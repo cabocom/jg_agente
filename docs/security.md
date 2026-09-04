@@ -87,3 +87,43 @@ El módulo [`SSRFValidator`](../app/security/ssrf.py) protege al Execution Plane
   - `SSRF_ALLOWED_NETWORKS`: Subredes CIDR explícitamente autorizadas para integraciones internas (ej. `10.200.0.0/24`).
   - `SSRF_ALLOW_PRIVATE_NETWORKS`: Flag opcional de entorno para permitir redes RFC 1918 sin desbloquear jamás loopback ni cloud metadata.
 
+---
+
+## 5. Interceptor de Ejecución (`SecurityGuard`)
+
+[`SecurityGuard`](../app/security/guard.py) es el interceptor central y sandbox de ejecución de `jg_agente`. Interpone una barrera determinista entre las decisiones del LLM y la invocación física de herramientas sobre el entorno.
+
+### 5.1 Pipeline de Evaluación (`evaluate`)
+
+```mermaid
+flowchart TD
+    Tool[Invocación de Tool con Argumentos] --> PermCheck{1. ¿Cumple Required Permissions?}
+    PermCheck -->|No| DenyPerm[DENY: Permisos Insuficientes]
+    
+    PermCheck -->|Sí| InjCheck{2. ¿Inyección Shell o Directory Traversal?}
+    InjCheck -->|Detectado| DenyInj[DENY: Inyección o Ruta Protegida]
+    
+    InjCheck -->|Limpio| SSRFCheck{3. ¿makes_http_requests o URL/IP?}
+    SSRFCheck -->|Vulnera SSRF| DenySSRF[DENY: Destino Prohibido]
+    
+    SSRFCheck -->|Seguro| RiskCheck{4. Nivel de Riesgo}
+    RiskCheck -->|HIGH o CRITICAL| HITLGate[REQUIRE_HUMAN_APPROVAL: Pausa HITL]
+    RiskCheck -->|LOW o MEDIUM| AllowExec[ALLOW: Ejecución Autorizada]
+    
+    DenyPerm --> Audit[Registro Inmutable en SecurityAuditLogger]
+    DenyInj --> Audit
+    DenySSRF --> Audit
+    HITLGate --> Audit
+    AllowExec --> Audit
+```
+
+### 5.2 Interceptor de Ejecución (`execute_tool`)
+1. **Decisión `DENY`:** Devuelve `ToolResult(success=False, error="SecurityGuard DENY...")` **sin invocar `func`**.
+2. **Decisión `REQUIRE_HUMAN_APPROVAL`:** Devuelve `ToolResult(success=False, requires_approval=True...)` **sin invocar `func`**, señalizando al orquestador LangGraph que debe pausarse en el checkpointer.
+3. **Decisión `ALLOW`:**
+   - Sanitiza entradas (`sanitize_arguments`: remueve caracteres nulos y normaliza espacios).
+   - Invoca `func(**sanitized_args)` calculando la duración exacta en milisegundos (`duration_ms`).
+   - Registra el evento `tool_executed` en el `SecurityAuditLogger`.
+   - Retorna el `ToolResult`.
+
+

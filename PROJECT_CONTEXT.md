@@ -1,9 +1,9 @@
 # CONTEXTO DE PROYECTO: jg_agente
 
-**Versión del documento:** 2.4.0  
+**Versión del documento:** 2.5.0  
 **Fecha de consolidación:** 4 de septiembre de 2026  
 **Componente:** Execution Plane (Motor Autónomo de Ejecución)  
-**Estado:** Fases 01 y 02 completadas (100%). Fase 03 en progreso (ISSUE-F03-T01, ISSUE-F03-T02, ISSUE-F03-T03 e ISSUE-F03-T04 completados: persistencia async PostgreSQL, modelos ORM `core_*`, migraciones Alembic, checkpointer LangGraph PostgresSaver sobre `core_checkpoints`, SecurityAuditLogger no bloqueante sobre `core_audit_records` y validador de protección SSRF).  
+**Estado:** Fases 01, 02 y 03 completadas (100%). Fase 03 culminada (ISSUE-F03-T01, ISSUE-F03-T02, ISSUE-F03-T03, ISSUE-F03-T04 e ISSUE-F03-T05: persistencia async PostgreSQL, modelos ORM `core_*`, migraciones Alembic, checkpointer LangGraph PostgresSaver sobre `core_checkpoints`, SecurityAuditLogger no bloqueante sobre `core_audit_records`, validador de protección SSRF e interceptor central SecurityGuard).  
 
 ---
 

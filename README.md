@@ -121,13 +121,14 @@ jg_agente/
 │   │   └── tools.py                # Contratos AgentTool y ToolResult
 │   └── security/
 │       ├── audit.py                # SecurityAuditLogger (persistencia no bloqueante)
+│       ├── guard.py                # SecurityGuard (interceptor de ejecución, permisos y HITL)
 │       └── ssrf.py                 # SSRFValidator (bloqueo RFC 1918, metadata y loopback)
 ├── docs/                           # Documentación técnica viva
 │   ├── architecture.md             # Visión del Execution Plane y ciclo cognitivo
 │   ├── models.md                   # Contratos canónicos I/O, Tools y Estado
 │   ├── database.md                 # Persistencia relacional, convención core_ y Alembic
 │   ├── checkpointer.md             # Checkpointer LangGraph sobre PostgreSQL
-│   ├── security.md                 # Seguridad, auditoría inmutable y protección SSRF
+│   ├── security.md                 # SecurityGuard, auditoría inmutable y protección SSRF
 │   └── issues/                     # Trazabilidad técnica por issue
 ├── tests/                          # Suite integral de pruebas (Unit + Integration)
 │   ├── test_bootstrap.py
@@ -138,7 +139,8 @@ jg_agente/
 │   ├── test_database_migrations.py
 │   ├── test_checkpointer.py
 │   ├── test_security_audit.py
-│   └── test_ssrf_validator.py
+│   ├── test_ssrf_validator.py
+│   └── test_security_guard.py
 └── scripts/
     └── check.sh                    # Verificación integral (Ruff + MyPy + Pytest)
 ```
@@ -152,7 +154,7 @@ La documentación exhaustiva del proyecto se encuentra disponible en [`docs/`](d
 - **[Contratos y Modelos Core](docs/models.md):** `AgentInput`, `AgentOutput`, `AgentTool` y `AgentState`.
 - **[Base de Datos y Alembic](docs/database.md):** Convención `core_`, esquemas y migraciones asíncronas.
 - **[Checkpointer LangGraph](docs/checkpointer.md):** Persistencia sobre PostgreSQL (`core_checkpoints`) y pausado HITL.
-- **[Seguridad y Auditoría](docs/security.md):** `SecurityAuditLogger`, trazabilidad inmutable y protección contra SSRF.
+- **[Seguridad y Auditoría](docs/security.md):** `SecurityGuard`, `SecurityAuditLogger`, trazabilidad inmutable y protección contra SSRF.
 
 ---
 
@@ -170,12 +172,13 @@ Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de 
 
 - [x] **Fase 01:** Setup inicial, Dockerfile, docker-compose, scripts de verificación y CI/CD con GitLab.
 - [x] **Fase 02:** Contratos Core (`AgentInput`, `AgentOutput`, `AgentTool`, `ToolResult`, compensación de rollback, `AgentState`).
-- [ ] **Fase 03:** Persistencia y Checkpointing (En curso):
+- [x] **Fase 03:** Persistencia, Checkpointing y Seguridad Base:
   - [x] `ISSUE-F03-T01`: Motor PostgreSQL async, convención `core_*` y migraciones Alembic.
   - [x] `ISSUE-F03-T02`: Checkpointer LangGraph (`PostgresSaver`) sobre vistas `core_checkpoints`.
   - [x] `ISSUE-F03-T03`: `SecurityAuditLogger` inmutable no bloqueante sobre `core_audit_records`.
   - [x] `ISSUE-F03-T04`: Validador de protección SSRF para herramientas de red (`SSRFValidator`).
-- [ ] **Fase 04:** Motor de Seguridad y Políticas (`SecurityGuard`).
+  - [x] `ISSUE-F03-T05`: Interceptor central de seguridad `SecurityGuard` (permisos, inyecciones, SSRF, HITL y auditoría).
+- [ ] **Fase 04:** CapabilityRegistry y Sistema de Plugins Core.
 - [ ] **Fase 05:** Ensamblado del Grafo LangGraph y Nodos Base (`reason`, `execute`, `conclude`).
 - [ ] **Fase 06:** Exposición API REST (`POST /executions/trigger`, HITL) y Bootstrap del Agente.
-- [ ] **Fase 07:** Sistema de Plugins (`CapabilityRegistry`) y primer plugin funcional.
+- [ ] **Fase 07:** Integración con plugins de dominio y validación end-to-end.
