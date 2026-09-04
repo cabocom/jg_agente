@@ -27,6 +27,23 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = Field(default="jg_agente", description="Nombre de la base de datos")
     DATABASE_URL: str | None = Field(default=None, description="URL de conexión SQLAlchemy async")
 
+    # Seguridad y protección SSRF
+    SSRF_ENFORCE_PROTECTION: bool = Field(
+        default=True, description="Habilita la validación y bloqueo estricto contra SSRF"
+    )
+    SSRF_ALLOWED_HOSTS: list[str] = Field(
+        default_factory=list,
+        description="Dominios y hostnames explícitamente permitidos para tools de red",
+    )
+    SSRF_ALLOWED_NETWORKS: list[str] = Field(
+        default_factory=list,
+        description="Rangos de red CIDR explícitamente permitidos (ej. '10.200.0.0/24')",
+    )
+    SSRF_ALLOW_PRIVATE_NETWORKS: bool = Field(
+        default=False,
+        description="Habilita el acceso a redes privadas si se autoriza explícitamente por configuración",
+    )
+
     @property
     def async_database_url(self) -> str:
         """Devuelve la URL asíncrona normalizada para SQLAlchemy (asyncpg o aiosqlite)."""

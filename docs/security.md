@@ -64,3 +64,26 @@ Cada registro de auditoría persiste estructurado con los siguientes cuatro meta
 
 ### 3.4 Resiliencia ante Claves Foráneas Desacopladas
 Si se audita una acción con un `execution_id` que aún no existe en `core_executions` (ej. en flujos efímeros o evaluaciones previas al registro de ejecución), el logger captura la excepción de clave foránea e inserta el registro con `execution_id=None`, preservando el identificador dentro de `details["unlinked_execution_id"]` para asegurar que **ninguna traza de auditoría se pierda jamás**.
+
+---
+
+## 4. Protección contra Server-Side Request Forgery (SSRF)
+
+El módulo [`SSRFValidator`](../app/security/ssrf.py) protege al Execution Plane contra peticiones no autorizadas hacia recursos internos, interfaces de administración y metadatos de proveedores de nube.
+
+### 4.1 Rangos y Destinos Bloqueados por Defecto
+1. **Loopback:** `127.0.0.0/8`, `::1/128`.
+2. **Cloud Metadata Services (IMDS):** `169.254.0.0/16`, `fe80::/10` (AWS, GCP, Azure, OpenStack `169.254.169.254`).
+3. **Redes Privadas (RFC 1918 / RFC 4193):** `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`.
+4. **Hostnames Protegidos:** `localhost`, `metadata.google.internal`, `*.local`, `*.internal`.
+5. **Esquemas No Autorizados:** Se bloquean esquemas arbitrarios (`file://`, `ftp://`, `gopher://`), autorizando exclusivamente `http` y `https`.
+
+### 4.2 Defensa en Profundidad para `AgentTool`
+- **Declaración:** Las herramientas declaran explícitamente `makes_http_requests=True` en su contrato.
+- **Inspección de Argumentos (`validate_tool_arguments_for_ssrf`):** Escanea argumentos de entrada generados por LLMs detectando URLs o IPs privadas embebidas.
+- **Resolución DNS y Anti-Rebinding:** Resuelve los nombres de dominio a sus direcciones IP físicas y verifica cada una de ellas contra las listas de redes bloqueadas.
+- **Allowlists Configurables:**
+  - `SSRF_ALLOWED_HOSTS`: Dominios o comodines autorizados (ej. `*.cabocom.net`, `api.github.com`).
+  - `SSRF_ALLOWED_NETWORKS`: Subredes CIDR explícitamente autorizadas para integraciones internas (ej. `10.200.0.0/24`).
+  - `SSRF_ALLOW_PRIVATE_NETWORKS`: Flag opcional de entorno para permitir redes RFC 1918 sin desbloquear jamás loopback ni cloud metadata.
+

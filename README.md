@@ -91,68 +91,91 @@ El ciclo cognitivo se construye durante el boot del agente:
 
 ---
 
-## 5. Estructura Prevista del Repositorio
+## 5. Estructura del Repositorio
 
 ```text
 jg_agente/
-├── README.md
-├── PROJECT_CONTEXT.md
-├── ISSUES.csv
-├── pyproject.toml
-├── Dockerfile
+├── .gitlab-ci.yml                  # Pipeline CI/CD a registry.cabocom.net
+├── Dockerfile                      # Multi-stage build optimizado
+├── docker-compose.yml              # Orquestación local con PostgreSQL
+├── .env.example                    # Plantilla de variables de entorno
+├── pyproject.toml                  # Dependencias y configuración de herramientas
+├── alembic.ini                     # Configuración de migraciones
+├── alembic/
+│   ├── env.py                      # Entorno async de Alembic con filtro core_
+│   └── versions/
+│       └── 0001_initial_core_tables.py # Migración de core_executions y core_audit_records
 ├── app/
-│   ├── main.py                     # Bootstrap, ciclo de vida y FastAPI
-│   ├── core/                       # Núcleo agnóstico del agente
-│   │   ├── state.py                # AgentState y modelos base
-│   │   ├── input_output.py         # AgentInput y AgentOutput
-│   │   ├── tool.py                 # Contrato AgentTool y ToolResult
-│   │   ├── capabilities.py         # CapabilityRegistry y detección de conflictos
-│   │   ├── plugin_base.py          # Definición abstracta de BasePlugin
-│   │   ├── plugin_manager.py       # Autodiscovery de plugins
-│   │   └── graph/                  # Ensamblado del grafo LangGraph
-│   │       ├── builder.py          # GraphBuilder condicionado por capacidades
-│   │       └── nodes/              # Nodos base (reason, execute, conclude)
-│   ├── security/                   # Seguridad de ejecución
-│   │   ├── guard.py                # SecurityGuard y evaluación de riesgos
-│   │   ├── ssrf.py                 # Validador de IPs y dominios prohibidos
-│   │   └── audit.py                # SecurityAuditLogger
-│   ├── persistence/                # Almacenamiento y checkpoints
-│   │   ├── database.py             # Sesión SQLAlchemy / asyncpg
-│   │   └── checkpointer.py         # PostgresSaver para LangGraph
-│   ├── api/                        # Endpoints internos
-│   │   ├── router.py
-│   │   ├── executions.py           # Trigger, get, approve, reject
-│   │   └── lifecycle.py            # Capabilities, health, metrics
-│   └── client/                     # Comunicación con el Control Plane
-│       ├── registration.py         # Protocolo de registro vía bootstrap token
-│       └── heartbeat.py            # Heartbeat periódico hacia jg_dashboard
-└── tests/                          # Suite integral de pruebas
-    ├── unit/
-    ├── integration/
-    └── e2e/
+│   ├── __init__.py                 # Versión del paquete
+│   ├── main.py                     # Bootstrap FastAPI y ciclo de vida
+│   ├── core/
+│   │   ├── config.py               # Configuración centralizada Pydantic
+│   │   └── checkpointer.py         # PostgresSaver, MemorySaver y vistas core_checkpoints
+│   ├── db/
+│   │   ├── base.py                 # DeclarativeBase y convención estricta core_
+│   │   ├── models.py               # Modelos ORM: CoreExecution y CoreAuditRecord
+│   │   └── session.py              # async_engine y factoría de sesiones asyncpg
+│   ├── models/
+│   │   ├── io.py                   # Contratos AgentInput y AgentOutput
+│   │   ├── state.py                # AgentState, PolicyDecision, SecurityEvaluationResult
+│   │   └── tools.py                # Contratos AgentTool y ToolResult
+│   └── security/
+│       ├── audit.py                # SecurityAuditLogger (persistencia no bloqueante)
+│       └── ssrf.py                 # SSRFValidator (bloqueo RFC 1918, metadata y loopback)
+├── docs/                           # Documentación técnica viva
+│   ├── architecture.md             # Visión del Execution Plane y ciclo cognitivo
+│   ├── models.md                   # Contratos canónicos I/O, Tools y Estado
+│   ├── database.md                 # Persistencia relacional, convención core_ y Alembic
+│   ├── checkpointer.md             # Checkpointer LangGraph sobre PostgreSQL
+│   ├── security.md                 # Seguridad, auditoría inmutable y protección SSRF
+│   └── issues/                     # Trazabilidad técnica por issue
+├── tests/                          # Suite integral de pruebas (Unit + Integration)
+│   ├── test_bootstrap.py
+│   ├── test_health_endpoint.py
+│   ├── test_io_models.py
+│   ├── test_tool_models.py
+│   ├── test_agent_state.py
+│   ├── test_database_migrations.py
+│   ├── test_checkpointer.py
+│   ├── test_security_audit.py
+│   └── test_ssrf_validator.py
+└── scripts/
+    └── check.sh                    # Verificación integral (Ruff + MyPy + Pytest)
 ```
 
 ---
 
-## 6. Estado Actual del Proyecto
+## 6. Documentación Técnica
 
-- **Fase actual:** Arquitectura consolidada y backlog inicial de issues preparado.
-- **Implementación:** Pendiente de inicio formal mediante ejecución ordenada del backlog.
-- **Proyectos de referencia congelados:** `jg-ai-gateway` y `Devops60k` se mantienen como fuentes de referencia documental y extracción de código, sin modificaciones activas.
+La documentación exhaustiva del proyecto se encuentra disponible en [`docs/`](docs/):
+- **[Arquitectura General](docs/architecture.md):** Separación de planos, ciclo de ejecución y principios.
+- **[Contratos y Modelos Core](docs/models.md):** `AgentInput`, `AgentOutput`, `AgentTool` y `AgentState`.
+- **[Base de Datos y Alembic](docs/database.md):** Convención `core_`, esquemas y migraciones asíncronas.
+- **[Checkpointer LangGraph](docs/checkpointer.md):** Persistencia sobre PostgreSQL (`core_checkpoints`) y pausado HITL.
+- **[Seguridad y Auditoría](docs/security.md):** `SecurityAuditLogger`, trazabilidad inmutable y protección contra SSRF.
 
 ---
 
-## 7. Roadmap de Alto Nivel
+## 7. Verificación de Calidad
 
-- [ ] **Fase 0:** Documentación, tooling, CI/CD y setup inicial.
-- [ ] **Fase 1:** Contratos base (`AgentInput`, `AgentOutput`, `AgentTool`, `ToolResult`).
-- [ ] **Fase 2:** Persistencia Core (`core_*`), checkpointer LangGraph y `SecurityGuard`.
-- [ ] **Fase 3:** `CapabilityRegistry` con resolución estricta de conflictos y `PluginManager`.
-- [ ] **Fase 4:** Motor de grafo dinámico y nodos base (`reason`, `execute`, `conclude`).
-- [ ] **Fase 5:** Nodos avanzados de ciclo (`observe`, `plan`, `risk_assess`, `human_approval`, `verify`, `rollback`).
-- [ ] **Fase 6:** API interna HTTP para ejecución y gestión de HITL.
-- [ ] **Fase 7:** Cliente de registro seguro (bootstrap token 24h) y heartbeats con `jg_dashboard`.
-- [ ] **Fase 8:** Implementación de `jg_plugin_conversational` (WeatherTool, NewsTool).
-- [ ] **Fase 9:** **Validación Caso de Éxito A (Conversacional end-to-end)**.
-- [ ] **Fase 10:** Implementación de `jg_plugin_devops` (InfraDiscovery, DAGPlanner, DockerTools, Verification).
-- [ ] **Fase 11:** **Validación Caso de Éxito B (DevOps end-to-end con HITL y Rollback)**.
+Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de tests:
+
+```bash
+./scripts/check.sh
+```
+
+---
+
+## 8. Estado del Proyecto y Roadmap
+
+- [x] **Fase 01:** Setup inicial, Dockerfile, docker-compose, scripts de verificación y CI/CD con GitLab.
+- [x] **Fase 02:** Contratos Core (`AgentInput`, `AgentOutput`, `AgentTool`, `ToolResult`, compensación de rollback, `AgentState`).
+- [ ] **Fase 03:** Persistencia y Checkpointing (En curso):
+  - [x] `ISSUE-F03-T01`: Motor PostgreSQL async, convención `core_*` y migraciones Alembic.
+  - [x] `ISSUE-F03-T02`: Checkpointer LangGraph (`PostgresSaver`) sobre vistas `core_checkpoints`.
+  - [x] `ISSUE-F03-T03`: `SecurityAuditLogger` inmutable no bloqueante sobre `core_audit_records`.
+  - [x] `ISSUE-F03-T04`: Validador de protección SSRF para herramientas de red (`SSRFValidator`).
+- [ ] **Fase 04:** Motor de Seguridad y Políticas (`SecurityGuard`).
+- [ ] **Fase 05:** Ensamblado del Grafo LangGraph y Nodos Base (`reason`, `execute`, `conclude`).
+- [ ] **Fase 06:** Exposición API REST (`POST /executions/trigger`, HITL) y Bootstrap del Agente.
+- [ ] **Fase 07:** Sistema de Plugins (`CapabilityRegistry`) y primer plugin funcional.
