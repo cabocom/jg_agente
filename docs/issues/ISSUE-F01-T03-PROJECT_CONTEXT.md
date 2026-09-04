@@ -20,7 +20,7 @@
   - `Dockerfile`: Construcción multi-stage (builder/runner) con usuario no-root `10001:10001` y healthcheck activo.
   - `docker-compose.yml`: Orquestación funcional de `jg_agente` y `jg_agente_postgres` en red bridge privada `jg_agente_net`.
 - **Pipeline CI/CD:**
-  - `.gitlab-ci.yml`: Pipeline con etapas `lint` (`lint:ruff`) y `test` (`typecheck:mypy`, `test:pytest`).
+  - `.gitlab-ci.yml`: Pipeline con etapas `lint` (`lint:ruff`), `test` (`typecheck:mypy`, `test:pytest`) y `build` (`build:docker` publicando en `registry.cabocom.net` con tag de rama).
 - **Verificación Local:**
   - `scripts/check.sh`: Comando único de verificación local passing al 100% sin advertencias.
 

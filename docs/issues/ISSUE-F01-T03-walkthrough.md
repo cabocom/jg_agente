@@ -13,7 +13,10 @@
    - Implementado job `lint:ruff` (valida formato y reglas estáticas con ruff).
    - Implementado job `typecheck:mypy` (instala `.[dev]` y ejecuta `mypy app tests` en modo estricto).
    - Implementado job `test:pytest` (ejecuta suite de pruebas unitarias y de integración).
-   - Implementado job `build:docker` (construye la imagen multi-stage y la publica en GitLab Container Registry al mergear a `main` o sobre tags).
+   - Implementado job `build:docker`:
+     - Autenticación con registro privado propio (`registry.cabocom.net`) usando las variables de grupo heredadas `REGISTRY_HOST`, `REGISTRY_USER`, `REGISTRY_PASSWORD`.
+     - Construcción y etiquetado automático usando el nombre de la rama sanitizado (`$SAFE_TAG` derivado de `$CI_COMMIT_BRANCH` / `$CI_COMMIT_REF_SLUG`), eliminando el commit SHA.
+     - Publicación adicional con `:latest` cuando se ejecuta sobre la rama `main` y con tag Git en releases.
    - Configurada caché de paquetes pip por rama (`python-pip-${CI_COMMIT_REF_SLUG}`).
    - Establecidas reglas anti-duplicación para Merge Requests.
 

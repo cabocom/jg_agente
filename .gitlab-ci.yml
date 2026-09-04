@@ -68,7 +68,7 @@ test:pytest:
     - pytest tests/
 
 # ==========================================
-# STAGE: BUILD (Publicación de imagen definitiva)
+# STAGE: BUILD (Publicación en registry privado)
 # ==========================================
 
 build:docker:
@@ -79,20 +79,44 @@ build:docker:
   variables:
     DOCKER_TLS_CERTDIR: "/certs"
   rules:
-    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: never
+    - if: $CI_COMMIT_BRANCH
     - if: $CI_COMMIT_TAG
   before_script:
-    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
-  script:
-    - echo "🛠️ Construyendo imagen definitiva de jg_agente..."
-    - docker build -t "$CI_REGISTRY_IMAGE:latest" -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" .
-    - echo "🚀 Publicando imagen en GitLab Container Registry ($CI_REGISTRY_IMAGE)..."
-    - docker push "$CI_REGISTRY_IMAGE:latest"
-    - docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+    - USER_NAME="${REGISTRY_USER:-$CI_REGISTRY_USER}"
+    - PASS_WORD="${REGISTRY_PASSWORD:-$CI_REGISTRY_PASSWORD}"
+    - HOST_NAME="${REGISTRY_HOST:-$CI_REGISTRY}"
     - |
-      if [ -n "$CI_COMMIT_TAG" ]; then
-        echo "🏷️ Publicando tag de release: $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG"
-        docker tag "$CI_REGISTRY_IMAGE:latest" "$CI_REGISTRY_IMAGE:$CI_COMMIT_TAG"
-        docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_TAG"
+      if [ -z "$USER_NAME" ] || [ -z "$PASS_WORD" ]; then
+        echo "❌ ERROR: Variables de autenticación del registro (REGISTRY_USER, REGISTRY_PASSWORD) no encontradas."
+        exit 1
       fi
-    - echo "✅ Imagen Docker publicada con éxito en el registro de contenedores."
+    - echo "🔑 Iniciando sesión en el registro $HOST_NAME con usuario $USER_NAME..."
+    - echo "$PASS_WORD" | docker login "$HOST_NAME" -u "$USER_NAME" --password-stdin
+  script:
+    - HOST_NAME="${REGISTRY_HOST:-$CI_REGISTRY}"
+    - IMAGE_BASE="$HOST_NAME/$CI_PROJECT_PATH"
+    - BRANCH_NAME="${CI_COMMIT_BRANCH:-$CI_COMMIT_REF_SLUG}"
+    - SAFE_TAG=$(echo "$BRANCH_NAME" | tr '/' '-')
+    - IMAGE_TAG="$IMAGE_BASE:$SAFE_TAG"
+    - echo "🛠️ Construyendo imagen Docker de jg_agente ($IMAGE_TAG)..."
+    - docker build -t "$IMAGE_TAG" .
+    - |
+      if [ "$CI_COMMIT_BRANCH" == "main" ] || [ "$CI_COMMIT_BRANCH" == "$CI_DEFAULT_BRANCH" ]; then
+        echo "🏷️ Etiquetando también como :latest para rama principal..."
+        docker tag "$IMAGE_TAG" "$IMAGE_BASE:latest"
+      fi
+    - echo "🚀 Publicando imagen en $HOST_NAME..."
+    - docker push "$IMAGE_TAG"
+    - |
+      if [ "$CI_COMMIT_BRANCH" == "main" ] || [ "$CI_COMMIT_BRANCH" == "$CI_DEFAULT_BRANCH" ]; then
+        docker push "$IMAGE_BASE:latest"
+      fi
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        RELEASE_TAG="$IMAGE_BASE:$CI_COMMIT_TAG"
+        echo "🏷️ Publicando tag de release: $RELEASE_TAG..."
+        docker tag "$IMAGE_TAG" "$RELEASE_TAG"
+        docker push "$RELEASE_TAG"
+      fi
+    - echo "✅ Imagen publicada con éxito en $HOST_NAME con tag $SAFE_TAG."
