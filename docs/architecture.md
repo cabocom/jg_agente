@@ -1,7 +1,7 @@
 # Arquitectura de `jg_agente` (Execution Plane)
 
 > **Estado del Documento:** ESPECIFICACIÓN TÉCNICA VIVA  
-> **Versión:** 2.3.0  
+> **Versión:** 2.4.0  
 > **Componente:** `jg_agente` — Execution Plane  
 
 ---
@@ -19,7 +19,7 @@
    if agent_type == "conversational": ...
    if is_devops: ...
    ```
-   Toda funcionalidad especializada se suministra exclusivamente vía **Plugins** cargados dinámicamente mediante `CapabilityRegistry`.
+   Toda funcionalidad especializada se suministra exclusivamente vía **Plugins** ([`BasePlugin`](plugins.md)) cargados dinámicamente mediante `CapabilityRegistry`.
 
 2. **Ausencia Absoluta de Adaptadores de Transporte:**
    `jg_agente` **NO conoce ni implementa interfaces de usuario o comunicación externa** (Asterisk, Telegram, WhatsApp, Slack, Webhooks propietarios).

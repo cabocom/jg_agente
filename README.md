@@ -119,6 +119,9 @@ jg_agente/
 │   │   ├── io.py                   # Contratos AgentInput y AgentOutput
 │   │   ├── state.py                # AgentState, PolicyDecision, SecurityEvaluationResult
 │   │   └── tools.py                # Contratos AgentTool y ToolResult
+│   ├── plugins/
+│   │   ├── __init__.py             # Exportación BasePlugin, BaseEngine, PluginMetadata
+│   │   └── base.py                 # Interfaz abstracta BasePlugin, ciclo de vida y BaseEngine
 │   └── security/
 │       ├── audit.py                # SecurityAuditLogger (persistencia no bloqueante)
 │       ├── guard.py                # SecurityGuard (interceptor de ejecución, permisos y HITL)
@@ -129,6 +132,7 @@ jg_agente/
 │   ├── database.md                 # Persistencia relacional, convención core_ y Alembic
 │   ├── checkpointer.md             # Checkpointer LangGraph sobre PostgreSQL
 │   ├── security.md                 # SecurityGuard, auditoría inmutable y protección SSRF
+│   ├── plugins.md                  # Sistema de plugins, BasePlugin y ciclo de vida
 │   └── issues/                     # Trazabilidad técnica por issue
 ├── tests/                          # Suite integral de pruebas (Unit + Integration)
 │   ├── test_bootstrap.py
@@ -140,7 +144,8 @@ jg_agente/
 │   ├── test_checkpointer.py
 │   ├── test_security_audit.py
 │   ├── test_ssrf_validator.py
-│   └── test_security_guard.py
+│   ├── test_security_guard.py
+│   └── test_base_plugin.py
 └── scripts/
     └── check.sh                    # Verificación integral (Ruff + MyPy + Pytest)
 ```
@@ -155,6 +160,7 @@ La documentación exhaustiva del proyecto se encuentra disponible en [`docs/`](d
 - **[Base de Datos y Alembic](docs/database.md):** Convención `core_`, esquemas y migraciones asíncronas.
 - **[Checkpointer LangGraph](docs/checkpointer.md):** Persistencia sobre PostgreSQL (`core_checkpoints`) y pausado HITL.
 - **[Seguridad y Auditoría](docs/security.md):** `SecurityGuard`, `SecurityAuditLogger`, trazabilidad inmutable y protección contra SSRF.
+- **[Plugins y Extensibilidad](docs/plugins.md):** `BasePlugin`, `BaseEngine`, metadatos y ciclo de vida.
 
 ---
 
@@ -178,7 +184,8 @@ Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de 
   - [x] `ISSUE-F03-T03`: `SecurityAuditLogger` inmutable no bloqueante sobre `core_audit_records`.
   - [x] `ISSUE-F03-T04`: Validador de protección SSRF para herramientas de red (`SSRFValidator`).
   - [x] `ISSUE-F03-T05`: Interceptor central de seguridad `SecurityGuard` (permisos, inyecciones, SSRF, HITL y auditoría).
-- [ ] **Fase 04:** CapabilityRegistry y Sistema de Plugins Core.
+- [ ] **Fase 04:** CapabilityRegistry y Sistema de Plugins Core:
+  - [x] `ISSUE-F04-T01`: Definición de interfaz abstracta `BasePlugin` y ciclo de vida.
 - [ ] **Fase 05:** Ensamblado del Grafo LangGraph y Nodos Base (`reason`, `execute`, `conclude`).
 - [ ] **Fase 06:** Exposición API REST (`POST /executions/trigger`, HITL) y Bootstrap del Agente.
 - [ ] **Fase 07:** Integración con plugins de dominio y validación end-to-end.
