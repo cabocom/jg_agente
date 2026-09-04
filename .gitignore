@@ -17,6 +17,12 @@ __pycache__/
 .coverage
 htmlcov/
 
+# Build y empaquetado
+*.egg-info/
+build/
+dist/
+*.whl
+
 # Variables de entorno y secretos locales
 .env
 .env.local
