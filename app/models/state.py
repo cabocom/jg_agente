@@ -1,0 +1,248 @@
+"""Estado global y modelos operacionales para el motor LangGraph de jg_agente.
+
+Este módulo define la especificación canónica y agnóstica de AgentState,
+desacoplada de dominios específicos como DevOps, infraestructura o telefonía.
+El estado del entorno se representa de forma genérica mediante environment_snapshot.
+"""
+
+from collections.abc import Sequence
+from datetime import UTC, datetime
+from enum import StrEnum
+from typing import Annotated, Any, TypedDict
+
+from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.models.io import AgentInput
+from app.models.tools import RiskLevel
+
+# ==========================================
+# 1. Reducers para LangGraph
+# ==========================================
+
+
+def append_reducer(left: list[Any] | None, right: list[Any] | Sequence[Any] | None) -> list[Any]:
+    """Reducer genérico para concatenar colecciones en el grafo de LangGraph."""
+    return list(left or []) + list(right or [])
+
+
+# ==========================================
+# 2. Enums Operacionales
+# ==========================================
+
+
+class AgentExecutionStatus(StrEnum):
+    """Estados del ciclo de vida operacional del agente."""
+
+    IDLE = "idle"
+    OBSERVING = "observing"
+    REASONING = "reasoning"
+    PLANNING = "planning"
+    AWAITING_APPROVAL = "awaiting_approval"
+    EXECUTING = "executing"
+    VERIFYING = "verifying"
+    DIAGNOSING = "diagnosing"
+    ROLLING_BACK = "rolling_back"
+    RESOLVED = "resolved"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class ApprovalStatus(StrEnum):
+    """Estados de aprobación humana (HITL)."""
+
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    AUTO_APPROVED = "auto_approved"
+    TIMEOUT = "timeout"
+
+
+class StepStatus(StrEnum):
+    """Estados de ejecución de un paso individual del plan."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    TIMED_OUT = "timed_out"
+
+
+class VerificationStatus(StrEnum):
+    """Estados de comprobación activa post-operación."""
+
+    NOT_STARTED = "not_started"
+    PASS = "pass"
+    FAIL = "fail"
+    DEGRADED = "degraded"
+    SKIPPED = "skipped"
+
+
+# ==========================================
+# 3. Modelos Estructurados Agnosticos
+# ==========================================
+
+
+class IntentModel(BaseModel):
+    """Intención procesada a partir de un estímulo de entrada."""
+
+    model_config = ConfigDict(extra="allow")
+
+    goal: str = Field(..., description="Objetivo principal formulado para el agente")
+    action_type: str = Field(default="general", description="Categoría de acción a ejecutar")
+    parameters: dict[str, Any] = Field(default_factory=dict, description="Parámetros extraídos")
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0, description="Nivel de certidumbre")
+    reasoning: str | None = Field(default=None, description="Justificación cognitiva del LLM")
+
+
+class PlanStep(BaseModel):
+    """Paso unitario dentro de un plan de ejecución."""
+
+    model_config = ConfigDict(extra="allow")
+
+    step_id: str = Field(..., description="Identificador único del paso")
+    tool_name: str = Field(..., description="Nombre de la herramienta a invocar")
+    tool_args: dict[str, Any] = Field(
+        default_factory=dict, description="Argumentos para la herramienta"
+    )
+    description: str = Field(default="", description="Descripción legible del paso")
+    risk_level: RiskLevel = Field(default=RiskLevel.LOW, description="Nivel de riesgo del paso")
+    reversible: bool = Field(default=False, description="Indica si el paso es compensable")
+    status: StepStatus = Field(default=StepStatus.PENDING, description="Estado del paso")
+
+
+class ExecutionPlan(BaseModel):
+    """Plan de ejecución estructurado compuesto por pasos ordenados."""
+
+    model_config = ConfigDict(extra="allow")
+
+    plan_id: str = Field(..., description="Identificador único del plan")
+    goal: str = Field(..., description="Objetivo general que persigue el plan")
+    steps: list[PlanStep] = Field(default_factory=list, description="Secuencia ordenada de pasos")
+    estimated_risk: RiskLevel = Field(default=RiskLevel.LOW, description="Riesgo máximo estimado")
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="Timestamp UTC de formulación del plan",
+    )
+
+
+class ApprovalRecord(BaseModel):
+    """Registro de autorización humana para operaciones de riesgo (HITL)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    status: ApprovalStatus = Field(
+        default=ApprovalStatus.PENDING, description="Estado de la aprobación"
+    )
+    approver: str | None = Field(default=None, description="Identificador o usuario que autorizó")
+    requested_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="Timestamp de solicitud",
+    )
+    decided_at: datetime | None = Field(default=None, description="Timestamp de decisión")
+    notes: str | None = Field(default=None, description="Comentarios u observaciones")
+    rejection_reason: str | None = Field(default=None, description="Motivo de rechazo")
+
+
+class StepExecutionRecord(BaseModel):
+    """Traza auditable de ejecución de un paso o herramienta."""
+
+    model_config = ConfigDict(extra="allow")
+
+    step_id: str = Field(..., description="Identificador del paso correspondiente")
+    tool_name: str = Field(..., description="Herramienta ejecutada")
+    tool_args: dict[str, Any] = Field(default_factory=dict, description="Argumentos suministrados")
+    status: StepStatus = Field(
+        default=StepStatus.COMPLETED, description="Resultado de la ejecución"
+    )
+    output: Any = Field(default="", description="Salida producida por la herramienta")
+    error: str | None = Field(default=None, description="Mensaje de error si falló")
+    duration_ms: float = Field(default=0.0, ge=0.0, description="Duración en milisegundos")
+    rollback_context: dict[str, Any] | None = Field(
+        default=None, description="Contexto de compensación"
+    )
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="Timestamp de ejecución",
+    )
+
+
+class AuditRecord(BaseModel):
+    """Registro inmutable de auditoría para compliance y observabilidad."""
+
+    model_config = ConfigDict(extra="allow")
+
+    event_type: str = Field(..., description="Tipo de evento registrado")
+    actor: str = Field(default="agent", description="Entidad o componente emisor")
+    details: dict[str, Any] = Field(default_factory=dict, description="Detalles del evento")
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="Timestamp UTC del evento",
+    )
+
+
+class ExecutionError(BaseModel):
+    """Error operacional capturado durante el ciclo del agente."""
+
+    model_config = ConfigDict(extra="allow")
+
+    code: str = Field(..., description="Código de clasificación del error")
+    message: str = Field(..., description="Mensaje explicativo del fallo")
+    component: str = Field(..., description="Componente o nodo de origen")
+    fatal: bool = Field(default=False, description="Indica si detiene el flujo por completo")
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="Timestamp del error",
+    )
+
+
+# ==========================================
+# 4. AgentState (TypedDict para LangGraph)
+# ==========================================
+
+
+class AgentState(TypedDict, total=False):
+    """Estado global agnóstico del grafo de ejecución para LangGraph.
+
+    No contiene referencias a infraestructura, contenedores ni tecnologías específicas.
+    La información del entorno se modela mediante el diccionario genérico environment_snapshot,
+    permitiendo a cada plugin almacenar sus datos de dominio sin contaminar el Core.
+    """
+
+    # 1. Petición y Estímulo
+    request: AgentInput
+
+    # 2. Historial conversacional y mensajería
+    messages: Annotated[list[BaseMessage], add_messages]
+
+    # 3. Comprensión y Observación del Entorno
+    intent: IntentModel | dict[str, Any] | None
+    environment_snapshot: dict[str, Any] | None
+
+    # 4. Planificación y Evaluación de Riesgo
+    plan: ExecutionPlan | dict[str, Any] | None
+    risk_assessment: dict[str, Any] | None
+
+    # 5. Aprobación Humana (HITL)
+    approval: ApprovalRecord | dict[str, Any] | None
+
+    # 6. Trazas de Ejecución, Rollback y Verificación
+    execution_records: Annotated[list[StepExecutionRecord], append_reducer]
+    verification_results: Annotated[list[dict[str, Any]], append_reducer]
+    rollback_records: Annotated[list[dict[str, Any]], append_reducer]
+    diagnostic_report: dict[str, Any] | str | None
+
+    # 7. Control de Flujo y Estado Operacional
+    status: AgentExecutionStatus | str
+    current_step: int
+    retry_count: int
+    circuit_breaker_active: bool
+    human_intervention_required: bool
+    is_resolved: bool
+    stop_reason: str | None
+
+    # 8. Errores y Auditoría Inmutable
+    errors: Annotated[list[ExecutionError], append_reducer]
+    audit_trail: Annotated[list[AuditRecord], append_reducer]

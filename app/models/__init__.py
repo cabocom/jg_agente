@@ -6,6 +6,21 @@ from app.models.io import (
     ExecutionStatus,
     UserContext,
 )
+from app.models.state import (
+    AgentExecutionStatus,
+    AgentState,
+    ApprovalRecord,
+    ApprovalStatus,
+    AuditRecord,
+    ExecutionError,
+    ExecutionPlan,
+    IntentModel,
+    PlanStep,
+    StepExecutionRecord,
+    StepStatus,
+    VerificationStatus,
+    append_reducer,
+)
 from app.models.tools import (
     AgentTool,
     RiskLevel,
@@ -14,12 +29,25 @@ from app.models.tools import (
 )
 
 __all__ = [
+    "AgentExecutionStatus",
     "AgentInput",
     "AgentOutput",
+    "AgentState",
     "AgentTool",
+    "ApprovalRecord",
+    "ApprovalStatus",
+    "AuditRecord",
+    "ExecutionError",
+    "ExecutionPlan",
     "ExecutionStatus",
+    "IntentModel",
+    "PlanStep",
     "RiskLevel",
+    "StepExecutionRecord",
+    "StepStatus",
     "ToolResult",
     "ToolType",
     "UserContext",
+    "VerificationStatus",
+    "append_reducer",
 ]
