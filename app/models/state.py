@@ -80,6 +80,14 @@ class VerificationStatus(StrEnum):
     SKIPPED = "skipped"
 
 
+class PolicyDecision(StrEnum):
+    """Decisiones del motor de políticas de seguridad."""
+
+    ALLOW = "allow"
+    DENY = "deny"
+    REQUIRE_HUMAN_APPROVAL = "require_human_approval"
+
+
 # ==========================================
 # 3. Modelos Estructurados Agnosticos
 # ==========================================
@@ -144,6 +152,31 @@ class ApprovalRecord(BaseModel):
     decided_at: datetime | None = Field(default=None, description="Timestamp de decisión")
     notes: str | None = Field(default=None, description="Comentarios u observaciones")
     rejection_reason: str | None = Field(default=None, description="Motivo de rechazo")
+
+
+class SecurityEvaluationResult(BaseModel):
+    """Resultado formal de la evaluación de seguridad antes de ejecutar una operación."""
+
+    model_config = ConfigDict(extra="allow")
+
+    decision: PolicyDecision = Field(
+        default=PolicyDecision.ALLOW, description="Decisión de política de seguridad"
+    )
+    operation: str = Field(default="", description="Nombre de la operación o herramienta evaluada")
+    target_resource: str = Field(default="", description="Recurso o parámetro objetivo evaluado")
+    risk_level: RiskLevel = Field(default=RiskLevel.LOW, description="Nivel de riesgo determinado")
+    reason: str = Field(default="", description="Motivo o justificación de la decisión")
+    required_permissions: list[str] = Field(
+        default_factory=list, description="Permisos necesarios para la ejecución"
+    )
+    is_reversible: bool = Field(default=True, description="Indica si la acción es compensable")
+    can_cause_data_loss: bool = Field(
+        default=False, description="Indica si la acción puede ocasionar pérdida de datos"
+    )
+    evaluated_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="Timestamp UTC de la evaluación",
+    )
 
 
 class StepExecutionRecord(BaseModel):
