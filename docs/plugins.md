@@ -152,3 +152,32 @@ A diferencia de sistemas permisivos que sobrescriben componentes de forma silenc
 - **Plugins:** `register_plugin(plugin)` (registro en cascada de herramientas, motores y modelos), `get_plugin(name)`.
 - **Resumen:** `get_capabilities_summary()` para la exposición pública del catálogo en el endpoint `GET /capabilities`.
 
+---
+
+## 6. Gestor de Plugins (`PluginManager`) y Autodescubrimiento
+
+Ubicado en `app/core/plugin_manager.py`, `PluginManager` orquesta el descubrimiento dinámico, la resolución de grafos de dependencia y el ciclo de vida de los plugins.
+
+### 6.1. Mecanismos Duales de Descubrimiento
+
+1. **Modo Distribuido (Producción):**  
+   Inspecciona `importlib.metadata.entry_points(group="jg_agente.plugins")`. Cualquier paquete Python instalado vía `pip` que declare este grupo en su `pyproject.toml` es autodescubierto e incorporado al Core sin modificar el código base.
+2. **Modo Local (Desarrollo):**  
+   Inspecciona rutas locales (`plugins/`) usando `pkgutil.iter_modules()`. Identifica módulos que expongan la convención `PLUGIN_CLASS` o cualquier clase que herede de `BasePlugin`.
+
+### 6.2. Validación de Dependencias y Ordenamiento Topológico
+
+- Cada plugin puede declarar dependencias en `PluginMetadata.dependencies`.
+- `PluginManager` construye un grafo dirigido y aplica el **algoritmo de Kahn** para:
+  - Validar que todas las dependencias requeridas existan y estén activas (`PluginDependencyError` si falta alguna).
+  - Detectar y prevenir dependencias circulares.
+  - Computar el orden topológico exacto para inicializar dependencias antes de sus consumidores.
+
+### 6.3. Ciclo de Vida Coordinado
+
+- **`await pm.startup()`:** Inicializa los plugins en orden topológico estricto de dependencias.
+- **`await pm.shutdown()`:** Detiene los plugins en **orden inverso** de dependencias, garantizando una liberación ordenada de recursos.
+- **`await pm.health_check()`:** Consolida el estado de salud y telemetría de todos los plugins activos.
+- **Soporte `async with pm:`** para inicialización y parada garantizada en contextos de ejecución acotados.
+
+
