@@ -99,6 +99,33 @@ class BaseEngine(ABC):
         pass
 
 
+class ObserverEngine(BaseEngine, ABC):
+    """Motor de observación de entorno o captura de telemetría previa al razonamiento."""
+
+    @property
+    def engine_type(self) -> str:
+        """Tipo de motor cognitivo estandarizado como observer."""
+        return "observer"
+
+
+class PlannerEngine(BaseEngine, ABC):
+    """Motor de formulación y descomposición de planes de acción."""
+
+    @property
+    def engine_type(self) -> str:
+        """Tipo de motor cognitivo estandarizado como planner."""
+        return "planner"
+
+
+class VerifierEngine(BaseEngine, ABC):
+    """Motor de verificación activa de resultados tras la ejecución de herramientas."""
+
+    @property
+    def engine_type(self) -> str:
+        """Tipo de motor cognitivo estandarizado como verifier."""
+        return "verifier"
+
+
 class BasePlugin(ABC):
     """Clase base abstracta obligatoria para todos los plugins de jg_agente.
 

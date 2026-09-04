@@ -110,7 +110,8 @@ jg_agente/
 │   ├── main.py                     # Bootstrap FastAPI y ciclo de vida
 │   ├── core/
 │   │   ├── config.py               # Configuración centralizada Pydantic
-│   │   └── checkpointer.py         # PostgresSaver, MemorySaver y vistas core_checkpoints
+│   │   ├── checkpointer.py         # PostgresSaver, MemorySaver y vistas core_checkpoints
+│   │   └── registry.py             # CapabilityRegistry y detección estricta de conflictos (BootConflictError)
 │   ├── db/
 │   │   ├── base.py                 # DeclarativeBase y convención estricta core_
 │   │   ├── models.py               # Modelos ORM: CoreExecution y CoreAuditRecord
@@ -145,7 +146,8 @@ jg_agente/
 │   ├── test_security_audit.py
 │   ├── test_ssrf_validator.py
 │   ├── test_security_guard.py
-│   └── test_base_plugin.py
+│   ├── test_base_plugin.py
+│   └── test_capability_registry.py
 └── scripts/
     └── check.sh                    # Verificación integral (Ruff + MyPy + Pytest)
 ```
@@ -160,7 +162,7 @@ La documentación exhaustiva del proyecto se encuentra disponible en [`docs/`](d
 - **[Base de Datos y Alembic](docs/database.md):** Convención `core_`, esquemas y migraciones asíncronas.
 - **[Checkpointer LangGraph](docs/checkpointer.md):** Persistencia sobre PostgreSQL (`core_checkpoints`) y pausado HITL.
 - **[Seguridad y Auditoría](docs/security.md):** `SecurityGuard`, `SecurityAuditLogger`, trazabilidad inmutable y protección contra SSRF.
-- **[Plugins y Extensibilidad](docs/plugins.md):** `BasePlugin`, `BaseEngine`, metadatos y ciclo de vida.
+- **[Plugins y Extensibilidad](docs/plugins.md):** `BasePlugin`, `BaseEngine`, `CapabilityRegistry` y ciclo de vida.
 
 ---
 
@@ -186,6 +188,7 @@ Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de 
   - [x] `ISSUE-F03-T05`: Interceptor central de seguridad `SecurityGuard` (permisos, inyecciones, SSRF, HITL y auditoría).
 - [ ] **Fase 04:** CapabilityRegistry y Sistema de Plugins Core:
   - [x] `ISSUE-F04-T01`: Definición de interfaz abstracta `BasePlugin` y ciclo de vida.
+  - [x] `ISSUE-F04-T02`: Implementación de `CapabilityRegistry` con detección estricta de conflictos.
 - [ ] **Fase 05:** Ensamblado del Grafo LangGraph y Nodos Base (`reason`, `execute`, `conclude`).
 - [ ] **Fase 06:** Exposición API REST (`POST /executions/trigger`, HITL) y Bootstrap del Agente.
 - [ ] **Fase 07:** Integración con plugins de dominio y validación end-to-end.

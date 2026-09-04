@@ -126,3 +126,29 @@ async with MyPlugin() as plugin:
     ...
 # shutdown() se ejecuta automáticamente al salir del bloque
 ```
+
+---
+
+## 5. Registro Central de Capacidades (`CapabilityRegistry`)
+
+Ubicado en `app/core/registry.py`, `CapabilityRegistry` consolida el catálogo de capacidades cargadas durante el arranque del agente, aplicando una política de **detección estricta de conflictos** que aborta el boot ante duplicados o inconsistencias:
+
+### 5.1. Detección de Conflictos (`BootConflictError`)
+
+A diferencia de sistemas permisivos que sobrescriben componentes de forma silenciosa, `jg_agente` impone que cualquier colisión en tiempo de arranque sea tratada como un fallo fatal de configuración mediante `BootConflictError`:
+
+1. **Unicidad de Herramientas:** Cada `AgentTool` se indexa por su nombre único (`tool.name`). Si dos herramientas poseen el mismo identificador, el registro falla inmediatamente.
+2. **Unicidad de Motores Cognitivos Singleton:** Los motores que intervienen en etapas críticas del ciclo de vida del agente solo admiten **una única implementación activa por rol**:
+   - `ObserverEngine` (`engine_type = "observer"`)
+   - `PlannerEngine` (`engine_type = "planner"`)
+   - `VerifierEngine` (`engine_type = "verifier"`)
+   El intento de registrar un segundo motor para cualquiera de estos roles lanza un `BootConflictError` explícito indicando el conflicto.
+3. **Motores de Dominio Múltiples:** Los motores con roles no singleton (e.g. `"discovery"`, `"telemetry"`) pueden coexistir siempre que sus nombres identificadores sean disjuntos.
+
+### 5.2. API de Consulta e Integración
+
+- **Herramientas:** `get_tool(name)`, `has_tool(name)`, `list_tools(category, max_risk)`, `get_langchain_tools()`.
+- **Motores:** `get_planner()`, `get_observer()`, `get_verifier()`, `get_engine(name)`, `get_engine_by_type(type)`.
+- **Plugins:** `register_plugin(plugin)` (registro en cascada de herramientas, motores y modelos), `get_plugin(name)`.
+- **Resumen:** `get_capabilities_summary()` para la exposición pública del catálogo en el endpoint `GET /capabilities`.
+

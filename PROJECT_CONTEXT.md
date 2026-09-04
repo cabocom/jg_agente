@@ -1,9 +1,9 @@
 # CONTEXTO DE PROYECTO: jg_agente
 
-**Versión del documento:** 2.6.0  
+**Versión del documento:** 2.7.0  
 **Fecha de consolidación:** 4 de septiembre de 2026  
 **Componente:** Execution Plane (Motor Autónomo de Ejecución)  
-**Estado:** Fases 01, 02 y 03 completadas (100%). Fase 04 iniciada (ISSUE-F04-T01: Interfaz abstracta `BasePlugin`, modelo canónico `PluginMetadata`, contrato base `BaseEngine`, registro de tools/engines/modelos y hooks de ciclo de vida asíncronos `startup`/`shutdown`).  
+**Estado:** Fases 01, 02 y 03 completadas (100%). Fase 04 avanzada (ISSUE-F04-T01: Interfaz abstracta `BasePlugin` y ciclo de vida; ISSUE-F04-T02: `CapabilityRegistry` con detección estricta de conflictos `BootConflictError`, indexación única de herramientas y motores singleton `ObserverEngine`, `PlannerEngine`, `VerifierEngine`).  
 
 ---
 
