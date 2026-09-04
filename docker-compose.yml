@@ -1,0 +1,58 @@
+services:
+  # Base de datos PostgreSQL para checkpoints de LangGraph y tablas del Core (core_*)
+  jg_agente_postgres:
+    image: postgres:16-alpine
+    container_name: jg_agente_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-jg_agente}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - jg_agente_postgres_data:/var/lib/postgresql/data
+    ports:
+      # Puerto 5433 en host para evitar colisiones con instancias existentes en 5432
+      - "${POSTGRES_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d jg_agente"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - jg_agente_net
+
+  # Motor de ejecución cognitivo jg_agente (Execution Plane)
+  jg_agente:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jg_agente
+    restart: unless-stopped
+    user: "10001:10001"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    depends_on:
+      jg_agente_postgres:
+        condition: service_healthy
+    environment:
+      ENV: ${ENV:-development}
+      AGENT_ID: ${AGENT_ID:-jg_agente_local}
+      POSTGRES_HOST: jg_agente_postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-jg_agente}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@jg_agente_postgres:5432/${POSTGRES_DB:-jg_agente}
+    ports:
+      - "${AGENT_PORT:-8001}:8000"
+    networks:
+      - jg_agente_net
+
+networks:
+  jg_agente_net:
+    driver: bridge
+
+volumes:
+  jg_agente_postgres_data:

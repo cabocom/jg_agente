@@ -1,0 +1,83 @@
+"""Servidor principal FastAPI de jg_agente (Execution Plane)."""
+
+import logging
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from typing import Any
+
+from fastapi import FastAPI, Response, status
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
+
+from app import __version__
+from app.core.config import settings
+
+logger = logging.getLogger("jg_agente")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] (%(name)s) %(message)s",
+)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Ciclo de vida de la aplicación."""
+    logger.info(
+        "Iniciando jg_agente v%s (Agent ID: %s, ENV: %s)",
+        __version__,
+        settings.AGENT_ID,
+        settings.ENV,
+    )
+    yield
+    logger.info("Deteniendo jg_agente...")
+
+
+app = FastAPI(
+    title="jg_agente",
+    description="Motor Autónomo de Ejecución Cognitiva y Accionamiento (Execution Plane)",
+    version=__version__,
+    lifespan=lifespan,
+)
+
+
+@app.get("/", tags=["Root"])
+async def root() -> dict[str, Any]:
+    """Endpoint raíz con metadatos del servicio."""
+    return {
+        "service": "jg_agente",
+        "version": __version__,
+        "agent_id": settings.AGENT_ID,
+        "environment": settings.ENV,
+        "status": "online",
+    }
+
+
+@app.get("/health", tags=["Observability"])
+async def health(response: Response) -> dict[str, Any]:
+    """Chequeo de salud del agente y conectividad con PostgreSQL."""
+    db_status = "untested"
+    db_error = None
+
+    try:
+        engine = create_async_engine(
+            settings.async_database_url,
+            pool_pre_ping=True,
+            connect_args={"timeout": 3},
+        )
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        await engine.dispose()
+        db_status = "connected"
+    except Exception as exc:
+        db_status = "disconnected"
+        db_error = str(exc)
+        logger.warning("Fallo en verificación de base de datos en /health: %s", exc)
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
+    return {
+        "status": "healthy" if db_status == "connected" else "degraded",
+        "service": "jg_agente",
+        "version": __version__,
+        "database": db_status,
+        "database_error": db_error,
+    }

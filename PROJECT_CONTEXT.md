@@ -3,7 +3,7 @@
 **Versión del documento:** 1.0.0  
 **Fecha de consolidación:** 4 de septiembre de 2026  
 **Componente:** Execution Plane (Motor Autónomo de Ejecución)  
-**Estado:** Fase 01 en progreso (`ISSUE-F01-T01` completado)  
+**Estado:** Fase 01 en progreso (`ISSUE-F01-T01` e `ISSUE-F01-T02` completados)  
 
 ---
 

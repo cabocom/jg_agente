@@ -5,9 +5,14 @@ set -e
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
-# Determinar ejecutable de entorno virtual si existe
-VENV_BIN="$PROJECT_ROOT/.venv/bin"
-if [ -d "$VENV_BIN" ]; then
+# Determinar ejecutable de entorno virtual si existe localmente o en el workspace
+if [ -f "$PROJECT_ROOT/.venv/bin/ruff" ]; then
+    VENV_BIN="$PROJECT_ROOT/.venv/bin"
+elif [ -f "$PROJECT_ROOT/../Devops60k/.venv/bin/ruff" ]; then
+    VENV_BIN="$PROJECT_ROOT/../Devops60k/.venv/bin"
+fi
+
+if [ -n "$VENV_BIN" ]; then
     RUFF="$VENV_BIN/ruff"
     MYPY="$VENV_BIN/mypy"
     PYTEST="$VENV_BIN/pytest"
