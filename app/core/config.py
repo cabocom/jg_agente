@@ -70,6 +70,43 @@ class Settings(BaseSettings):
         description="Exige la presencia obligatoria de un VerifierEngine registrado",
     )
 
+    # Proveedor de Modelos de Lenguaje (LLM)
+    LLM_PROVIDER: str = Field(
+        default="mock",
+        description="Proveedor de LLM a utilizar ('mock', 'openai', 'custom', 'ollama')",
+    )
+    LLM_MODEL: str = Field(
+        default="gpt-4o-mini",
+        description="Nombre del modelo cognitivo a emplear",
+    )
+    LLM_API_KEY: str | None = Field(
+        default=None,
+        description="Clave de API para el proveedor de LLM",
+    )
+    LLM_BASE_URL: str | None = Field(
+        default=None,
+        description="URL base para APIs compatibles con OpenAI / proxies locales",
+    )
+    LLM_TEMPERATURE: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=2.0,
+        description="Temperatura de muestreo para el LLM",
+    )
+    LLM_MAX_TOKENS: int = Field(
+        default=2048,
+        gt=0,
+        description="Máximo de tokens por respuesta del LLM",
+    )
+    DEFAULT_SYSTEM_PROMPT: str = Field(
+        default=(
+            "Eres un agente inteligente autónomo de ejecución orientado a objetivos. "
+            "Analiza las solicitudes, decide si debes invocar herramientas o responder directamente, "
+            "y actúa con máxima precisión, seguridad y concisión."
+        ),
+        description="Prompt del sistema base para el razonamiento cognitivo",
+    )
+
     @property
     def async_database_url(self) -> str:
         """Devuelve la URL asíncrona normalizada para SQLAlchemy (asyncpg o aiosqlite)."""

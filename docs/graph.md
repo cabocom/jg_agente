@@ -14,8 +14,10 @@ El componente `GraphBuilder` (`app/core/graph.py`) es el ensamblador agnóstico 
 **Queda terminantemente prohibido el acoplamiento a tipos de agente o dominios específicos:**
 ```python
 # PROHIBIDO EN EL CORE:
-if agent_type == "conversational": ...
-if is_devops: ...
+if agent_type == "conversational":
+    ...
+if is_devops:
+    ...
 ```
 
 La topología del grafo es determinada 100% por capacidades disponibles:
@@ -118,3 +120,18 @@ state = await graph.ainvoke(
 snapshot = await graph.aget_state(config)
 print("Estado snapshot:", snapshot.values["status"])
 ```
+
+---
+
+## 5. Nodo Cognitivo Troncal: `reason`
+
+El nodo `reason` (`app/nodes/reason.py`) actúa como el centro de deliberación del agente:
+
+1. **Memoria Conversacional:** Consume `AgentState["messages"]` e inyecta la directriz de sistema (`SystemMessage`) y el estímulo actual (`HumanMessage`).
+2. **Tool Binding Dinámico:** Obtiene las herramientas disponibles de `CapabilityRegistry.get_langchain_tools()` y las enlaza al LLM vía `model.bind_tools()`.
+3. **Decisión de Flujo Agnóstica:**
+   - Si el LLM emite `tool_calls`: Genera un `IntentModel` con `action_type = "act"`, enrutando directamente a `execute`.
+   - Si no hay `tool_calls` pero existe un motor de planificación (`PlannerEngine`) y el estímulo es operativo: Genera un `IntentModel` con `action_type = "plan"`, derivando el flujo a `plan`.
+   - Si la interacción es un saludo o respuesta conversacional directa: Genera un `IntentModel` con `action_type = "conclude"`, emitiendo la respuesta textual del LLM en `AIMessage`.
+4. **Auditoría Estructurada:** Registra cada invocación en `audit_trail` bajo el tipo de evento `reasoning_completed`.
+

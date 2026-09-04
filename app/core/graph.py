@@ -11,7 +11,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
@@ -105,55 +106,12 @@ async def default_observe_node(
 async def default_reason_node(
     state: AgentState,
     registry: CapabilityRegistry,
+    llm: BaseChatModel | None = None,
 ) -> dict[str, Any]:
-    """Nodo de razonamiento cognitivo: interpreta la intención y evalúa los pasos a seguir."""
-    existing_intent = state.get("intent")
-    prompt = ""
-    if state.get("request"):
-        prompt = state["request"].prompt
-    elif state.get("messages"):
-        for msg in reversed(state["messages"]):
-            if isinstance(msg, HumanMessage):
-                prompt = str(msg.content)
-                break
+    """Nodo de razonamiento cognitivo: delega en el nodo reason con modelo LLM configurable."""
+    from app.nodes.reason import reason_node
 
-    if existing_intent is not None:
-        if isinstance(existing_intent, dict):
-            intent = IntentModel(**existing_intent)
-        else:
-            intent = existing_intent
-    else:
-        # Formular intención base a partir del estímulo recibido
-        has_tools = len(registry.list_tools()) > 0
-        has_planner = registry.get_planner() is not None
-        action_type = "plan" if has_planner else ("act" if has_tools else "conclude")
-        intent = IntentModel(
-            goal=prompt or "Procesar solicitud",
-            action_type=action_type,
-            parameters={"prompt": prompt},
-            confidence=1.0,
-            reasoning="Razonamiento cognitivo inicial completado.",
-        )
-
-    # Si no requiere acciones ni planes, sintetizar respuesta inicial si messages está vacío
-    messages_to_add: list[Any] = []
-    if intent.action_type in ("conclude", "respond") and not state.get("messages"):
-        messages_to_add.append(AIMessage(content=f"Respuesta generada para: {intent.goal}"))
-
-    result_dict: dict[str, Any] = {
-        "status": AgentExecutionStatus.REASONING,
-        "intent": intent,
-        "audit_trail": [
-            AuditRecord(
-                event_type="reasoning_completed",
-                details={"goal": intent.goal, "action_type": intent.action_type},
-            )
-        ],
-    }
-    if messages_to_add:
-        result_dict["messages"] = messages_to_add
-
-    return result_dict
+    return await reason_node(state, registry, llm=llm)
 
 
 async def default_plan_node(
@@ -640,10 +598,12 @@ class GraphBuilder:
         registry: CapabilityRegistry,
         node_overrides: dict[str, Callable[..., Any]] | None = None,
         security_guard: SecurityGuard | None = None,
+        llm: BaseChatModel | None = None,
     ) -> None:
         self.registry = registry
         self.node_overrides = node_overrides or {}
         self.security_guard = security_guard or SecurityGuard()
+        self.llm = llm
         self._topology_info: GraphTopologyInfo | None = None
 
     def get_topology(self) -> GraphTopologyInfo:
@@ -741,7 +701,7 @@ class GraphBuilder:
         else:
 
             async def _reason_node(s: AgentState) -> dict[str, Any]:
-                return await default_reason_node(s, self.registry)
+                return await default_reason_node(s, self.registry, llm=self.llm)
 
             builder.add_node("reason", cast(Any, _reason_node))
 
@@ -924,9 +884,10 @@ def build_agent_graph(
     checkpointer: BaseCheckpointSaver[Any] | None = None,
     interrupt_before: list[str] | None = None,
     interrupt_after: list[str] | None = None,
+    llm: BaseChatModel | None = None,
 ) -> CompiledStateGraph[Any, Any]:
     """Helper de conveniencia para instanciar y compilar el grafo LangGraph."""
-    return GraphBuilder(registry).build(
+    return GraphBuilder(registry, llm=llm).build(
         checkpointer=checkpointer,
         interrupt_before=interrupt_before,
         interrupt_after=interrupt_after,

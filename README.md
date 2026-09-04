@@ -110,8 +110,10 @@ jg_agente/
 │   ├── main.py                     # Bootstrap FastAPI y ciclo de vida
 │   ├── core/
 │   │   ├── boot.py                 # Validación en boot, comprobación de integridad y arranque
-│   │   ├── config.py               # Configuración centralizada Pydantic
 │   │   ├── checkpointer.py         # PostgresSaver, MemorySaver y vistas core_checkpoints
+│   │   ├── config.py               # Configuración centralizada Pydantic
+│   │   ├── graph.py                # GraphBuilder agnóstico de LangGraph y topologías dinámicas
+│   │   ├── llm.py                  # MockChatModel, OpenAICompatibleChatModel y factoría get_chat_model
 │   │   ├── plugin_manager.py       # PluginManager: autodescubrimiento y resolución de dependencias
 │   │   └── registry.py             # CapabilityRegistry y detección estricta de conflictos (BootConflictError)
 │   ├── db/
@@ -122,6 +124,9 @@ jg_agente/
 │   │   ├── io.py                   # Contratos AgentInput y AgentOutput
 │   │   ├── state.py                # AgentState, PolicyDecision, SecurityEvaluationResult
 │   │   └── tools.py                # Contratos AgentTool y ToolResult
+│   ├── nodes/
+│   │   ├── __init__.py             # Exportación de nodos base del grafo
+│   │   └── reason.py               # Nodo base reason: inferencia LLM, tool binding y decisión de flujo
 │   ├── plugins/
 │   │   ├── __init__.py             # Exportación BasePlugin, BaseEngine, PluginMetadata
 │   │   └── base.py                 # Interfaz abstracta BasePlugin, ciclo de vida y BaseEngine
@@ -136,6 +141,7 @@ jg_agente/
 │   ├── checkpointer.md             # Checkpointer LangGraph sobre PostgreSQL
 │   ├── security.md                 # SecurityGuard, auditoría inmutable y protección SSRF
 │   ├── plugins.md                  # Sistema de plugins, BasePlugin y ciclo de vida
+│   ├── graph.md                    # Ensamblador GraphBuilder, contratos de nodos y StateSnapshot
 │   └── issues/                     # Trazabilidad técnica por issue
 ├── tests/                          # Suite integral de pruebas (Unit + Integration)
 │   ├── test_bootstrap.py
@@ -151,7 +157,9 @@ jg_agente/
 │   ├── test_base_plugin.py
 │   ├── test_capability_registry.py
 │   ├── test_plugin_manager.py
-│   └── test_boot_validation.py
+│   ├── test_boot_validation.py
+│   ├── test_graph_builder.py
+│   └── test_node_reason.py
 └── scripts/
     └── check.sh                    # Verificación integral (Ruff + MyPy + Pytest)
 ```
@@ -167,6 +175,7 @@ La documentación exhaustiva del proyecto se encuentra disponible en [`docs/`](d
 - **[Checkpointer LangGraph](docs/checkpointer.md):** Persistencia sobre PostgreSQL (`core_checkpoints`) y pausado HITL.
 - **[Seguridad y Auditoría](docs/security.md):** `SecurityGuard`, `SecurityAuditLogger`, trazabilidad inmutable y protección contra SSRF.
 - **[Plugins y Extensibilidad](docs/plugins.md):** `BasePlugin`, `BaseEngine`, `CapabilityRegistry` y `PluginManager`.
+- **[Grafo y Flujos Cognitivos](docs/graph.md):** `GraphBuilder` agnóstico, nodos canónicos y `StateSnapshot`.
 
 ---
 
@@ -197,5 +206,7 @@ Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de 
   - [x] `ISSUE-F04-T04`: Validación en boot del agente contra `CapabilityRegistry`.
 - [ ] **Fase 05:** Ensamblado del Grafo LangGraph y Nodos Base:
   - [x] `ISSUE-F05-T01`: Implementación del `GraphBuilder` agnóstico de LangGraph (sin bifurcaciones de dominio y con `StateSnapshot` funcional).
+  - [x] `ISSUE-F05-T02`: Implementación de nodo base: `reason` (inferencia LLM, tool binding dinámico y memoria conversacional).
+  - [ ] `ISSUE-F05-T03`: Implementación de nodo base: `plan`.
 - [ ] **Fase 06:** Exposición API REST (`POST /executions/trigger`, HITL) y Bootstrap del Agente.
 - [ ] **Fase 07:** Integración con plugins de dominio y validación end-to-end.

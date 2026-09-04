@@ -141,9 +141,9 @@ class TestGraphBuilderMinimal:
             "request": AgentInput(
                 execution_id="exec-min-01",
                 thread_id=thread_id,
-                prompt="Hola, ¿puedes ejecutar una consulta?",
+                prompt="Hola, ¿puedes ejecutar mock_safe_tool?",
             ),
-            "messages": [HumanMessage(content="Hola, ¿puedes ejecutar una consulta?")],
+            "messages": [HumanMessage(content="Hola, ¿puedes ejecutar mock_safe_tool?")],
             "status": AgentExecutionStatus.IDLE,
         }
 
