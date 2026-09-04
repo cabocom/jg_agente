@@ -18,8 +18,12 @@ class AgentInput(BaseModel):
     execution_id: str = Field(..., description="ID único de la ejecución asignado por el invocador")
     thread_id: str = Field(..., description="ID de sesión o hilo conversacional persistente")
     prompt: str = Field(..., description="Estímulo principal de texto normalizado")
-    parameters: dict[str, Any] = Field(default_factory=dict, description="Parámetros opcionales del contexto")
-    user_context: Optional[UserContext] = Field(default=None, description="Contexto del usuario autenticado en el Dashboard")
+    parameters: dict[str, Any] = Field(
+        default_factory=dict, description="Parámetros opcionales del contexto"
+    )
+    user_context: Optional[UserContext] = Field(
+        default=None, description="Contexto del usuario autenticado en el Dashboard"
+    )
 ```
 
 ### 1.2 `AgentOutput`
@@ -97,6 +101,7 @@ class PolicyDecision(StrEnum):
     ALLOW = "allow"
     DENY = "deny"
     REQUIRE_HUMAN_APPROVAL = "require_human_approval"
+
 
 class SecurityEvaluationResult(BaseModel):
     decision: PolicyDecision

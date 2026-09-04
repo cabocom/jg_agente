@@ -195,6 +195,7 @@ Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de 
   - [x] `ISSUE-F04-T02`: Implementación de `CapabilityRegistry` con detección estricta de conflictos.
   - [x] `ISSUE-F04-T03`: Implementación de `PluginManager` con autodiscovery.
   - [x] `ISSUE-F04-T04`: Validación en boot del agente contra `CapabilityRegistry`.
-- [ ] **Fase 05:** Ensamblado del Grafo LangGraph y Nodos Base (`reason`, `execute`, `conclude`).
+- [ ] **Fase 05:** Ensamblado del Grafo LangGraph y Nodos Base:
+  - [x] `ISSUE-F05-T01`: Implementación del `GraphBuilder` agnóstico de LangGraph (sin bifurcaciones de dominio y con `StateSnapshot` funcional).
 - [ ] **Fase 06:** Exposición API REST (`POST /executions/trigger`, HITL) y Bootstrap del Agente.
 - [ ] **Fase 07:** Integración con plugins de dominio y validación end-to-end.

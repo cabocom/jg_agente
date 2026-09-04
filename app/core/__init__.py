@@ -11,6 +11,7 @@ from app.core.checkpointer import (
     get_postgres_checkpointer,
 )
 from app.core.config import Settings, settings
+from app.core.graph import GraphBuilder, GraphTopologyInfo, build_agent_graph
 from app.core.plugin_manager import (
     PluginDependencyError,
     PluginLoadError,
@@ -22,10 +23,13 @@ __all__ = [
     "BootConflictError",
     "BootIntegrityError",
     "CapabilityRegistry",
+    "GraphBuilder",
+    "GraphTopologyInfo",
     "PluginDependencyError",
     "PluginLoadError",
     "PluginManager",
     "Settings",
+    "build_agent_graph",
     "get_checkpointer",
     "get_memory_checkpointer",
     "get_postgres_checkpointer",

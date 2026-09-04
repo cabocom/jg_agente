@@ -250,19 +250,24 @@ class SecurityGuard:
         tool: AgentTool,
         tool_args: dict[str, Any],
         caller_permissions: Sequence[str] | None = None,
+        bypass_approval: bool = False,
         execution_id: str | None = None,
         thread_id: str | None = None,
     ) -> ToolResult:
         """Interpola validación de seguridad, sanitización y auditoría antes de invocar la tool.
 
         - Si la decisión es DENY: Devuelve ToolResult con fallo sin invocar la función.
-        - Si la decisión es REQUIRE_HUMAN_APPROVAL: Devuelve ToolResult señalizando pausa HITL.
-        - Si la decisión es ALLOW: Sanitiza entradas, invoca la herramienta y audita el resultado.
+        - Si la decisión es REQUIRE_HUMAN_APPROVAL: Devuelve ToolResult señalizando pausa HITL (salvo bypass_approval=True).
+        - Si la decisión es ALLOW (o aprobada): Sanitiza entradas, invoca la herramienta y audita el resultado.
         """
+        caller_perms = list(caller_permissions or [])
+        if bypass_approval and isinstance(tool, AgentTool):
+            caller_perms.extend(tool.required_permissions)
+
         eval_res = self.evaluate(
             tool=tool,
             tool_args=tool_args,
-            caller_permissions=caller_permissions,
+            caller_permissions=caller_perms,
             execution_id=execution_id,
         )
 
@@ -278,7 +283,7 @@ class SecurityGuard:
                 },
             )
 
-        if eval_res.decision == PolicyDecision.REQUIRE_HUMAN_APPROVAL:
+        if eval_res.decision == PolicyDecision.REQUIRE_HUMAN_APPROVAL and not bypass_approval:
             return ToolResult(
                 success=False,
                 error=f"SecurityGuard REQUIRE_HUMAN_APPROVAL: {eval_res.reason}",
@@ -291,7 +296,7 @@ class SecurityGuard:
                 },
             )
 
-        # Decisión ALLOW: Sanitizar entradas e invocar físicamente la herramienta
+        # Decisión ALLOW (o HITL aprobado): Sanitizar entradas e invocar físicamente la herramienta
         sanitized_args = self.sanitize_arguments(tool_args)
         start_time = time.perf_counter()
 

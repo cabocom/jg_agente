@@ -1,0 +1,933 @@
+"""Ensamblador agnóstico de grafos LangGraph (GraphBuilder) para jg_agente.
+
+Este módulo construye el flujo StateGraph del motor de ejecución de forma dinámica
+inspeccionando exclusivamente el CapabilityRegistry y las herramientas/motores disponibles.
+Cumple con el principio de Agnosticismo Radical del Core: la topología se ensambla
+exclusivamente por introspección de capacidades sin referencias a dominios ni banderas fijas.
+"""
+
+import inspect
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any, cast
+
+from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
+from pydantic import BaseModel, Field
+
+from app.core.registry import CapabilityRegistry
+from app.models.state import (
+    AgentExecutionStatus,
+    AgentState,
+    ApprovalRecord,
+    ApprovalStatus,
+    AuditRecord,
+    ExecutionError,
+    ExecutionPlan,
+    IntentModel,
+    PlanStep,
+    PolicyDecision,
+    SecurityEvaluationResult,
+    StepExecutionRecord,
+    StepStatus,
+    VerificationStatus,
+)
+from app.models.tools import RiskLevel
+from app.security.guard import SecurityGuard
+
+
+class GraphTopologyInfo(BaseModel):
+    """Metadatos de la topología del grafo ensamblado dinámicamente."""
+
+    nodes: list[str] = Field(
+        default_factory=list,
+        description="Identificadores de todos los nodos agregados al grafo",
+    )
+    conditional_nodes: list[str] = Field(
+        default_factory=list,
+        description="Nodos condicionales incluidos basados en capacidades registradas",
+    )
+    has_observer: bool = Field(default=False, description="Indica si se conectó el nodo observe")
+    has_planner: bool = Field(default=False, description="Indica si se conectó el nodo plan")
+    has_risk_assessment: bool = Field(
+        default=False, description="Indica si se conectó el nodo risk_assess"
+    )
+    has_human_approval: bool = Field(
+        default=False, description="Indica si se conectó el nodo human_approval"
+    )
+    has_verifier: bool = Field(default=False, description="Indica si se conectó el nodo verify")
+    has_rollback: bool = Field(default=False, description="Indica si se conectó el nodo rollback")
+
+
+# ==========================================================
+# 1. Nodos Canónicos y Auxiliares por Defecto (Agnósticos)
+# ==========================================================
+
+
+async def default_observe_node(
+    state: AgentState,
+    registry: CapabilityRegistry,
+) -> dict[str, Any]:
+    """Nodo de observación: captura el estado del entorno mediante ObserverEngine si existe."""
+    observer = registry.get_observer()
+    snapshot: dict[str, Any] = {}
+
+    if observer is not None:
+        observe_fn = getattr(observer, "observe", None)
+        if callable(observe_fn):
+            res = observe_fn(state)
+            raw = await res if inspect.iscoroutine(res) else res
+            if isinstance(raw, dict):
+                snapshot = dict(raw)
+            elif raw is not None:
+                snapshot = {"observed": raw}
+        else:
+            snapshot = {"observer": observer.name, "status": "observed"}
+
+    return {
+        "status": AgentExecutionStatus.OBSERVING,
+        "environment_snapshot": snapshot,
+        "audit_trail": [
+            AuditRecord(
+                event_type="observe_completed",
+                details={
+                    "engine": observer.name if observer else "none",
+                    "keys": list(snapshot.keys()),
+                },
+            )
+        ],
+    }
+
+
+async def default_reason_node(
+    state: AgentState,
+    registry: CapabilityRegistry,
+) -> dict[str, Any]:
+    """Nodo de razonamiento cognitivo: interpreta la intención y evalúa los pasos a seguir."""
+    existing_intent = state.get("intent")
+    prompt = ""
+    if state.get("request"):
+        prompt = state["request"].prompt
+    elif state.get("messages"):
+        for msg in reversed(state["messages"]):
+            if isinstance(msg, HumanMessage):
+                prompt = str(msg.content)
+                break
+
+    if existing_intent is not None:
+        if isinstance(existing_intent, dict):
+            intent = IntentModel(**existing_intent)
+        else:
+            intent = existing_intent
+    else:
+        # Formular intención base a partir del estímulo recibido
+        has_tools = len(registry.list_tools()) > 0
+        has_planner = registry.get_planner() is not None
+        action_type = "plan" if has_planner else ("act" if has_tools else "conclude")
+        intent = IntentModel(
+            goal=prompt or "Procesar solicitud",
+            action_type=action_type,
+            parameters={"prompt": prompt},
+            confidence=1.0,
+            reasoning="Razonamiento cognitivo inicial completado.",
+        )
+
+    # Si no requiere acciones ni planes, sintetizar respuesta inicial si messages está vacío
+    messages_to_add: list[Any] = []
+    if intent.action_type in ("conclude", "respond") and not state.get("messages"):
+        messages_to_add.append(AIMessage(content=f"Respuesta generada para: {intent.goal}"))
+
+    result_dict: dict[str, Any] = {
+        "status": AgentExecutionStatus.REASONING,
+        "intent": intent,
+        "audit_trail": [
+            AuditRecord(
+                event_type="reasoning_completed",
+                details={"goal": intent.goal, "action_type": intent.action_type},
+            )
+        ],
+    }
+    if messages_to_add:
+        result_dict["messages"] = messages_to_add
+
+    return result_dict
+
+
+async def default_plan_node(
+    state: AgentState,
+    registry: CapabilityRegistry,
+) -> dict[str, Any]:
+    """Nodo de planificación: genera una secuencia de pasos estructurados (ExecutionPlan)."""
+    planner = registry.get_planner()
+    plan: ExecutionPlan | None = None
+
+    if planner is not None:
+        plan_fn = getattr(planner, "create_plan", None) or getattr(planner, "plan", None)
+        if callable(plan_fn):
+            res = plan_fn(state)
+            raw_plan = await res if inspect.iscoroutine(res) else res
+            if isinstance(raw_plan, ExecutionPlan):
+                plan = raw_plan
+            elif isinstance(raw_plan, dict):
+                plan = ExecutionPlan(**raw_plan)
+
+    if plan is None:
+        intent = state.get("intent")
+        goal = intent.goal if isinstance(intent, IntentModel) else "Ejecución de plan estándar"
+        steps: list[PlanStep] = []
+        # Construir pasos si hay herramientas disponibles coincidentes
+        tools = registry.list_tools()
+        if tools:
+            target_tool = tools[0]
+            steps.append(
+                PlanStep(
+                    step_id="step-1",
+                    tool_name=target_tool.name,
+                    tool_args={},
+                    description=f"Ejecutar {target_tool.name}",
+                    risk_level=target_tool.risk_level,
+                    reversible=target_tool.reversible,
+                )
+            )
+        plan = ExecutionPlan(
+            plan_id=f"plan-{int(datetime.now(UTC).timestamp())}",
+            goal=goal,
+            steps=steps,
+            estimated_risk=steps[0].risk_level if steps else RiskLevel.LOW,
+        )
+
+    return {
+        "status": AgentExecutionStatus.PLANNING,
+        "plan": plan,
+        "audit_trail": [
+            AuditRecord(
+                event_type="planning_completed",
+                details={
+                    "plan_id": plan.plan_id,
+                    "steps_count": len(plan.steps),
+                    "estimated_risk": plan.estimated_risk.value,
+                },
+            )
+        ],
+    }
+
+
+async def default_risk_assess_node(
+    state: AgentState,
+    registry: CapabilityRegistry,
+    security_guard: SecurityGuard,
+) -> dict[str, Any]:
+    """Nodo de evaluación de riesgo de operaciones antes de su ejecución."""
+    plan = state.get("plan")
+    max_risk = RiskLevel.LOW
+    requires_approval = False
+
+    steps: list[PlanStep] = []
+    if isinstance(plan, ExecutionPlan):
+        steps = plan.steps
+    elif isinstance(plan, dict) and "steps" in plan:
+        steps = [PlanStep(**s) if isinstance(s, dict) else s for s in plan["steps"]]
+
+    for step in steps:
+        tool = registry.get_tool(step.tool_name)
+        tool_risk = tool.risk_level if tool else step.risk_level
+        if tool_risk in (RiskLevel.HIGH, RiskLevel.CRITICAL):
+            max_risk = tool_risk
+            requires_approval = True
+
+    eval_result = SecurityEvaluationResult(
+        decision=PolicyDecision.REQUIRE_HUMAN_APPROVAL
+        if requires_approval
+        else PolicyDecision.ALLOW,
+        operation="plan_risk_assessment",
+        risk_level=max_risk,
+        reason="Operación de alto riesgo detectada en el plan"
+        if requires_approval
+        else "Nivel de riesgo operativo aceptable",
+    )
+
+    update_state: dict[str, Any] = {
+        "risk_assessment": eval_result.model_dump(),
+        "circuit_breaker_active": False,
+        "audit_trail": [
+            AuditRecord(
+                event_type="risk_assessment_completed",
+                details={"decision": eval_result.decision.value, "risk_level": max_risk.value},
+            )
+        ],
+    }
+
+    if requires_approval:
+        update_state["human_intervention_required"] = True
+        update_state["status"] = AgentExecutionStatus.AWAITING_APPROVAL
+        if not state.get("approval"):
+            update_state["approval"] = ApprovalRecord(
+                status=ApprovalStatus.PENDING,
+                notes="Aprobación humana requerida por riesgo operativo elevado.",
+            )
+
+    return update_state
+
+
+async def default_human_approval_node(
+    state: AgentState,
+    registry: CapabilityRegistry,
+) -> dict[str, Any]:
+    """Nodo de gestión de aprobación humana (HITL)."""
+    approval = state.get("approval")
+    approval_rec: ApprovalRecord
+    if isinstance(approval, dict):
+        approval_rec = ApprovalRecord(**approval)
+    elif isinstance(approval, ApprovalRecord):
+        approval_rec = approval
+    else:
+        approval_rec = ApprovalRecord(status=ApprovalStatus.PENDING)
+
+    return {
+        "status": AgentExecutionStatus.AWAITING_APPROVAL
+        if approval_rec.status == ApprovalStatus.PENDING
+        else AgentExecutionStatus.EXECUTING,
+        "human_intervention_required": approval_rec.status == ApprovalStatus.PENDING,
+        "approval": approval_rec,
+        "audit_trail": [
+            AuditRecord(
+                event_type="human_approval_node_evaluated",
+                details={"status": approval_rec.status.value},
+            )
+        ],
+    }
+
+
+async def default_execute_node(
+    state: AgentState,
+    registry: CapabilityRegistry,
+    security_guard: SecurityGuard,
+) -> dict[str, Any]:
+    """Nodo de ejecución de acciones: invoca herramientas registradas bajo sandbox seguro."""
+    plan = state.get("plan")
+    records: list[StepExecutionRecord] = []
+    errors: list[ExecutionError] = []
+
+    steps_to_run: list[PlanStep] = []
+    if isinstance(plan, ExecutionPlan):
+        steps_to_run = plan.steps
+    elif isinstance(plan, dict) and "steps" in plan:
+        steps_to_run = [PlanStep(**s) if isinstance(s, dict) else s for s in plan["steps"]]
+
+    # Si no hay plan estructurado pero hay una herramienta disponible
+    if not steps_to_run:
+        tools = registry.list_tools()
+        if tools:
+            t = tools[0]
+            steps_to_run = [
+                PlanStep(
+                    step_id="direct-step-1",
+                    tool_name=t.name,
+                    tool_args={},
+                    risk_level=t.risk_level,
+                    reversible=t.reversible,
+                )
+            ]
+
+    for step in steps_to_run:
+        tool = registry.get_tool(step.tool_name)
+        if not tool:
+            err = ExecutionError(
+                code="TOOL_NOT_FOUND",
+                message=f"La herramienta '{step.tool_name}' no existe en el CapabilityRegistry.",
+                component="execute",
+                fatal=True,
+            )
+            errors.append(err)
+            records.append(
+                StepExecutionRecord(
+                    step_id=step.step_id,
+                    tool_name=step.tool_name,
+                    tool_args=step.tool_args,
+                    status=StepStatus.FAILED,
+                    error=err.message,
+                )
+            )
+            continue
+
+        tool_result = security_guard.execute_tool(
+            tool=tool,
+            tool_args=step.tool_args,
+            bypass_approval=(
+                state.get("approval") is not None
+                and getattr(state.get("approval"), "status", None) == ApprovalStatus.APPROVED
+            ),
+        )
+        if inspect.iscoroutine(tool_result.output):
+            tool_result.output = await tool_result.output
+
+        step_status = StepStatus.COMPLETED if tool_result.success else StepStatus.FAILED
+        records.append(
+            StepExecutionRecord(
+                step_id=step.step_id,
+                tool_name=step.tool_name,
+                tool_args=step.tool_args,
+                status=step_status,
+                output=tool_result.output,
+                error=tool_result.error,
+                duration_ms=tool_result.duration_ms,
+                rollback_context=tool_result.rollback_context,
+            )
+        )
+        if not tool_result.success and tool_result.error:
+            errors.append(
+                ExecutionError(
+                    code="TOOL_EXECUTION_FAILED",
+                    message=tool_result.error,
+                    component="execute",
+                )
+            )
+
+    return {
+        "status": AgentExecutionStatus.EXECUTING,
+        "execution_records": records,
+        "errors": errors,
+        "audit_trail": [
+            AuditRecord(
+                event_type="execute_completed",
+                details={"steps_executed": len(records), "errors": len(errors)},
+            )
+        ],
+    }
+
+
+async def default_verify_node(
+    state: AgentState,
+    registry: CapabilityRegistry,
+) -> dict[str, Any]:
+    """Nodo de verificación: comprueba activamente los resultados post-ejecución."""
+    verifier = registry.get_verifier()
+    records = state.get("execution_records") or []
+    has_failed_steps = any(r.status == StepStatus.FAILED for r in records)
+
+    v_status = VerificationStatus.FAIL if has_failed_steps else VerificationStatus.PASS
+    details: dict[str, Any] = {"verified_by": verifier.name if verifier else "core"}
+
+    if verifier is not None:
+        verify_fn = getattr(verifier, "verify", None)
+        if callable(verify_fn):
+            res = verify_fn(state)
+            if inspect.iscoroutine(res):
+                v_res = await res
+            else:
+                v_res = res
+            if isinstance(v_res, dict):
+                details.update(v_res)
+                if "status" in v_res:
+                    v_status = VerificationStatus(v_res["status"])
+
+    return {
+        "status": AgentExecutionStatus.VERIFYING,
+        "verification_results": [
+            {
+                "status": v_status.value,
+                "timestamp": datetime.now(UTC).isoformat(),
+                "details": details,
+            }
+        ],
+        "audit_trail": [
+            AuditRecord(
+                event_type="verification_completed",
+                details={"status": v_status.value, "details": details},
+            )
+        ],
+    }
+
+
+async def default_rollback_node(
+    state: AgentState,
+    registry: CapabilityRegistry,
+) -> dict[str, Any]:
+    """Nodo de compensación (Rollback): revierte pasos reversibles ejecutados."""
+    records = state.get("execution_records") or []
+    rollback_traces: list[dict[str, Any]] = []
+
+    # Revertir en orden inverso de ejecución
+    for rec in reversed(records):
+        if rec.status == StepStatus.COMPLETED and rec.rollback_context is not None:
+            tool = registry.get_tool(rec.tool_name)
+            if tool and tool.reversible:
+                res = tool.rollback(rec.rollback_context)
+                rollback_traces.append(
+                    {
+                        "step_id": rec.step_id,
+                        "tool_name": rec.tool_name,
+                        "success": res.success,
+                        "output": res.output,
+                        "error": res.error,
+                        "timestamp": datetime.now(UTC).isoformat(),
+                    }
+                )
+
+    return {
+        "status": AgentExecutionStatus.ROLLING_BACK,
+        "rollback_records": rollback_traces,
+        "audit_trail": [
+            AuditRecord(
+                event_type="rollback_completed",
+                details={"steps_reverted": len(rollback_traces)},
+            )
+        ],
+    }
+
+
+async def default_conclude_node(
+    state: AgentState,
+    registry: CapabilityRegistry,
+) -> dict[str, Any]:
+    """Nodo de conclusión: consolida el estado final y genera la respuesta resolutiva."""
+    errors = state.get("errors") or []
+    is_failed = (
+        any(getattr(e, "fatal", False) for e in errors)
+        or state.get("status") == AgentExecutionStatus.FAILED
+    )
+    final_status = AgentExecutionStatus.FAILED if is_failed else AgentExecutionStatus.RESOLVED
+
+    # Si no hay mensajes de salida, construir uno representativo
+    messages = state.get("messages") or []
+    if not messages or not isinstance(messages[-1], AIMessage):
+        summary = (
+            "Ejecución finalizada con éxito."
+            if not is_failed
+            else "Ejecución concluida con errores."
+        )
+        messages = list(messages) + [AIMessage(content=summary)]
+
+    return {
+        "status": final_status,
+        "is_resolved": not is_failed,
+        "messages": messages,
+        "audit_trail": [
+            AuditRecord(
+                event_type="execution_concluded",
+                details={"final_status": final_status.value, "is_resolved": not is_failed},
+            )
+        ],
+    }
+
+
+# ==========================================================
+# 2. Enrutadores Condicionales Agnósticos
+# ==========================================================
+
+
+def route_after_reason(state: AgentState, has_planner: bool, has_tools: bool) -> str:
+    """Enruta desde 'reason' según la intención detectada y las capacidades disponibles."""
+    intent = state.get("intent")
+    action_type = ""
+    if isinstance(intent, IntentModel):
+        action_type = intent.action_type
+    elif isinstance(intent, dict):
+        action_type = intent.get("action_type", "")
+
+    if action_type in ("conclude", "respond"):
+        return "conclude"
+    if has_planner:
+        return "plan"
+    if has_tools:
+        return "execute"
+    return "conclude"
+
+
+def route_after_plan(state: AgentState, has_risk_assessment: bool) -> str:
+    """Enruta desde 'plan' hacia evaluación de riesgo si existe, o directo a ejecución."""
+    if has_risk_assessment:
+        return "risk_assess"
+    return "execute"
+
+
+def route_after_risk_assess(state: AgentState, has_human_approval: bool) -> str:
+    """Enruta desde 'risk_assess' evaluando la política de seguridad."""
+    risk_info = state.get("risk_assessment") or {}
+    decision = (
+        risk_info.get("decision")
+        if isinstance(risk_info, dict)
+        else getattr(risk_info, "decision", None)
+    )
+
+    if decision == PolicyDecision.DENY or decision == PolicyDecision.DENY.value:
+        return "conclude"
+
+    approval = state.get("approval")
+    approval_status = (
+        getattr(approval, "status", None)
+        if approval
+        else (approval.get("status") if isinstance(approval, dict) else None)
+    )
+
+    if (
+        decision
+        in (PolicyDecision.REQUIRE_HUMAN_APPROVAL, PolicyDecision.REQUIRE_HUMAN_APPROVAL.value)
+        or approval_status == ApprovalStatus.PENDING
+    ):
+        if has_human_approval:
+            return "human_approval"
+        return "conclude"
+
+    return "execute"
+
+
+def route_after_human_approval(state: AgentState) -> str:
+    """Enruta desde 'human_approval' tras evaluar el resultado de la autorización."""
+    approval = state.get("approval")
+    approval_status = (
+        getattr(approval, "status", None)
+        if approval
+        else (approval.get("status") if isinstance(approval, dict) else None)
+    )
+
+    if approval_status in (
+        ApprovalStatus.APPROVED,
+        ApprovalStatus.APPROVED.value,
+        ApprovalStatus.AUTO_APPROVED,
+        ApprovalStatus.AUTO_APPROVED.value,
+    ):
+        return "execute"
+    return "conclude"
+
+
+def route_after_execute(state: AgentState, has_verifier: bool) -> str:
+    """Enruta tras 'execute' hacia verificación o conclusión."""
+    if has_verifier:
+        return "verify"
+    return "conclude"
+
+
+def route_after_verify(state: AgentState, has_rollback: bool) -> str:
+    """Enruta tras 'verify' evaluando si la comprobación fue exitosa o requiere compensación."""
+    v_results = state.get("verification_results") or []
+    has_failure = any(
+        v.get("status") in (VerificationStatus.FAIL.value, VerificationStatus.DEGRADED.value)
+        if isinstance(v, dict)
+        else getattr(v, "status", None) in (VerificationStatus.FAIL, VerificationStatus.DEGRADED)
+        for v in v_results
+    )
+
+    if has_failure and has_rollback:
+        records = state.get("execution_records") or []
+        has_reversible = any(
+            r.status == StepStatus.COMPLETED and r.rollback_context is not None for r in records
+        )
+        if has_reversible:
+            return "rollback"
+
+    return "conclude"
+
+
+# ==========================================================
+# 3. Ensamblador del Grafo (GraphBuilder)
+# ==========================================================
+
+
+class GraphBuilder:
+    """Ensamblador agnóstico de grafos LangGraph (StateGraph) para jg_agente.
+
+    Analiza dinámicamente las capacidades de `CapabilityRegistry` y genera
+    un grafo compilado con la topología mínima o expandida según herramientas
+    y motores registrados.
+    """
+
+    def __init__(
+        self,
+        registry: CapabilityRegistry,
+        node_overrides: dict[str, Callable[..., Any]] | None = None,
+        security_guard: SecurityGuard | None = None,
+    ) -> None:
+        self.registry = registry
+        self.node_overrides = node_overrides or {}
+        self.security_guard = security_guard or SecurityGuard()
+        self._topology_info: GraphTopologyInfo | None = None
+
+    def get_topology(self) -> GraphTopologyInfo:
+        """Calcula e inspecciona los nodos y capacidades que se conectarán en el grafo."""
+        has_observer = self.registry.get_observer() is not None or "observe" in self.node_overrides
+        has_planner = self.registry.get_planner() is not None or "plan" in self.node_overrides
+        has_verifier = self.registry.get_verifier() is not None or "verify" in self.node_overrides
+
+        tools = self.registry.list_tools()
+        has_high_risk = (
+            any(t.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL) for t in tools)
+            or "risk_assess" in self.node_overrides
+        )
+        has_reversible = any(t.reversible for t in tools) or "rollback" in self.node_overrides
+
+        has_risk_assessment = has_high_risk or has_planner
+        has_human_approval = has_high_risk
+
+        nodes: list[str] = []
+        cond_nodes: list[str] = []
+
+        if has_observer:
+            nodes.append("observe")
+            cond_nodes.append("observe")
+
+        nodes.append("reason")
+
+        if has_planner:
+            nodes.append("plan")
+            cond_nodes.append("plan")
+
+        if has_risk_assessment:
+            nodes.append("risk_assess")
+            cond_nodes.append("risk_assess")
+
+        if has_human_approval:
+            nodes.append("human_approval")
+            cond_nodes.append("human_approval")
+
+        nodes.append("execute")
+
+        if has_verifier:
+            nodes.append("verify")
+            cond_nodes.append("verify")
+
+        if has_reversible:
+            nodes.append("rollback")
+            cond_nodes.append("rollback")
+
+        nodes.append("conclude")
+
+        return GraphTopologyInfo(
+            nodes=nodes,
+            conditional_nodes=cond_nodes,
+            has_observer=has_observer,
+            has_planner=has_planner,
+            has_risk_assessment=has_risk_assessment,
+            has_human_approval=has_human_approval,
+            has_verifier=has_verifier,
+            has_rollback=has_reversible,
+        )
+
+    def build(
+        self,
+        checkpointer: BaseCheckpointSaver[Any] | None = None,
+        interrupt_before: list[str] | None = None,
+        interrupt_after: list[str] | None = None,
+    ) -> CompiledStateGraph[Any, Any]:
+        """Ensambla y compila el StateGraph en un CompiledStateGraph con persistencia y snapshot."""
+        topology = self.get_topology()
+        self._topology_info = topology
+
+        # LangGraph StateGraph agnóstico
+        builder: StateGraph[AgentState, Any, Any, Any] = StateGraph(AgentState)
+        has_tools = len(self.registry.list_tools()) > 0
+
+        # --- Definición y registro de Nodos asíncronos ---
+
+        # 1. Observe (Condicional)
+        if topology.has_observer:
+            observe_handler = self.node_overrides.get("observe")
+            if observe_handler:
+                builder.add_node("observe", cast(Any, observe_handler))
+            else:
+
+                async def _observe_node(s: AgentState) -> dict[str, Any]:
+                    return await default_observe_node(s, self.registry)
+
+                builder.add_node("observe", cast(Any, _observe_node))
+
+        # 2. Reason (Obligatorio)
+        reason_handler = self.node_overrides.get("reason")
+        if reason_handler:
+            builder.add_node("reason", cast(Any, reason_handler))
+        else:
+
+            async def _reason_node(s: AgentState) -> dict[str, Any]:
+                return await default_reason_node(s, self.registry)
+
+            builder.add_node("reason", cast(Any, _reason_node))
+
+        # 3. Plan (Condicional)
+        if topology.has_planner:
+            plan_handler = self.node_overrides.get("plan")
+            if plan_handler:
+                builder.add_node("plan", cast(Any, plan_handler))
+            else:
+
+                async def _plan_node(s: AgentState) -> dict[str, Any]:
+                    return await default_plan_node(s, self.registry)
+
+                builder.add_node("plan", cast(Any, _plan_node))
+
+        # 4. Risk Assessment (Condicional)
+        if topology.has_risk_assessment:
+            risk_handler = self.node_overrides.get("risk_assess")
+            if risk_handler:
+                builder.add_node("risk_assess", cast(Any, risk_handler))
+            else:
+
+                async def _risk_assess_node(s: AgentState) -> dict[str, Any]:
+                    return await default_risk_assess_node(s, self.registry, self.security_guard)
+
+                builder.add_node("risk_assess", cast(Any, _risk_assess_node))
+
+        # 5. Human Approval (Condicional)
+        if topology.has_human_approval:
+            approval_handler = self.node_overrides.get("human_approval")
+            if approval_handler:
+                builder.add_node("human_approval", cast(Any, approval_handler))
+            else:
+
+                async def _human_approval_node(s: AgentState) -> dict[str, Any]:
+                    return await default_human_approval_node(s, self.registry)
+
+                builder.add_node("human_approval", cast(Any, _human_approval_node))
+
+        # 6. Execute (Obligatorio)
+        execute_handler = self.node_overrides.get("execute")
+        if execute_handler:
+            builder.add_node("execute", cast(Any, execute_handler))
+        else:
+
+            async def _execute_node(s: AgentState) -> dict[str, Any]:
+                return await default_execute_node(s, self.registry, self.security_guard)
+
+            builder.add_node("execute", cast(Any, _execute_node))
+
+        # 7. Verify (Condicional)
+        if topology.has_verifier:
+            verify_handler = self.node_overrides.get("verify")
+            if verify_handler:
+                builder.add_node("verify", cast(Any, verify_handler))
+            else:
+
+                async def _verify_node(s: AgentState) -> dict[str, Any]:
+                    return await default_verify_node(s, self.registry)
+
+                builder.add_node("verify", cast(Any, _verify_node))
+
+        # 8. Rollback (Condicional)
+        if topology.has_rollback:
+            rollback_handler = self.node_overrides.get("rollback")
+            if rollback_handler:
+                builder.add_node("rollback", cast(Any, rollback_handler))
+            else:
+
+                async def _rollback_node(s: AgentState) -> dict[str, Any]:
+                    return await default_rollback_node(s, self.registry)
+
+                builder.add_node("rollback", cast(Any, _rollback_node))
+
+        # 9. Conclude (Obligatorio)
+        conclude_handler = self.node_overrides.get("conclude")
+        if conclude_handler:
+            builder.add_node("conclude", cast(Any, conclude_handler))
+        else:
+
+            async def _conclude_node(s: AgentState) -> dict[str, Any]:
+                return await default_conclude_node(s, self.registry)
+
+            builder.add_node("conclude", cast(Any, _conclude_node))
+
+        # --- Conexión de Aristas (Edges) ---
+
+        # Conexión inicial desde START
+        if topology.has_observer:
+            builder.add_edge(START, "observe")
+            builder.add_edge("observe", "reason")
+        else:
+            builder.add_edge(START, "reason")
+
+        # Conexión desde Reason
+        reason_destinations: list[str] = ["conclude"]
+        if topology.has_planner:
+            reason_destinations.append("plan")
+        if has_tools:
+            reason_destinations.append("execute")
+
+        builder.add_conditional_edges(
+            "reason",
+            lambda s: route_after_reason(
+                s,
+                has_planner=topology.has_planner,
+                has_tools=has_tools,
+            ),
+            path_map=list(set(reason_destinations)),
+        )
+
+        # Conexión desde Plan (si existe)
+        if topology.has_planner:
+            if topology.has_risk_assessment:
+                builder.add_edge("plan", "risk_assess")
+            else:
+                builder.add_edge("plan", "execute")
+
+        # Conexión desde Risk Assessment (si existe)
+        if topology.has_risk_assessment:
+            risk_destinations = ["execute", "conclude"]
+            if topology.has_human_approval:
+                risk_destinations.append("human_approval")
+            builder.add_conditional_edges(
+                "risk_assess",
+                lambda s: route_after_risk_assess(
+                    s,
+                    has_human_approval=topology.has_human_approval,
+                ),
+                path_map=list(set(risk_destinations)),
+            )
+
+        # Conexión desde Human Approval (si existe)
+        if topology.has_human_approval:
+            builder.add_conditional_edges(
+                "human_approval",
+                route_after_human_approval,
+                path_map=["execute", "conclude"],
+            )
+
+        # Conexión desde Execute
+        if topology.has_verifier:
+            builder.add_edge("execute", "verify")
+        else:
+            builder.add_edge("execute", "conclude")
+
+        # Conexión desde Verify (si existe)
+        if topology.has_verifier:
+            verify_destinations = ["conclude"]
+            if topology.has_rollback:
+                verify_destinations.append("rollback")
+            builder.add_conditional_edges(
+                "verify",
+                lambda s: route_after_verify(
+                    s,
+                    has_rollback=topology.has_rollback,
+                ),
+                path_map=list(set(verify_destinations)),
+            )
+
+        # Conexión desde Rollback (si existe)
+        if topology.has_rollback:
+            builder.add_edge("rollback", "conclude")
+
+        # Conexión final desde Conclude hacia END
+        builder.add_edge("conclude", END)
+
+        # Persistencia: Si no se suministra checkpointer externo, se utiliza MemorySaver
+        saver = checkpointer if checkpointer is not None else MemorySaver()
+
+        return builder.compile(
+            checkpointer=saver,
+            interrupt_before=interrupt_before,
+            interrupt_after=interrupt_after,
+        )
+
+
+def build_agent_graph(
+    registry: CapabilityRegistry,
+    checkpointer: BaseCheckpointSaver[Any] | None = None,
+    interrupt_before: list[str] | None = None,
+    interrupt_after: list[str] | None = None,
+) -> CompiledStateGraph[Any, Any]:
+    """Helper de conveniencia para instanciar y compilar el grafo LangGraph."""
+    return GraphBuilder(registry).build(
+        checkpointer=checkpointer,
+        interrupt_before=interrupt_before,
+        interrupt_after=interrupt_after,
+    )

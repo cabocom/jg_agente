@@ -1,9 +1,9 @@
 # CONTEXTO DE PROYECTO: jg_agente
 
-**Versión del documento:** 2.9.0  
+**Versión del documento:** 2.10.0  
 **Fecha de consolidación:** 4 de septiembre de 2026  
 **Componente:** Execution Plane (Motor Autónomo de Ejecución)  
-**Estado:** Fases 01, 02, 03 y 04 completadas (100%). Fase 04 culminada (ISSUE-F04-T01: Interfaz abstracta `BasePlugin`; ISSUE-F04-T02: `CapabilityRegistry` y `BootConflictError`; ISSUE-F04-T03: `PluginManager` con autodiscovery dual y resolución topológica; ISSUE-F04-T04: `validate_boot_capabilities`, `BootIntegrityError`, integración en `lifespan` FastAPI y endpoint `/capabilities`). Próximo hito: Fase 05 (Grafo LangGraph y Nodos Base).  
+**Estado:** Fases 01, 02, 03 y 04 completadas (100%). Fase 05 iniciada con ISSUE-F05-T01 completado al 100% (`GraphBuilder` agnóstico de LangGraph con introspección dinámica de `CapabilityRegistry`, cero bifurcaciones condicionales de dominio y soporte de `StateSnapshot` funcional). Próximo hito: Nodos base y pipelines de ejecución.  
 
 ---
 
@@ -21,8 +21,10 @@
    El Core de `jg_agente` no contiene conocimiento de dominios específicos (telefonía, devops, finanzas, etc.). Queda terminantemente prohibido el uso de bifurcaciones condicionales basadas en el tipo de agente:
    ```python
    # PROHIBIDO EN EL CORE:
-   if agent_type == "conversational": ...
-   if is_devops: ...
+   if agent_type == "conversational":
+       ...
+   if is_devops:
+       ...
    ```
    El comportamiento se define exclusivamente a través de la composición de capacidades (`CapabilityRegistry`) aportadas por los plugins instalados.
 
@@ -69,12 +71,18 @@
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
 
+
 class AgentInput(BaseModel):
     execution_id: str = Field(..., description="ID único de la ejecución asignado por el invocador")
     thread_id: str = Field(..., description="ID de sesión o hilo conversacional persistente")
     prompt: str = Field(..., description="Estímulo principal de texto normalizado")
-    parameters: Dict[str, Any] = Field(default_factory=dict, description="Parámetros opcionales del contexto")
-    user_context: Optional[Dict[str, Any]] = Field(default=None, description="Contexto del usuario autenticado en el Dashboard")
+    parameters: Dict[str, Any] = Field(
+        default_factory=dict, description="Parámetros opcionales del contexto"
+    )
+    user_context: Optional[Dict[str, Any]] = Field(
+        default=None, description="Contexto del usuario autenticado en el Dashboard"
+    )
+
 
 class AgentOutput(BaseModel):
     execution_id: str
@@ -96,16 +104,19 @@ from enum import Enum
 from typing import Callable, Optional, Type, Dict, Any
 from pydantic import BaseModel
 
+
 class RiskLevel(str, Enum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
     CRITICAL = "critical"
 
+
 class ToolType(str, Enum):
     READ = "read"
     MUTATION = "mutation"
     INTERACTION = "interaction"
+
 
 class ToolResult(BaseModel):
     success: bool
@@ -114,6 +125,7 @@ class ToolResult(BaseModel):
     duration_ms: float
     metadata: Dict[str, Any] = {}
     rollback_context: Optional[Dict[str, Any]] = None
+
 
 class AgentTool(BaseModel):
     name: str

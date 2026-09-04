@@ -24,6 +24,7 @@ class PolicyDecision(StrEnum):
     DENY = "deny"
     REQUIRE_HUMAN_APPROVAL = "require_human_approval"
 
+
 class SecurityEvaluationResult(BaseModel):
     decision: PolicyDecision
     operation: str

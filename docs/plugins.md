@@ -22,16 +22,16 @@ Representa la identidad formal, versión, restricciones de compatibilidad y depe
 
 ```python
 class PluginMetadata(BaseModel):
-    name: str                           # Identificador único (slug: 'weather', 'devops')
-    version: str                        # Versión semántica (e.g. '1.0.0')
-    description: str = ""               # Descripción funcional
-    author: str = ""                    # Autor u organización
-    jg_agente_version_min: str = "1.0.0" # Compatibilidad mínima requerida con Core
-    enabled: bool = True                # Flag de activación
-    tags: list[str] = []                # Categorías clasificatorias
-    dependencies: list[str] = []        # Plugins requeridos
-    config_schema: type[BaseModel] | None = None # Esquema de configuración
-    extra: dict[str, Any] = {}          # Metadatos libres
+    name: str  # Identificador único (slug: 'weather', 'devops')
+    version: str  # Versión semántica (e.g. '1.0.0')
+    description: str = ""  # Descripción funcional
+    author: str = ""  # Autor u organización
+    jg_agente_version_min: str = "1.0.0"  # Compatibilidad mínima requerida con Core
+    enabled: bool = True  # Flag de activación
+    tags: list[str] = []  # Categorías clasificatorias
+    dependencies: list[str] = []  # Plugins requeridos
+    config_schema: type[BaseModel] | None = None  # Esquema de configuración
+    extra: dict[str, Any] = {}  # Metadatos libres
 ```
 
 ### 2.2. Motor de Dominio (`BaseEngine`)
