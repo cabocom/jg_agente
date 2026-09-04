@@ -5,12 +5,14 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, Response, status
+from fastapi import FastAPI, Request, Response, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app import __version__
+from app.core.boot import init_agent_capabilities
 from app.core.config import settings
+from app.core.registry import CapabilityRegistry
 
 logger = logging.getLogger("jg_agente")
 logging.basicConfig(
@@ -21,15 +23,27 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Ciclo de vida de la aplicación."""
+    """Ciclo de vida de la aplicación con validación de boot e inicialización de plugins."""
     logger.info(
         "Iniciando jg_agente v%s (Agent ID: %s, ENV: %s)",
         __version__,
         settings.AGENT_ID,
         settings.ENV,
     )
+
+    # 1. Autodescubrimiento, validación de integridad de arranque y registro
+    registry, plugin_manager = init_agent_capabilities(settings)
+    app.state.registry = registry
+    app.state.plugin_manager = plugin_manager
+
+    # 2. Inicialización asíncrona de plugins
+    await plugin_manager.startup()
+
     yield
+
+    # 3. Apagado ordenado
     logger.info("Deteniendo jg_agente...")
+    await plugin_manager.shutdown()
 
 
 app = FastAPI(
@@ -50,6 +64,15 @@ async def root() -> dict[str, Any]:
         "environment": settings.ENV,
         "status": "online",
     }
+
+
+@app.get("/capabilities", tags=["Observability"])
+async def capabilities(request: Request) -> dict[str, Any]:
+    """Catálogo consolidado de herramientas, motores y plugins registrados en jg_agente."""
+    registry: CapabilityRegistry = (
+        getattr(request.app.state, "registry", None) or CapabilityRegistry()
+    )
+    return registry.get_capabilities_summary()
 
 
 @app.get("/health", tags=["Observability"])

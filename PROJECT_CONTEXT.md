@@ -1,9 +1,9 @@
 # CONTEXTO DE PROYECTO: jg_agente
 
-**Versión del documento:** 2.8.0  
+**Versión del documento:** 2.9.0  
 **Fecha de consolidación:** 4 de septiembre de 2026  
 **Componente:** Execution Plane (Motor Autónomo de Ejecución)  
-**Estado:** Fases 01, 02 y 03 completadas (100%). Fase 04 avanzada (ISSUE-F04-T01: Interfaz abstracta `BasePlugin` y ciclo de vida; ISSUE-F04-T02: `CapabilityRegistry` con detección estricta de conflictos `BootConflictError`; ISSUE-F04-T03: `PluginManager` con autodescubrimiento dual, validación topológica de dependencias e integración de ciclo de vida).  
+**Estado:** Fases 01, 02, 03 y 04 completadas (100%). Fase 04 culminada (ISSUE-F04-T01: Interfaz abstracta `BasePlugin`; ISSUE-F04-T02: `CapabilityRegistry` y `BootConflictError`; ISSUE-F04-T03: `PluginManager` con autodiscovery dual y resolución topológica; ISSUE-F04-T04: `validate_boot_capabilities`, `BootIntegrityError`, integración en `lifespan` FastAPI y endpoint `/capabilities`). Próximo hito: Fase 05 (Grafo LangGraph y Nodos Base).  
 
 ---
 

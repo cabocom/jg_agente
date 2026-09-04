@@ -14,7 +14,7 @@ from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Any, Self
 
-from app.core.registry import CapabilityRegistry
+from app.core.registry import BootConflictError, CapabilityRegistry
 from app.plugins.base import BasePlugin
 
 logger = logging.getLogger("jg_agente.plugin_manager")
@@ -186,6 +186,8 @@ class PluginManager:
             try:
                 instance = plugin_cls()
                 self.register_plugin_instance(instance)
+            except (BootConflictError, PluginDependencyError):
+                raise
             except Exception as exc:
                 logger.error("Fallo al instanciar plugin '%s': %s", plugin_cls, exc)
                 raise PluginLoadError(f"Error instanciando {plugin_cls}: {exc}") from exc

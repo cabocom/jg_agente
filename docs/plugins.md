@@ -180,4 +180,28 @@ Ubicado en `app/core/plugin_manager.py`, `PluginManager` orquesta el descubrimie
 - **`await pm.health_check()`:** Consolida el estado de salud y telemetría de todos los plugins activos.
 - **Soporte `async with pm:`** para inicialización y parada garantizada en contextos de ejecución acotados.
 
+---
+
+## 7. Validación en Boot e Integridad de Capacidades
+
+Ubicado en `app/core/boot.py`, el subsistema de arranque realiza una comprobación determinista de coherencia antes de que la aplicación FastAPI acepte tráfico.
+
+### 7.1. Verificación de Integridad (`validate_boot_capabilities`)
+
+Garantiza que el conjunto de capacidades cargadas sea compatible con el perfil configurado del agente:
+1. **Plugins Requeridos:** Comprueba que todos los plugins declarados en `settings.REQUIRED_PLUGINS` estén cargados y activos.
+2. **Herramientas Obligatorias:** Comprueba que todas las tools declaradas en `settings.REQUIRED_TOOLS` existan en el `CapabilityRegistry`.
+3. **Motores Cognitivos Esenciales:** Si el perfil exige planificación (`REQUIRE_PLANNER=True`), observación (`REQUIRE_OBSERVER=True`) o verificación (`REQUIRE_VERIFIER=True`), valida que el motor correspondiente se encuentre registrado.
+4. **Integridad Funcional de Tools:** Verifica que cada herramienta disponga de una función ejecutable (`callable(tool.func)`) y categoría válida.
+
+Ante cualquier discrepancia, se lanza un `BootIntegrityError` explícito abortando el arranque de inmediato.
+
+### 7.2. Orquestación en Lifespan y Endpoint `/capabilities`
+
+Durante el evento `lifespan` de FastAPI en `app/main.py`:
+- Se invoca `init_agent_capabilities(settings)`, la cual descubre plugins, valida dependencias, verifica colisiones y valida la integridad de arranque.
+- Se almacenan `registry` y `plugin_manager` en el estado de la aplicación (`app.state`).
+- Se expone el catálogo activo en `GET /capabilities` mediante `registry.get_capabilities_summary()`.
+
+
 

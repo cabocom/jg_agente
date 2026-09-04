@@ -44,6 +44,32 @@ class Settings(BaseSettings):
         description="Habilita el acceso a redes privadas si se autoriza explícitamente por configuración",
     )
 
+    # Perfil de capacidades y plugins para validación en boot
+    PLUGINS_DIR: str | None = Field(
+        default=None,
+        description="Directorio local alternativo para escaneo de plugins",
+    )
+    REQUIRED_PLUGINS: list[str] = Field(
+        default_factory=list,
+        description="Lista de nombres de plugins obligatorios para el arranque del agente",
+    )
+    REQUIRED_TOOLS: list[str] = Field(
+        default_factory=list,
+        description="Lista de nombres de herramientas obligatorias para el arranque del agente",
+    )
+    REQUIRE_PLANNER: bool = Field(
+        default=False,
+        description="Exige la presencia obligatoria de un PlannerEngine registrado",
+    )
+    REQUIRE_OBSERVER: bool = Field(
+        default=False,
+        description="Exige la presencia obligatoria de un ObserverEngine registrado",
+    )
+    REQUIRE_VERIFIER: bool = Field(
+        default=False,
+        description="Exige la presencia obligatoria de un VerifierEngine registrado",
+    )
+
     @property
     def async_database_url(self) -> str:
         """Devuelve la URL asíncrona normalizada para SQLAlchemy (asyncpg o aiosqlite)."""

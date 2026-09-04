@@ -109,6 +109,7 @@ jg_agente/
 │   ├── __init__.py                 # Versión del paquete
 │   ├── main.py                     # Bootstrap FastAPI y ciclo de vida
 │   ├── core/
+│   │   ├── boot.py                 # Validación en boot, comprobación de integridad y arranque
 │   │   ├── config.py               # Configuración centralizada Pydantic
 │   │   ├── checkpointer.py         # PostgresSaver, MemorySaver y vistas core_checkpoints
 │   │   ├── plugin_manager.py       # PluginManager: autodescubrimiento y resolución de dependencias
@@ -149,7 +150,8 @@ jg_agente/
 │   ├── test_security_guard.py
 │   ├── test_base_plugin.py
 │   ├── test_capability_registry.py
-│   └── test_plugin_manager.py
+│   ├── test_plugin_manager.py
+│   └── test_boot_validation.py
 └── scripts/
     └── check.sh                    # Verificación integral (Ruff + MyPy + Pytest)
 ```
@@ -188,10 +190,11 @@ Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de 
   - [x] `ISSUE-F03-T03`: `SecurityAuditLogger` inmutable no bloqueante sobre `core_audit_records`.
   - [x] `ISSUE-F03-T04`: Validador de protección SSRF para herramientas de red (`SSRFValidator`).
   - [x] `ISSUE-F03-T05`: Interceptor central de seguridad `SecurityGuard` (permisos, inyecciones, SSRF, HITL y auditoría).
-- [ ] **Fase 04:** CapabilityRegistry y Sistema de Plugins Core:
+- [x] **Fase 04:** CapabilityRegistry y Sistema de Plugins Core (100%):
   - [x] `ISSUE-F04-T01`: Definición de interfaz abstracta `BasePlugin` y ciclo de vida.
   - [x] `ISSUE-F04-T02`: Implementación de `CapabilityRegistry` con detección estricta de conflictos.
   - [x] `ISSUE-F04-T03`: Implementación de `PluginManager` con autodiscovery.
+  - [x] `ISSUE-F04-T04`: Validación en boot del agente contra `CapabilityRegistry`.
 - [ ] **Fase 05:** Ensamblado del Grafo LangGraph y Nodos Base (`reason`, `execute`, `conclude`).
 - [ ] **Fase 06:** Exposición API REST (`POST /executions/trigger`, HITL) y Bootstrap del Agente.
 - [ ] **Fase 07:** Integración con plugins de dominio y validación end-to-end.
