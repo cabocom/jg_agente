@@ -1,9 +1,9 @@
 # CONTEXTO DE PROYECTO: jg_agente
 
-**Versión del documento:** 1.0.0  
+**Versión del documento:** 1.1.0  
 **Fecha de consolidación:** 4 de septiembre de 2026  
 **Componente:** Execution Plane (Motor Autónomo de Ejecución)  
-**Estado:** Fase 01 completada (100%). Preparado para iniciar Fase 02 (Contratos y Modelos Core).  
+**Estado:** Fase 01 completada (100%). Fase 02 en progreso (ISSUE-F02-T01 completado: contratos implementados en `app/models/io.py`).  
 
 ---
 
