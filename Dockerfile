@@ -31,8 +31,10 @@ WORKDIR /app
 # Copiar paquetes instalados desde la etapa builder
 COPY --from=builder /install /usr/local
 
-# Copiar código fuente de la aplicación
+# Copiar código fuente de la aplicación y migraciones
 COPY app/ ./app
+COPY alembic/ ./alembic
+COPY alembic.ini ./alembic.ini
 
 # Permisos para usuario appuser en directorios de trabajo y efímeros
 RUN mkdir -p /app/data /tmp && \

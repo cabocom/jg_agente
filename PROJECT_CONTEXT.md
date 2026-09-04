@@ -1,9 +1,9 @@
 # CONTEXTO DE PROYECTO: jg_agente
 
-**Versión del documento:** 2.0.0  
+**Versión del documento:** 2.1.0  
 **Fecha de consolidación:** 4 de septiembre de 2026  
 **Componente:** Execution Plane (Motor Autónomo de Ejecución)  
-**Estado:** Fase 01 completada (100%). Fase 02 completada (100%: contratos en `app/models/io.py`, `app/models/tools.py` y `app/models/state.py`). Preparado para Fase 03.  
+**Estado:** Fases 01 y 02 completadas (100%). Fase 03 en progreso (ISSUE-F03-T01 completado: persistencia async PostgreSQL, modelos ORM `core_*` y migraciones Alembic).  
 
 ---
 

@@ -29,11 +29,21 @@ class Settings(BaseSettings):
 
     @property
     def async_database_url(self) -> str:
-        """Devuelve la URL asíncrona normalizada para SQLAlchemy (asyncpg)."""
+        """Devuelve la URL asíncrona normalizada para SQLAlchemy (asyncpg o aiosqlite)."""
         if self.DATABASE_URL:
             return self.DATABASE_URL
         return (
             f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+            f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        )
+
+    @property
+    def sync_database_url(self) -> str:
+        """Devuelve la URL síncrona normalizada para inspección y utilidades."""
+        if self.DATABASE_URL:
+            return self.DATABASE_URL.replace("+asyncpg", "").replace("+aiosqlite", "")
+        return (
+            f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
             f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
         )
 
