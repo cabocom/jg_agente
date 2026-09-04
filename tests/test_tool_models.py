@@ -195,6 +195,20 @@ class TestAgentTool:
         assert "item-101" in str(rb_res.output)
         assert rb_res.metadata["rollback_executed"] is True
 
+    def test_agent_tool_reversible_true_without_rollback_func_raises_validation_error(
+        self,
+    ) -> None:
+        with pytest.raises(ValidationError) as exc_info:
+            AgentTool(
+                name="invalid_reversible",
+                description="Herramienta sin compensador",
+                category="test",
+                func=sample_calculator,
+                reversible=True,
+                rollback_func=None,
+            )
+        assert "rollback_func" in str(exc_info.value)
+
     def test_agent_tool_rollback_when_no_rollback_func(self) -> None:
         tool = AgentTool(
             name="no_rollback",
@@ -205,6 +219,39 @@ class TestAgentTool:
         rb_res = tool.rollback({"item_id": "item-101"})
         assert rb_res.success is False
         assert rb_res.error == "NO_ROLLBACK_AVAILABLE"
+        assert rb_res.metadata["reversible"] is False
+
+    def test_agent_tool_rollback_exception_handling(self) -> None:
+        def failing_rollback(context: dict[str, Any]) -> ToolResult:
+            raise RuntimeError("Fallo crítico en el compensador")
+
+        tool = AgentTool(
+            name="failing_rollback_tool",
+            description="Herramienta con compensador fallido",
+            category="system",
+            func=sample_calculator,
+            rollback_func=failing_rollback,
+        )
+        rb_res = tool.rollback({"item_id": "item-202"})
+        assert rb_res.success is False
+        assert rb_res.error is not None
+        assert "Fallo crítico en el compensador" in rb_res.error
+        assert rb_res.metadata["rollback_executed"] is False
+
+    def test_agent_tool_rollback_primitive_returns(self) -> None:
+        def bool_rollback(context: dict[str, Any]) -> bool:
+            return True
+
+        tool = AgentTool(
+            name="bool_rollback_tool",
+            description="Compensador booleano",
+            category="system",
+            func=sample_calculator,
+            rollback_func=bool_rollback,  # type: ignore[arg-type]
+        )
+        rb_res = tool.rollback({"item_id": "item-303"})
+        assert rb_res.success is True
+        assert rb_res.metadata["rollback_executed"] is True
 
     def test_agent_tool_as_langchain_tool(self) -> None:
         tool = AgentTool(

@@ -146,7 +146,12 @@ class AgentTool(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def adjust_reversible_and_permissions(self) -> "AgentTool":
+    def validate_reversible_and_rollback(self) -> "AgentTool":
+        if self.reversible and self.rollback_func is None:
+            raise ValueError(
+                "Las herramientas configuradas como reversibles (reversible=True) "
+                "deben proporcionar obligatoriamente un 'rollback_func' válido para compensación."
+            )
         if self.rollback_func is not None:
             self.reversible = True
         return self
@@ -190,10 +195,61 @@ class AgentTool(BaseModel):
             )
 
     def rollback(self, rollback_context: dict[str, Any]) -> ToolResult:
-        """Ejecuta la compensación asociada a la herramienta si está definida."""
-        if self.rollback_func is not None:
-            return self.rollback_func(rollback_context)
-        return ToolResult(success=False, error="NO_ROLLBACK_AVAILABLE")
+        """Ejecuta la compensación asociada a la herramienta si está definida.
+
+        Si la herramienta no es reversible o no cuenta con función de compensación,
+        emite un ToolResult con error explícito 'NO_ROLLBACK_AVAILABLE'.
+        """
+        if not self.reversible or self.rollback_func is None:
+            return ToolResult(
+                success=False,
+                error="NO_ROLLBACK_AVAILABLE",
+                output="Operación no reversible: la herramienta no dispone de compensador registrado.",
+                metadata={"reversible": False},
+            )
+
+        start_time = time.perf_counter()
+        try:
+            res = self.rollback_func(rollback_context)
+            duration = (time.perf_counter() - start_time) * 1000
+
+            if isinstance(res, ToolResult):
+                if res.duration_ms <= 0.0:
+                    res.duration_ms = round(duration, 2)
+                res.metadata.setdefault("rollback_executed", True)
+                return res
+            elif isinstance(res, bool):
+                return ToolResult(
+                    success=res,
+                    output="Compensación completada exitosamente."
+                    if res
+                    else "Compensación fallida.",
+                    duration_ms=round(duration, 2),
+                    metadata={"rollback_executed": True},
+                )
+            elif isinstance(res, str):
+                return ToolResult(
+                    success=True,
+                    output=res,
+                    duration_ms=round(duration, 2),
+                    metadata={"rollback_executed": True},
+                )
+            else:
+                return ToolResult(
+                    success=True,
+                    output=str(res) if res is not None else "Compensación completada.",
+                    duration_ms=round(duration, 2),
+                    metadata={"rollback_executed": True},
+                )
+        except Exception as exc:
+            duration = (time.perf_counter() - start_time) * 1000
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"Error durante la compensación: {exc}",
+                duration_ms=round(duration, 2),
+                metadata={"rollback_executed": False, "exception": str(exc)},
+            )
 
     def as_langchain_tool(self) -> BaseTool:
         """Convierte AgentTool en un BaseTool/StructuredTool nativo de LangChain."""
