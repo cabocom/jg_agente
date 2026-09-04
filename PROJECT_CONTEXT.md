@@ -1,9 +1,9 @@
 # CONTEXTO DE PROYECTO: jg_agente
 
-**Versión del documento:** 2.1.0  
+**Versión del documento:** 2.2.0  
 **Fecha de consolidación:** 4 de septiembre de 2026  
 **Componente:** Execution Plane (Motor Autónomo de Ejecución)  
-**Estado:** Fases 01 y 02 completadas (100%). Fase 03 en progreso (ISSUE-F03-T01 completado: persistencia async PostgreSQL, modelos ORM `core_*` y migraciones Alembic).  
+**Estado:** Fases 01 y 02 completadas (100%). Fase 03 en progreso (ISSUE-F03-T01 e ISSUE-F03-T02 completados: persistencia async PostgreSQL, modelos ORM `core_*`, migraciones Alembic e integración de PostgresSaver para checkpoints de LangGraph sobre `core_checkpoints`).  
 
 ---
 
