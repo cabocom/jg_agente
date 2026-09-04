@@ -6,10 +6,20 @@ from app.models.io import (
     ExecutionStatus,
     UserContext,
 )
+from app.models.tools import (
+    AgentTool,
+    RiskLevel,
+    ToolResult,
+    ToolType,
+)
 
 __all__ = [
     "AgentInput",
     "AgentOutput",
+    "AgentTool",
     "ExecutionStatus",
+    "RiskLevel",
+    "ToolResult",
+    "ToolType",
     "UserContext",
 ]
