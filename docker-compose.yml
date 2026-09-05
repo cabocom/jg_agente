@@ -45,14 +45,25 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-jg_agente}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@jg_agente_postgres:5432/${POSTGRES_DB:-jg_agente}
+      DASHBOARD_URL: ${DASHBOARD_URL:-http://jg_dashboard:8080}
+      CREDENTIALS_FILE: /app/data/.agent_credentials.json
+      AGENT_BOOTSTRAP_TOKEN: ${AGENT_BOOTSTRAP_TOKEN:-}
+      ENABLE_HEARTBEAT: ${ENABLE_HEARTBEAT:-true}
+    volumes:
+      - jg_agente_data:/app/data
     ports:
       - "${AGENT_PORT:-8001}:8000"
     networks:
       - jg_agente_net
+      - jg_network
 
 networks:
   jg_agente_net:
     driver: bridge
+  jg_network:
+    name: jg_network
+    external: true
 
 volumes:
   jg_agente_postgres_data:
+  jg_agente_data:

@@ -90,6 +90,38 @@ def get_default_serializer() -> JsonPlusSerializer:
     return JsonPlusSerializer(allowed_msgpack_modules=STATE_ALLOWED_CLASSES)
 
 
+class DualPostgresSaver(PostgresSaver):
+    """PostgresSaver compatible con ejecución síncrona y asíncrona (ainvoke) de LangGraph."""
+
+    async def aget_tuple(self, config: Any) -> Any:
+        import asyncio
+
+        return await asyncio.to_thread(self.get_tuple, config)
+
+    async def aput(self, config: Any, checkpoint: Any, metadata: Any, new_versions: Any) -> Any:
+        import asyncio
+
+        return await asyncio.to_thread(self.put, config, checkpoint, metadata, new_versions)
+
+    async def aput_writes(
+        self, config: Any, writes: Any, task_id: Any, task_path: Any = ""
+    ) -> Any:
+        import asyncio
+
+        return await asyncio.to_thread(self.put_writes, config, writes, task_id, task_path)
+
+    async def alist(
+        self, config: Any, *, filter: Any = None, before: Any = None, limit: Any = None
+    ) -> Any:
+        import asyncio
+
+        items = await asyncio.to_thread(
+            lambda: list(self.list(config, filter=filter, before=before, limit=limit))
+        )
+        for item in items:
+            yield item
+
+
 def get_postgres_checkpointer(
     connection_string: str | None = None,
     max_pool_size: int = 20,
@@ -97,7 +129,7 @@ def get_postgres_checkpointer(
     """Inicializa y configura un checkpointer persistente basado en PostgreSQL para LangGraph.
 
     Ejecuta saver.setup() e inicializa la vista core_checkpoints para compatibilidad con la
-    convención de nombres estricta del Core.
+    convención de nombres estricta del Core. Soporta invocación síncrona y asíncrona (ainvoke).
     """
     uri = connection_string or settings.sync_database_url
     target_host = uri.split("@")[-1] if "@" in uri else uri
@@ -110,7 +142,7 @@ def get_postgres_checkpointer(
         kwargs={"autocommit": True, "row_factory": dict_row},
     )
     serde = get_default_serializer()
-    saver = PostgresSaver(pool, serde=serde)
+    saver = DualPostgresSaver(pool, serde=serde)
 
     try:
         saver.setup()

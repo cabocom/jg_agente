@@ -25,6 +25,7 @@ def test_collect_system_metrics() -> None:
     assert metrics["plugins_count"] == 0
     assert "timestamp" in metrics
     assert "version" in metrics
+    assert "cpu_percent" in metrics
 
 
 @pytest.mark.asyncio

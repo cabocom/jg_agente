@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import logging
+import os
 import resource
 import sys
 import time
@@ -25,18 +26,22 @@ def collect_system_metrics(
     """Recopila telemetría y métricas de salud del sistema, proceso y capacidades activas."""
     # Uso de memoria portable entre plataformas
     # En Linux, ru_maxrss se reporta en kilobytes; en macOS (Darwin), en bytes.
-    ru_maxrss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    ru_resource = resource.getrusage(resource.RUSAGE_SELF)
     if sys.platform == "darwin":
-        memory_mb = round(ru_maxrss / (1024 * 1024), 2)
+        memory_mb = round(ru_resource.ru_maxrss / (1024 * 1024), 2)
     else:
-        memory_mb = round(ru_maxrss / 1024, 2)
+        memory_mb = round(ru_resource.ru_maxrss / 1024, 2)
 
     uptime_sec = round(time.time() - start_time, 2)
+    cpu_time = ru_resource.ru_utime + ru_resource.ru_stime
+    cpu_count = os.cpu_count() or 1
+    cpu_percent = min(round((cpu_time / max(uptime_sec, 1.0)) * 100 / cpu_count, 1), 100.0)
 
     return {
         "version": __version__,
         "uptime_seconds": uptime_sec,
         "memory_mb": memory_mb,
+        "cpu_percent": cpu_percent,
         "tools_count": len(registry.list_tools()) if registry is not None else 0,
         "plugins_count": len(registry.list_plugins()) if registry is not None else 0,
         "engines_count": len(registry.list_engines()) if registry is not None else 0,
