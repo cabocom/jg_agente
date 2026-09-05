@@ -1,0 +1,32 @@
+[project]
+name = "jg-plugin-devops"
+version = "0.1.0"
+description = "Plugin DevOps e infraestructura para jg_agente"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "Javier Gálvez" }]
+dependencies = [
+    "pydantic>=2.10.0",
+    "sqlalchemy>=2.0.0",
+]
+
+[project.entry-points."jg_agente.plugins"]
+devops = "jg_plugin_devops.plugin:DevOpsPlugin"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["jg_plugin_devops*"]
+exclude = ["tests*"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra -q"
+testpaths = ["tests"]
+pythonpath = [".", "../.."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
