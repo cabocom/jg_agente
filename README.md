@@ -116,9 +116,12 @@ jg_agente/
 │   │   ├── boot.py                 # Validación en boot, comprobación de integridad y arranque
 │   │   ├── checkpointer.py         # PostgresSaver, MemorySaver y vistas core_checkpoints
 │   │   ├── config.py               # Configuración centralizada Pydantic
+│   │   ├── credentials.py          # Almacenamiento seguro de credenciales POSIX 0600
 │   │   ├── graph.py                # GraphBuilder agnóstico de LangGraph y topologías dinámicas
+│   │   ├── heartbeat.py            # HeartbeatService: latidos periódicos y telemetría hacia Dashboard
 │   │   ├── llm.py                  # MockChatModel, OpenAICompatibleChatModel y factoría get_chat_model
 │   │   ├── plugin_manager.py       # PluginManager: autodescubrimiento y resolución de dependencias
+│   │   ├── registration.py         # DashboardRegistrationClient con bootstrap token y reintentos
 │   │   └── registry.py             # CapabilityRegistry y detección estricta de conflictos (BootConflictError)
 │   ├── db/
 │   │   ├── base.py                 # DeclarativeBase y convención estricta core_
@@ -243,7 +246,7 @@ Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de 
   - [x] `ISSUE-F07-T02`: Endpoint `GET /executions/{thread_id}` (consulta de estado, checkpoints, historial de pasos, HITL y errores).
   - [x] `ISSUE-F07-T03`: Endpoints de resolución HITL `POST /executions/{thread_id}/approve` y `reject` (Command(resume=...) en LangGraph).
   - [x] `ISSUE-F07-T04`: Endpoints de telemetría `GET /capabilities`, `/health` y `/metrics`.
-- [ ] **Fase 08:** Bootstrap del Agente, Registro con Dashboard y Heartbeat (En progreso):
+- [x] **Fase 08:** Bootstrap del Agente, Registro con Dashboard y Heartbeat (100%):
   - [x] `ISSUE-F08-T01`: Cliente de registro con jg_dashboard mediante bootstrap token (`DashboardRegistrationClient`, `CredentialStore`, `auto_register_agent` en lifespan, permisos 0600 y reintentos exponenciales).
   - [x] `ISSUE-F08-T02`: Mecanismo de persistencia y recarga de credencial permanente (`CredentialStore.load`, `reload_credentials`, verificación activa con Dashboard en boot `verify_credentials`, tolerancia a fallos de red e invalidación ante rechazo 401).
-  - [ ] `ISSUE-F08-T03`: Bucle periódico de heartbeat hacia Dashboard.
+  - [x] `ISSUE-F08-T03`: Bucle periódico de heartbeat hacia Dashboard (`HeartbeatService`, recolección portable de telemetría de memoria/uptime/capacidades, tolerancia a caídas de red y ciclo de vida en `lifespan`).

@@ -11,6 +11,7 @@ from app import __version__
 from app.api import executions_router, telemetry_router
 from app.core.boot import init_agent_capabilities
 from app.core.config import settings
+from app.core.heartbeat import HeartbeatService
 from app.core.registration import auto_register_agent
 
 logger = logging.getLogger("jg_agente")
@@ -22,7 +23,7 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Ciclo de vida de la aplicación con validación de boot, registro y plugins."""
+    """Ciclo de vida de la aplicación con validación de boot, registro, heartbeat y plugins."""
     logger.info(
         "Iniciando jg_agente v%s (Agent ID: %s, ENV: %s)",
         __version__,
@@ -43,10 +44,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.credentials = credentials
     app.state.credentials_verified = credentials.verified if credentials else False
 
+    # 4. Iniciar servicio de heartbeat periódico en segundo plano si está habilitado y autenticado
+    heartbeat_service: HeartbeatService | None = None
+    if settings.ENABLE_HEARTBEAT and credentials is not None:
+        heartbeat_service = HeartbeatService(settings=settings, registry=registry)
+        heartbeat_service.start()
+    app.state.heartbeat_service = heartbeat_service
+
     yield
 
-    # 4. Apagado ordenado
+    # 5. Apagado ordenado
     logger.info("Deteniendo jg_agente...")
+    if heartbeat_service is not None:
+        await heartbeat_service.stop()
     await plugin_manager.shutdown()
 
 
@@ -67,6 +77,7 @@ async def root() -> dict[str, Any]:
     """Endpoint raíz con metadatos del servicio."""
     is_registered = bool(settings.PERMANENT_AGENT_SECRET)
     is_verified = getattr(app.state, "credentials_verified", False)
+    hb_service: HeartbeatService | None = getattr(app.state, "heartbeat_service", None)
     return {
         "service": "jg_agente",
         "version": __version__,
@@ -76,4 +87,8 @@ async def root() -> dict[str, Any]:
         "registered": is_registered,
         "credentials_verified": is_verified,
         "dashboard_url": settings.DASHBOARD_URL,
+        "heartbeat_active": hb_service.is_running if hb_service is not None else False,
+        "last_heartbeat_at": (
+            hb_service.last_successful_heartbeat if hb_service is not None else None
+        ),
     }

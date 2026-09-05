@@ -1,9 +1,9 @@
 # CONTEXTO DE PROYECTO: jg_agente
 
-**Versión del documento:** 2.24.0  
+**Versión del documento:** 2.25.0  
 **Fecha de consolidación:** 5 de septiembre de 2026  
 **Componente:** Execution Plane (Motor Autónomo de Ejecución)  
-**Estado:** Fases 01 a 07 completadas (100%). Fase 08 en progreso: ISSUE-F08-T01 e ISSUE-F08-T02 completados (Cliente de registro Zero-Trust con bootstrap token, persistencia y recarga de credencial permanente en arranques sucesivos, verificación activa con Dashboard en boot `verify_credentials` e invalidación segura ante rechazo).
+**Estado:** Fases 01 a 08 completadas (100%). Fase 08 completada íntegramente: ISSUE-F08-T01, ISSUE-F08-T02 e ISSUE-F08-T03 (Cliente de registro Zero-Trust con bootstrap token, persistencia y recarga de credencial permanente con permisos POSIX 0600, verificación activa en boot con tolerancia a fallos e invalidación segura ante 401, y bucle de heartbeat periódico con telemetría de salud, memoria portable, uptime y ciclo de vida en lifespan).
 
 ---
 

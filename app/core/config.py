@@ -49,6 +49,20 @@ class Settings(BaseSettings):
         default=True,
         description="Verifica activamente la credencial permanente contra el Dashboard en el arranque",
     )
+    ENABLE_HEARTBEAT: bool = Field(
+        default=True,
+        description="Habilita el bucle periódico en segundo plano de heartbeat hacia el Dashboard",
+    )
+    HEARTBEAT_INTERVAL_SECONDS: int = Field(
+        default=30,
+        ge=1,
+        description="Intervalo en segundos entre cada emisión de heartbeat hacia el Dashboard",
+    )
+    HEARTBEAT_TIMEOUT_SECONDS: float = Field(
+        default=5.0,
+        gt=0.0,
+        description="Timeout en segundos para la petición HTTP de heartbeat",
+    )
 
     # PostgreSQL para Checkpoints y tablas core_*
     POSTGRES_HOST: str = Field(default="jg_agente_postgres", description="Host de PostgreSQL")
