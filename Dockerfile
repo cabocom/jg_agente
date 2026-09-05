@@ -31,8 +31,9 @@ WORKDIR /app
 # Copiar paquetes instalados desde la etapa builder
 COPY --from=builder /install /usr/local
 
-# Copiar código fuente de la aplicación y migraciones
+# Copiar código fuente de la aplicación, plugins y migraciones
 COPY app/ ./app
+COPY plugins/ ./plugins
 COPY alembic/ ./alembic
 COPY alembic.ini ./alembic.ini
 

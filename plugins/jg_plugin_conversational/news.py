@@ -9,6 +9,7 @@ import logging
 import re
 import time
 import xml.etree.ElementTree as ET
+from typing import Any
 
 import httpx
 from pydantic import BaseModel, Field, field_validator
@@ -111,8 +112,19 @@ def _get_simulated_news(topic: str, limit: int) -> list[dict[str, str]]:
     return selected[:limit]
 
 
-def get_news_fn(args: NewsArgs) -> ToolResult:
+def get_news_fn(
+    args: NewsArgs | None = None,
+    topic: str | None = None,
+    limit: int | None = None,
+    query: str | None = None,
+    **kwargs: Any,
+) -> ToolResult:
     """Consulta titulares de noticias desde Europa Press RSS o fallback determinista."""
+    if args is None:
+        raw_topic = topic or query or kwargs.get("input") or "general"
+        raw_limit = limit if limit is not None else 5
+        args = NewsArgs(topic=raw_topic, limit=raw_limit)
+
     start_time = time.perf_counter()
     topic = args.topic.lower()
     limit = args.limit

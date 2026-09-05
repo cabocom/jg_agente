@@ -27,7 +27,6 @@ from app.models.state import (
     AgentExecutionStatus,
     AgentState,
     ExecutionPlan,
-    IntentModel,
     PlanStep,
     StepStatus,
 )
@@ -213,7 +212,9 @@ async def main() -> None:
     print(f"\n{C_BOLD}2. Escenario de Verificación Post-Ejecución:{C_RESET}")
     print("   [1] Verificación Exitosa (Flujo normal -> Conclude con éxito)")
     print("   [2] Simular Fallo de Verificación (Activa el nodo ROLLBACK automático)")
-    verify_choice = input(f"\n{C_CYAN}Selecciona escenario [1-2] (default: 1): {C_RESET}").strip() or "1"
+    verify_choice = (
+        input(f"\n{C_CYAN}Selecciona escenario [1-2] (default: 1): {C_RESET}").strip() or "1"
+    )
     simulate_failure = verify_choice == "2"
 
     # 3. Construir CapabilityRegistry con motores y herramientas
@@ -275,7 +276,7 @@ async def main() -> None:
     }
 
     print(f"{C_BOLD}🚀 Disparando ejecución en hilo '{thread_id}'...{C_RESET}")
-    print(f"   Prompt: \"{prompt}\"\n")
+    print(f'   Prompt: "{prompt}"\n')
 
     # 6. Primera fase: ejecutar hasta encontrar posible interrupción HITL
     result = await graph.ainvoke(initial_state, config=config)
@@ -286,7 +287,9 @@ async def main() -> None:
         payload = interrupts[0].value if interrupts else {}
 
         print(f"\n{C_YELLOW}{C_BOLD}{'!' * 60}{C_RESET}")
-        print(f"{C_YELLOW}{C_BOLD} 🛑 [HUMAN-IN-THE-LOOP] INTERRUPCIÓN DE SEGURIDAD DETECTADA{C_RESET}")
+        print(
+            f"{C_YELLOW}{C_BOLD} 🛑 [HUMAN-IN-THE-LOOP] INTERRUPCIÓN DE SEGURIDAD DETECTADA{C_RESET}"
+        )
         print(f"{C_YELLOW}{C_BOLD}{'!' * 60}{C_RESET}")
         print(f"   Acción requerida: {C_BOLD}{payload.get('action')}{C_RESET}")
         print(f"   Mensaje: {payload.get('message')}")
@@ -297,11 +300,21 @@ async def main() -> None:
             print(f"\n   {C_BOLD}Pasos formulados para autorización:{C_RESET}")
             for s in steps:
                 s_name = s.get("tool_name") if isinstance(s, dict) else getattr(s, "tool_name", "")
-                s_risk = s.get("risk_level") if isinstance(s, dict) else getattr(s, "risk_level", "")
+                s_risk = (
+                    s.get("risk_level") if isinstance(s, dict) else getattr(s, "risk_level", "")
+                )
                 print(f"     • [{s_risk}] {s_name}")
 
-        print(f"\n   {C_DIM}El grafo está actualmente pausado y persistido en el checkpointer.{C_RESET}")
-        dec = input(f"\n{C_BOLD}¿Autorizas la ejecución de la acción de alto riesgo? ([S]í / [N]o): {C_RESET}").strip().lower()
+        print(
+            f"\n   {C_DIM}El grafo está actualmente pausado y persistido en el checkpointer.{C_RESET}"
+        )
+        dec = (
+            input(
+                f"\n{C_BOLD}¿Autorizas la ejecución de la acción de alto riesgo? ([S]í / [N]o): {C_RESET}"
+            )
+            .strip()
+            .lower()
+        )
 
         is_approved = dec in ("s", "si", "y", "yes")
         approver = os.environ.get("USER", "operador_humano")
@@ -309,10 +322,14 @@ async def main() -> None:
         resume_payload = {
             "approved": is_approved,
             "approver": approver,
-            "notes": "Autorizado en terminal interactiva" if is_approved else "Rechazado por operador",
+            "notes": "Autorizado en terminal interactiva"
+            if is_approved
+            else "Rechazado por operador",
         }
 
-        print(f"\n{C_CYAN}🔄 Enviando comando de reanudación: Command(resume={resume_payload})...{C_RESET}\n")
+        print(
+            f"\n{C_CYAN}🔄 Enviando comando de reanudación: Command(resume={resume_payload})...{C_RESET}\n"
+        )
         result = await graph.ainvoke(Command(resume=resume_payload), config=config)
 
     # 7. Resumen de Ejecución Final
@@ -341,20 +358,26 @@ async def main() -> None:
 
     rollbacks = result.get("rollback_records", [])
     if rollbacks:
-        print(f"\n• {C_YELLOW}{C_BOLD}Compensaciones de Rollback Ejecutadas ({len(rollbacks)}):{C_RESET}")
+        print(
+            f"\n• {C_YELLOW}{C_BOLD}Compensaciones de Rollback Ejecutadas ({len(rollbacks)}):{C_RESET}"
+        )
         for rb in rollbacks:
             rb_name = rb.get("tool_name")
             rb_ok = rb.get("success")
             rb_col = C_GREEN if rb_ok else C_RED
-            print(f"   - {rb_name} ➔ {rb_col}{'ÉXITO' if rb_ok else 'FALLO'}{C_RESET} ({rb.get('output')})")
+            print(
+                f"   - {rb_name} ➔ {rb_col}{'ÉXITO' if rb_ok else 'FALLO'}{C_RESET} ({rb.get('output')})"
+            )
 
     output = result.get("output")
     if output:
         print(f"\n• {C_BOLD}Respuesta Final para el Usuario:{C_RESET}")
-        print(f"   \"{output.response}\"")
+        print(f'   "{output.response}"')
 
     audits = result.get("audit_trail", [])
-    print(f"\n• {C_BOLD}Trazas de Auditoría Inmutables:{C_RESET} {len(audits)} eventos registrados.")
+    print(
+        f"\n• {C_BOLD}Trazas de Auditoría Inmutables:{C_RESET} {len(audits)} eventos registrados."
+    )
     for a in audits:
         print(f"   [{a.event_type}] por {a.actor}")
 

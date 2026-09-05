@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import time
+from typing import Any
 
 import httpx
 from pydantic import BaseModel, Field, field_validator
@@ -67,8 +68,18 @@ def _get_simulated_weather(location: str) -> tuple[float, str]:
     return temp, phrase
 
 
-def get_weather_fn(args: WeatherArgs) -> ToolResult:
+def get_weather_fn(
+    args: WeatherArgs | None = None,
+    location: str | None = None,
+    city: str | None = None,
+    query: str | None = None,
+    **kwargs: Any,
+) -> ToolResult:
     """Ejecuta la consulta meteorológica mediante Azure Maps o fallback simulado."""
+    if args is None:
+        loc = location or city or query or kwargs.get("input") or ""
+        args = WeatherArgs(location=loc)
+
     start_time = time.perf_counter()
     location = args.location
     api_key = os.getenv("AZURE_MAPS_KEY")

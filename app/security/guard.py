@@ -301,7 +301,14 @@ class SecurityGuard:
         start_time = time.perf_counter()
 
         try:
-            raw_res = tool.func(**sanitized_args)
+            try:
+                raw_res = tool.func(**sanitized_args)
+            except TypeError:
+                if tool.args_schema:
+                    parsed_args = tool.args_schema(**sanitized_args)
+                    raw_res = tool.func(parsed_args)
+                else:
+                    raise
             tool_res: ToolResult = (
                 raw_res
                 if isinstance(raw_res, ToolResult)

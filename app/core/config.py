@@ -1,6 +1,6 @@
 """Configuración centralizada de jg_agente basada en Pydantic Settings."""
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -128,6 +128,14 @@ class Settings(BaseSettings):
         default=None,
         description="Clave de API para el proveedor de LLM",
     )
+    GROQ_API_KEY: str | None = Field(
+        default=None,
+        description="Clave de API de Groq",
+    )
+    AZURE_MAPS_KEY: str | None = Field(
+        default=None,
+        description="Clave de API de Azure Maps para WeatherTool",
+    )
     LLM_BASE_URL: str | None = Field(
         default=None,
         description="URL base para APIs compatibles con OpenAI / proxies locales",
@@ -151,6 +159,20 @@ class Settings(BaseSettings):
         ),
         description="Prompt del sistema base para el razonamiento cognitivo",
     )
+
+    @model_validator(mode="after")
+    def _resolve_llm_defaults(self) -> "Settings":
+        """Resuelve dinámicamente el proveedor de LLM y claves si se proporcionan en el entorno."""
+        if self.GROQ_API_KEY and not self.LLM_API_KEY:
+            self.LLM_API_KEY = self.GROQ_API_KEY
+
+        # Si se suministra una clave de API pero el proveedor sigue en 'mock', promover a 'groq'
+        if (self.GROQ_API_KEY or self.LLM_API_KEY) and self.LLM_PROVIDER == "mock":
+            self.LLM_PROVIDER = "groq"
+            if self.LLM_MODEL in ("gpt-4o-mini", "mock", "llama-3.3-70b-versatile"):
+                self.LLM_MODEL = "openai/gpt-oss-120b"
+
+        return self
 
     @property
     def async_database_url(self) -> str:

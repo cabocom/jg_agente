@@ -5,6 +5,7 @@ de lenguaje mediante LangChain BaseChatModel, incluyendo un proveedor Mock deter
 para testing y ejecución local, y un cliente compatible con OpenAI/vLLM/Ollama vía HTTP.
 """
 
+import json
 import logging
 import uuid
 from collections.abc import Callable, Sequence
@@ -266,11 +267,22 @@ class OpenAICompatibleChatModel(BaseChatModel):
 
         for tc in choice.get("tool_calls", []):
             fn = tc.get("function", {})
+            raw_args = fn.get("arguments", {})
+            if isinstance(raw_args, str):
+                try:
+                    parsed_args = json.loads(raw_args)
+                except Exception:
+                    parsed_args = {"input": raw_args}
+            elif isinstance(raw_args, dict):
+                parsed_args = raw_args
+            else:
+                parsed_args = {}
+
             tool_calls.append(
                 {
                     "id": tc.get("id"),
                     "name": fn.get("name"),
-                    "args": fn.get("arguments", {}),
+                    "args": parsed_args,
                     "type": "tool_call",
                 }
             )

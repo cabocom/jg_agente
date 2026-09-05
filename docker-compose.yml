@@ -5,16 +5,16 @@ services:
     container_name: jg_agente_postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-jg_agente}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${JG_AGENTE_POSTGRES_DB:-jg_agente}
+      POSTGRES_USER: ${JG_AGENTE_POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${JG_AGENTE_POSTGRES_PASSWORD:-postgres}
     volumes:
       - jg_agente_postgres_data:/var/lib/postgresql/data
     ports:
       # Puerto 5433 en host para evitar colisiones con instancias existentes en 5432
-      - "${POSTGRES_PORT:-5433}:5432"
+      - "${JG_AGENTE_POSTGRES_PORT:-5433}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d jg_agente"]
+      test: ["CMD-SHELL", "pg_isready -U ${JG_AGENTE_POSTGRES_USER:-postgres} -d ${JG_AGENTE_POSTGRES_DB:-jg_agente}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -41,16 +41,24 @@ services:
       AGENT_ID: ${AGENT_ID:-jg_agente_local}
       POSTGRES_HOST: jg_agente_postgres
       POSTGRES_PORT: 5432
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-jg_agente}
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@jg_agente_postgres:5432/${POSTGRES_DB:-jg_agente}
+      POSTGRES_USER: ${JG_AGENTE_POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${JG_AGENTE_POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${JG_AGENTE_POSTGRES_DB:-jg_agente}
+      DATABASE_URL: postgresql+asyncpg://${JG_AGENTE_POSTGRES_USER:-postgres}:${JG_AGENTE_POSTGRES_PASSWORD:-postgres}@jg_agente_postgres:5432/${JG_AGENTE_POSTGRES_DB:-jg_agente}
       DASHBOARD_URL: ${DASHBOARD_URL:-http://jg_dashboard:8080}
       CREDENTIALS_FILE: /app/data/.agent_credentials.json
       AGENT_BOOTSTRAP_TOKEN: ${AGENT_BOOTSTRAP_TOKEN:-}
       ENABLE_HEARTBEAT: ${ENABLE_HEARTBEAT:-true}
+      LLM_PROVIDER: ${LLM_PROVIDER:-groq}
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-120b}
+      LLM_API_KEY: ${GLOBAL_GROQ_API_KEY:-${GROQ_API_KEY:-}}
+      GROQ_API_KEY: ${GLOBAL_GROQ_API_KEY:-${GROQ_API_KEY:-}}
+      AZURE_MAPS_KEY: ${GLOBAL_AZURE_MAPS_KEY:-${AZURE_MAPS_KEY:-}}
+      PLUGINS_DIR: ${PLUGINS_DIR:-plugins}
     volumes:
       - jg_agente_data:/app/data
+      - ./app:/app/app:ro
+      - ./plugins:/app/plugins:ro
     ports:
       - "${AGENT_PORT:-8001}:8000"
     networks:

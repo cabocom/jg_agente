@@ -98,7 +98,12 @@ async def execute_node(
                 name = tc.get("name", "")
                 args = tc.get("args") or {}
                 if isinstance(args, str):
-                    args = {"input": args}
+                    try:
+                        import json
+
+                        args = json.loads(args)
+                    except Exception:
+                        args = {"input": args}
                 tool_def = registry.get_tool(name)
                 risk = tool_def.risk_level if tool_def else RiskLevel.LOW
                 rev = tool_def.reversible if tool_def else False
