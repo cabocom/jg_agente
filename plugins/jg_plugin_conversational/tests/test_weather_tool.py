@@ -144,10 +144,9 @@ def test_conversational_plugin_register_tools() -> None:
     """Verifica que ConversationalPlugin expone get_weather en su catálogo de herramientas."""
     plugin = ConversationalPlugin()
     tools = plugin.register_tools()
-
-    assert len(tools) == 1
-    weather_tool = tools[0]
-    assert weather_tool.name == "get_weather"
+    tool_names = [t.name for t in tools]
+    assert "get_weather" in tool_names
+    weather_tool = next(t for t in tools if t.name == "get_weather")
     assert weather_tool.category == "weather"
     assert weather_tool.risk_level == RiskLevel.LOW
 
@@ -167,6 +166,6 @@ def test_capability_registry_weather_registration() -> None:
 
     # Validar resumen de capacidades
     summary = registry.get_capabilities_summary()
-    assert summary["tools_count"] == 1
-    assert summary["tools"][0]["name"] == "get_weather"
-    assert summary["tools"][0]["risk_level"] == "low"
+    assert summary["tools_count"] >= 1
+    tool_entry = next(t for t in summary["tools"] if t["name"] == "get_weather")
+    assert tool_entry["risk_level"] == "low"

@@ -253,3 +253,4 @@ Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de 
 - [ ] **Fase 09:** Plugin Conversacional (`jg_plugin_conversational`):
   - [x] `ISSUE-F09-T01`: Estructura del paquete `jg_plugin_conversational` (`ConversationalPlugin`, `PLUGIN_CLASS`, `BasePlugin`, autodescubrimiento local/entry_point y tests autónomos en `plugins/jg_plugin_conversational/tests/`).
   - [x] `ISSUE-F09-T02`: Implementación de `WeatherTool` (`get_weather`, `WeatherArgs`, contrato `AgentTool`, protección anti-SSRF, modo dual Azure Maps / simulación determinista y tests en el plugin).
+  - [x] `ISSUE-F09-T03`: Implementación de `NewsTool` (`get_news`, `NewsArgs`, contrato `AgentTool`, filtrado seguro de temas, validación SSRF, timeout de 5s, fallback determinista y tests en el plugin).

@@ -28,14 +28,15 @@ class ConversationalPlugin(BasePlugin):
             author="Javier Gálvez",
             dependencies=[],
             jg_agente_version_min="0.1.0",
-            tags=["conversational", "nlp", "interaction", "weather"],
+            tags=["conversational", "nlp", "interaction", "weather", "news"],
         )
 
     def register_tools(self) -> list[AgentTool]:
         """Declara la lista de AgentTool provistas por el plugin conversacional."""
+        from jg_plugin_conversational.news import create_news_tool
         from jg_plugin_conversational.weather import create_weather_tool
 
-        return [create_weather_tool()]
+        return [create_weather_tool(), create_news_tool()]
 
     def register_engines(self) -> dict[str, BaseEngine]:
         """Declara los motores cognitivos provistos por el plugin.

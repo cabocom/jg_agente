@@ -43,8 +43,10 @@ def test_register_tools_and_engines_contracts() -> None:
 
     tools = plugin.register_tools()
     assert isinstance(tools, list)
-    assert len(tools) == 1
-    assert tools[0].name == "get_weather"
+    assert len(tools) == 2
+    tool_names = {t.name for t in tools}
+    assert "get_weather" in tool_names
+    assert "get_news" in tool_names
 
     engines = plugin.register_engines()
     assert isinstance(engines, dict)
