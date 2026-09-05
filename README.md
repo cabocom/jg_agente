@@ -129,6 +129,7 @@ jg_agente/
 │   │   ├── conclude.py             # Nodo base conclude: unificación de salida, formateo AgentOutput y métricas
 │   │   ├── execute.py              # Nodo base execute: ejecución secuencial, sandbox SecurityGuard y rollback_context
 │   │   ├── observe.py              # Nodo opcional observe: telemetría agnóstica de entorno con ObserverEngine
+│   │   ├── plan.py                 # Nodo opcional plan: formulación de ExecutionPlan con pasos y dependencias
 │   │   └── reason.py               # Nodo base reason: inferencia LLM, tool binding y decisión de flujo
 │   ├── plugins/
 │   │   ├── __init__.py             # Exportación BasePlugin, BaseEngine, PluginMetadata
@@ -165,7 +166,8 @@ jg_agente/
 │   ├── test_node_reason.py
 │   ├── test_node_execute.py
 │   ├── test_node_conclude.py
-│   └── test_node_observe.py
+│   ├── test_node_observe.py
+│   └── test_node_plan.py
 └── scripts/
     └── check.sh                    # Verificación integral (Ruff + MyPy + Pytest)
 ```
@@ -217,5 +219,6 @@ Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de 
   - [x] `ISSUE-F05-T04`: Implementación de nodo base: `conclude` (unificación de salida, AgentOutput y métricas de tiempo).
 - [ ] **Fase 06:** Nodos Opcionales y Motores Cognitivos:
   - [x] `ISSUE-F06-T01`: Implementación de nodo opcional: `observe` (telemetría de entorno desacoplada y ObserverEngine).
+  - [x] `ISSUE-F06-T02`: Implementación de nodo opcional: `plan` (conversión de intent a ExecutionPlan estructurado con dependencias).
 - [ ] **Fase 07:** Exposición API REST (`POST /executions/trigger`, HITL) y Bootstrap del Agente.
 - [ ] **Fase 08:** Integración con plugins de dominio y validación end-to-end.

@@ -173,4 +173,18 @@ El nodo `observe` (`app/nodes/observe.py`) captura telemetría y el estado del e
 4. **Resiliencia Operacional:** Las excepciones del motor de observación se capturan con registro de `ExecutionError(component="observe", fatal=False)` sin interrumpir el ciclo de vida del agente.
 5. **Auditoría y Métricas:** Emite el evento `observe_completed` en `state["audit_trail"]` con el tiempo de telemetría (`duration_ms`) y las claves detectadas.
 
+---
+
+## 9. Nodo Opcional de Planificación: `plan`
+
+El nodo `plan` (`app/nodes/plan.py`) estructura las intenciones operativas del agente en un plan de ejecución formal:
+
+1. **Activación Condicional:** Se ejecuta tras `reason` cuando la intención del agente es operativa y existe un `PlannerEngine` registrado en `CapabilityRegistry`.
+2. **Invocación Polimórfica:** Localiza métodos de formulación (`create_plan`, `plan`, `build_plan`, `generate_plan`), aceptando ejecuciones síncronas o asíncronas con conversión robusta desde `ExecutionPlan`, diccionarios o listas de `PlanStep`.
+3. **Dependencias Explícitas entre Pasos:** Soporta el campo `dependencies` en `PlanStep`, permitiendo a los planificadores modelar secuencias causales estrictas entre herramientas.
+4. **Cálculo Consolidado de Riesgo:** Evalúa los pasos del plan y eleva `estimated_risk` al nivel más restrictivo entre ellos (`LOW < MEDIUM < HIGH < CRITICAL`), habilitando el enrutamiento adecuado hacia `risk_assess` y aprobación HITL.
+5. **Tolerancia a Fallos y Fallback:** Si no se dispone de planificador o si éste arroja una excepción, emite un `ExecutionError` no fatal y genera un plan fallback basado en el catálogo de herramientas.
+6. **Auditoría Estructurada:** Emite el evento inmutable `planning_completed` en `state["audit_trail"]` con el recuento de pasos, duración (`duration_ms`) y riesgo estimado.
+
+
 

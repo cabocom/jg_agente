@@ -90,59 +90,10 @@ async def default_plan_node(
     state: AgentState,
     registry: CapabilityRegistry,
 ) -> dict[str, Any]:
-    """Nodo de planificación: genera una secuencia de pasos estructurados (ExecutionPlan)."""
-    planner = registry.get_planner()
-    plan: ExecutionPlan | None = None
+    """Nodo de planificación: genera una secuencia de pasos estructurados delegando en plan_node."""
+    from app.nodes.plan import plan_node
 
-    if planner is not None:
-        plan_fn = getattr(planner, "create_plan", None) or getattr(planner, "plan", None)
-        if callable(plan_fn):
-            res = plan_fn(state)
-            raw_plan = await res if inspect.iscoroutine(res) else res
-            if isinstance(raw_plan, ExecutionPlan):
-                plan = raw_plan
-            elif isinstance(raw_plan, dict):
-                plan = ExecutionPlan(**raw_plan)
-
-    if plan is None:
-        intent = state.get("intent")
-        goal = intent.goal if isinstance(intent, IntentModel) else "Ejecución de plan estándar"
-        steps: list[PlanStep] = []
-        # Construir pasos si hay herramientas disponibles coincidentes
-        tools = registry.list_tools()
-        if tools:
-            target_tool = tools[0]
-            steps.append(
-                PlanStep(
-                    step_id="step-1",
-                    tool_name=target_tool.name,
-                    tool_args={},
-                    description=f"Ejecutar {target_tool.name}",
-                    risk_level=target_tool.risk_level,
-                    reversible=target_tool.reversible,
-                )
-            )
-        plan = ExecutionPlan(
-            plan_id=f"plan-{int(datetime.now(UTC).timestamp())}",
-            goal=goal,
-            steps=steps,
-            estimated_risk=steps[0].risk_level if steps else RiskLevel.LOW,
-        )
-
-    return {
-        "status": AgentExecutionStatus.PLANNING,
-        "plan": plan,
-        "audit_trail": [
-            AuditRecord(
-                event_type="planning_completed",
-                details={
-                    "plan_id": plan.plan_id,
-                    "steps_count": len(plan.steps),
-                    "estimated_risk": plan.estimated_risk.value,
-                },
-            )
-        ],
-    }
+    return await plan_node(state, registry=registry)
 
 
 async def default_risk_assess_node(
