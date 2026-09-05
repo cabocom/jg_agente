@@ -130,7 +130,8 @@ jg_agente/
 │   │   ├── execute.py              # Nodo base execute: ejecución secuencial, sandbox SecurityGuard y rollback_context
 │   │   ├── observe.py              # Nodo opcional observe: telemetría agnóstica de entorno con ObserverEngine
 │   │   ├── plan.py                 # Nodo opcional plan: formulación de ExecutionPlan con pasos y dependencias
-│   │   └── reason.py               # Nodo base reason: inferencia LLM, tool binding y decisión de flujo
+│   │   ├── reason.py               # Nodo base reason: inferencia LLM, tool binding y decisión de flujo
+│   │   └── risk_assess.py          # Nodo de gobernanza HITL: evaluación de riesgos (SecurityGuard)
 │   ├── plugins/
 │   │   ├── __init__.py             # Exportación BasePlugin, BaseEngine, PluginMetadata
 │   │   └── base.py                 # Interfaz abstracta BasePlugin, ciclo de vida y BaseEngine
@@ -167,7 +168,8 @@ jg_agente/
 │   ├── test_node_execute.py
 │   ├── test_node_conclude.py
 │   ├── test_node_observe.py
-│   └── test_node_plan.py
+│   ├── test_node_plan.py
+│   └── test_node_risk_assess.py
 └── scripts/
     └── check.sh                    # Verificación integral (Ruff + MyPy + Pytest)
 ```
@@ -220,5 +222,6 @@ Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de 
 - [ ] **Fase 06:** Nodos Opcionales y Motores Cognitivos:
   - [x] `ISSUE-F06-T01`: Implementación de nodo opcional: `observe` (telemetría de entorno desacoplada y ObserverEngine).
   - [x] `ISSUE-F06-T02`: Implementación de nodo opcional: `plan` (conversión de intent a ExecutionPlan estructurado con dependencias).
+  - [x] `ISSUE-F06-T03`: Implementación de nodo de evaluación de riesgo y política HITL: `risk_assess` (RiskLevel >= HIGH y human_approval).
 - [ ] **Fase 07:** Exposición API REST (`POST /executions/trigger`, HITL) y Bootstrap del Agente.
 - [ ] **Fase 08:** Integración con plugins de dominio y validación end-to-end.

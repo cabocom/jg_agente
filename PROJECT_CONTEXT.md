@@ -1,9 +1,9 @@
 # CONTEXTO DE PROYECTO: jg_agente
 
-**Versión del documento:** 2.15.0  
+**Versión del documento:** 2.16.0  
 **Fecha de consolidación:** 5 de septiembre de 2026  
 **Componente:** Execution Plane (Motor Autónomo de Ejecución)  
-**Estado:** Fases 01, 02, 03, 04 y 05 completadas (100%). Fase 06 avanzada con ISSUE-F06-T01 (Nodo opcional observe) e ISSUE-F06-T02 (Nodo opcional plan con ExecutionPlan estructurado, dependencias y cálculo de riesgo dinámico) completados al 100%. 173 tests pasando en verde.  
+**Estado:** Fases 01, 02, 03, 04 y 05 completadas (100%). Fase 06 avanzada con ISSUE-F06-T01 (Nodo observe), ISSUE-F06-T02 (Nodo plan) e ISSUE-F06-T03 (Nodo de evaluación de riesgo y política HITL risk_assess) completados al 100%. 180 tests pasando en verde.  
 
 ---
 

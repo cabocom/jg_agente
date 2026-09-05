@@ -186,5 +186,19 @@ El nodo `plan` (`app/nodes/plan.py`) estructura las intenciones operativas del a
 5. **Tolerancia a Fallos y Fallback:** Si no se dispone de planificador o si éste arroja una excepción, emite un `ExecutionError` no fatal y genera un plan fallback basado en el catálogo de herramientas.
 6. **Auditoría Estructurada:** Emite el evento inmutable `planning_completed` en `state["audit_trail"]` con el recuento de pasos, duración (`duration_ms`) y riesgo estimado.
 
+---
+
+## 10. Nodo de Evaluación de Riesgo y Gobernanza HITL: `risk_assess`
+
+El nodo `risk_assess` (`app/nodes/risk_assess.py`) evalúa preventivamente el impacto operacional de los planes estructurados y las herramientas invocadas:
+
+1. **Activación y Posicionamiento:** Se intercala entre `plan` y la ejecución material (`plan -> risk_assess -> execute` o `human_approval`).
+2. **Evaluación Centralizada con SecurityGuard:** Intercepta cada acción contra las políticas de inyección shell, directory traversal, SSRF y permisos RBAC.
+3. **Puerta Human-In-The-Loop (HITL):** Si alguna acción presenta `RiskLevel >= HIGH` (`RiskLevel.HIGH` o `RiskLevel.CRITICAL`), marca formalmente `requires_approval = True`, fija el estado en `AWAITING_APPROVAL` e inicializa el registro `ApprovalRecord(status=PENDING)`.
+4. **Enrutamiento Condicional:** En la topología de LangGraph, si `requires_approval == True`, deriva el flujo hacia `human_approval` para pausar la ejecución en el checkpointer hasta la aprobación humana vía `jg_dashboard`.
+5. **Bloqueo Preventivo:** Ante violaciones de seguridad detectadas, emite veredicto `DENY`, activa `circuit_breaker_active` y desvía la ejecución a `conclude` con estado `FAILED`.
+6. **Auditoría Estructurada:** Emite el evento `risk_assessment_completed` en `audit_trail` con el veredicto, nivel de riesgo máximo y métricas de tiempo (`duration_ms`).
+
+
 
 

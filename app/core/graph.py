@@ -25,11 +25,8 @@ from app.models.state import (
     ApprovalRecord,
     ApprovalStatus,
     AuditRecord,
-    ExecutionPlan,
     IntentModel,
-    PlanStep,
     PolicyDecision,
-    SecurityEvaluationResult,
     StepStatus,
     VerificationStatus,
 )
@@ -101,56 +98,10 @@ async def default_risk_assess_node(
     registry: CapabilityRegistry,
     security_guard: SecurityGuard,
 ) -> dict[str, Any]:
-    """Nodo de evaluación de riesgo de operaciones antes de su ejecución."""
-    plan = state.get("plan")
-    max_risk = RiskLevel.LOW
-    requires_approval = False
+    """Nodo de evaluación de riesgo de operaciones delegando en risk_assess_node."""
+    from app.nodes.risk_assess import risk_assess_node
 
-    steps: list[PlanStep] = []
-    if isinstance(plan, ExecutionPlan):
-        steps = plan.steps
-    elif isinstance(plan, dict) and "steps" in plan:
-        steps = [PlanStep(**s) if isinstance(s, dict) else s for s in plan["steps"]]
-
-    for step in steps:
-        tool = registry.get_tool(step.tool_name)
-        tool_risk = tool.risk_level if tool else step.risk_level
-        if tool_risk in (RiskLevel.HIGH, RiskLevel.CRITICAL):
-            max_risk = tool_risk
-            requires_approval = True
-
-    eval_result = SecurityEvaluationResult(
-        decision=PolicyDecision.REQUIRE_HUMAN_APPROVAL
-        if requires_approval
-        else PolicyDecision.ALLOW,
-        operation="plan_risk_assessment",
-        risk_level=max_risk,
-        reason="Operación de alto riesgo detectada en el plan"
-        if requires_approval
-        else "Nivel de riesgo operativo aceptable",
-    )
-
-    update_state: dict[str, Any] = {
-        "risk_assessment": eval_result.model_dump(),
-        "circuit_breaker_active": False,
-        "audit_trail": [
-            AuditRecord(
-                event_type="risk_assessment_completed",
-                details={"decision": eval_result.decision.value, "risk_level": max_risk.value},
-            )
-        ],
-    }
-
-    if requires_approval:
-        update_state["human_intervention_required"] = True
-        update_state["status"] = AgentExecutionStatus.AWAITING_APPROVAL
-        if not state.get("approval"):
-            update_state["approval"] = ApprovalRecord(
-                status=ApprovalStatus.PENDING,
-                notes="Aprobación humana requerida por riesgo operativo elevado.",
-            )
-
-    return update_state
+    return await risk_assess_node(state, registry=registry, security_guard=security_guard)
 
 
 async def default_human_approval_node(
@@ -336,6 +287,8 @@ def route_after_risk_assess(state: AgentState, has_human_approval: bool) -> str:
         decision
         in (PolicyDecision.REQUIRE_HUMAN_APPROVAL, PolicyDecision.REQUIRE_HUMAN_APPROVAL.value)
         or approval_status == ApprovalStatus.PENDING
+        or state.get("requires_approval") is True
+        or state.get("human_intervention_required") is True
     ):
         if has_human_approval:
             return "human_approval"

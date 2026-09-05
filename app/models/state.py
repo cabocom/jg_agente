@@ -264,6 +264,7 @@ class AgentState(TypedDict, total=False):
 
     # 5. Aprobación Humana (HITL)
     approval: ApprovalRecord | dict[str, Any] | None
+    requires_approval: bool
 
     # 6. Trazas de Ejecución, Rollback y Verificación
     execution_records: Annotated[list[StepExecutionRecord], append_reducer]
