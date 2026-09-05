@@ -14,7 +14,7 @@ from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.io import AgentInput
+from app.models.io import AgentInput, AgentOutput
 from app.models.tools import RiskLevel
 
 # ==========================================
@@ -279,3 +279,6 @@ class AgentState(TypedDict, total=False):
     # 8. Errores y Auditoría Inmutable
     errors: Annotated[list[ExecutionError], append_reducer]
     audit_trail: Annotated[list[AuditRecord], append_reducer]
+
+    # 9. Salida Sintetizada Normalizada
+    output: AgentOutput | dict[str, Any] | None

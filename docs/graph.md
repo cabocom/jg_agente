@@ -148,3 +148,16 @@ El nodo `execute` (`app/nodes/execute.py`) actúa como el ejecutor físico de he
 5. **Historial Conversacional (`ToolMessage`):** Genera mensajes `ToolMessage` asociados a cada `tool_call_id` para retroalimentar la memoria del LLM.
 6. **Métricas y Auditoría:** Registra `duration_ms` en cada paso y emite un registro `AuditRecord` bajo el evento `execute_completed`.
 
+---
+
+## 7. Nodo Terminal de Síntesis: `conclude`
+
+El nodo `conclude` (`app/nodes/conclude.py`) consolida el desenlace del ciclo cognitivo y emite el contrato formal `AgentOutput`:
+
+1. **Evaluación de Estado Operacional:** Determina si la ejecución concluyó como `AgentExecutionStatus.RESOLVED` / `ExecutionStatus.COMPLETED` (`"completed"`) o `FAILED`.
+2. **Síntesis de Respuesta Textual:** Resuelve la respuesta determinista para el invocador a partir del historial `AIMessage`, parámetros de intención o resumen de herramientas.
+3. **Cómputo Temporal Preciso:** Calcula `execution_time_ms` a partir de `request.created_at` (wall-clock time) y duraciones agregadas de herramientas.
+4. **Construcción de `AgentOutput`:** Genera la instancia canónica de salida con `execution_id`, `thread_id`, `status`, `response`, `data`, `metadata` y `execution_time_ms`.
+5. **Persistencia en el Estado:** Almacena el objeto en `state["output"]` para su inspección inmediata en el `StateSnapshot` de LangGraph antes de conectar con el nodo terminal `END`.
+6. **Auditoría Inmutable:** Emite el evento `execution_concluded` en `audit_trail`.
+

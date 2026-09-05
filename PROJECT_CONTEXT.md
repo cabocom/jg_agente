@@ -1,9 +1,9 @@
 # CONTEXTO DE PROYECTO: jg_agente
 
-**Versión del documento:** 2.12.0  
+**Versión del documento:** 2.13.0  
 **Fecha de consolidación:** 5 de septiembre de 2026  
 **Componente:** Execution Plane (Motor Autónomo de Ejecución)  
-**Estado:** Fases 01, 02, 03 y 04 completadas (100%). Fase 05 avanzada con ISSUE-F05-T01 (GraphBuilder agnóstico), ISSUE-F05-T02 (Nodo base cognitivo reason) e ISSUE-F05-T03 (Nodo base actuador execute con SecurityGuard, métricas y rollback_context) completados al 100%. Próximo hito: ISSUE-F05-T04 (Nodo base: plan).  
+**Estado:** Fases 01, 02, 03 y 04 completadas (100%). Fase 05 avanzada con ISSUE-F05-T01 (GraphBuilder agnóstico), ISSUE-F05-T02 (Nodo base reason), ISSUE-F05-T03 (Nodo base execute) e ISSUE-F05-T04 (Nodo base conclude con síntesis AgentOutput y métricas temporales) completados al 100%. Próximo hito: ISSUE-F05-T05 (Nodos de planificación y soporte).  
 
 ---
 

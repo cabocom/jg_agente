@@ -12,7 +12,6 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
@@ -352,35 +351,10 @@ async def default_conclude_node(
     state: AgentState,
     registry: CapabilityRegistry,
 ) -> dict[str, Any]:
-    """Nodo de conclusión: consolida el estado final y genera la respuesta resolutiva."""
-    errors = state.get("errors") or []
-    is_failed = (
-        any(getattr(e, "fatal", False) for e in errors)
-        or state.get("status") == AgentExecutionStatus.FAILED
-    )
-    final_status = AgentExecutionStatus.FAILED if is_failed else AgentExecutionStatus.RESOLVED
+    """Nodo de conclusión: delega en conclude_node para consolidar la salida AgentOutput."""
+    from app.nodes.conclude import conclude_node
 
-    # Si no hay mensajes de salida, construir uno representativo
-    messages = state.get("messages") or []
-    if not messages or not isinstance(messages[-1], AIMessage):
-        summary = (
-            "Ejecución finalizada con éxito."
-            if not is_failed
-            else "Ejecución concluida con errores."
-        )
-        messages = list(messages) + [AIMessage(content=summary)]
-
-    return {
-        "status": final_status,
-        "is_resolved": not is_failed,
-        "messages": messages,
-        "audit_trail": [
-            AuditRecord(
-                event_type="execution_concluded",
-                details={"final_status": final_status.value, "is_resolved": not is_failed},
-            )
-        ],
-    }
+    return await conclude_node(state, registry=registry)
 
 
 # ==========================================================
