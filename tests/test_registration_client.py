@@ -17,6 +17,7 @@ from app.core.registration import (
     RegistrationConflictError,
     RegistrationError,
     auto_register_agent,
+    reload_credentials,
 )
 from app.core.registry import CapabilityRegistry
 from app.models.registration import AgentCredentials
@@ -393,3 +394,196 @@ async def test_auto_register_raises_when_required_and_missing(
 
     with pytest.raises(RegistrationError):
         await auto_register_agent(settings=test_settings)
+
+
+# --- Tests para Verificación de Credenciales (ISSUE-F08-T02) ---
+
+
+@pytest.mark.asyncio
+async def test_verify_credentials_success() -> None:
+    """Valida verificación exitosa de credencial permanente contra endpoint de heartbeat."""
+    captured_request: dict[str, Any] = {}
+
+    async def mock_handler(request: httpx.Request) -> httpx.Response:
+        captured_request["url"] = str(request.url)
+        captured_request["headers"] = dict(request.headers)
+        return httpx.Response(
+            200,
+            json={
+                "status": "success",
+                "message": "Heartbeat registrado exitosamente",
+                "agent_id": "test-agent-123",
+                "name": "Verified Agent",
+                "agent_status": "ACTIVE",
+            },
+        )
+
+    transport = httpx.MockTransport(mock_handler)
+    client = DashboardRegistrationClient(
+        dashboard_url="http://test-dashboard:8080",
+        timeout=5.0,
+        transport=transport,
+    )
+
+    result = await client.verify_credentials("test-agent-123", "secret-pass-456")
+    assert result["agent_status"] == "ACTIVE"
+    assert "/api/v1/agents/heartbeat" in captured_request["url"]
+    assert "Bearer secret-pass-456" in captured_request["headers"]["authorization"]
+    assert captured_request["headers"]["x-agent-id"] == "test-agent-123"
+
+
+@pytest.mark.asyncio
+async def test_verify_credentials_401_revoked() -> None:
+    """Valida que credencial permanente rechazada por Dashboard lance RegistrationAuthError."""
+
+    async def mock_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            401,
+            json={"error": "Unauthorized", "message": "Credencial permanente inválida o revocada"},
+        )
+
+    transport = httpx.MockTransport(mock_handler)
+    client = DashboardRegistrationClient(
+        dashboard_url="http://test-dashboard:8080",
+        transport=transport,
+    )
+
+    with pytest.raises(RegistrationAuthError) as exc_info:
+        await client.verify_credentials("revoked-agent-id", "invalid_secret")
+
+    assert "HTTP 401" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_verify_credentials_connection_failure() -> None:
+    """Valida que un fallo de red durante la verificación lance DashboardConnectionError."""
+
+    async def mock_handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("Connection refused")
+
+    transport = httpx.MockTransport(mock_handler)
+    client = DashboardRegistrationClient(
+        dashboard_url="http://test-dashboard:8080",
+        transport=transport,
+    )
+
+    with pytest.raises(DashboardConnectionError):
+        await client.verify_credentials("agent-id-net", "secret-net")
+
+
+@pytest.mark.asyncio
+async def test_auto_register_reloads_persisted_and_verifies(
+    temp_credentials_file: Path, sample_credentials: AgentCredentials
+) -> None:
+    """Valida que al arrancar con credenciales persistidas, verifique con Dashboard y marque verified=True."""
+    CredentialStore.save(sample_credentials, temp_credentials_file)
+
+    async def mock_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "status": "success",
+                "message": "Heartbeat registrado exitosamente",
+                "agent_id": sample_credentials.agent_id,
+                "agent_status": "ACTIVE",
+            },
+        )
+
+    transport = httpx.MockTransport(mock_handler)
+    client = DashboardRegistrationClient(
+        dashboard_url="http://test-dashboard:8080",
+        transport=transport,
+    )
+
+    test_settings = Settings(
+        CREDENTIALS_FILE=str(temp_credentials_file),
+        VERIFY_CREDENTIALS_ON_BOOT=True,
+    )
+
+    creds = await auto_register_agent(settings=test_settings, client=client)
+    assert creds is not None
+    assert creds.agent_id == sample_credentials.agent_id
+    assert creds.verified is True
+
+
+@pytest.mark.asyncio
+async def test_auto_register_persisted_credentials_revoked_clears_disk(
+    temp_credentials_file: Path, sample_credentials: AgentCredentials
+) -> None:
+    """Si las credenciales en disco fueron revocadas en el Dashboard, se limpian y se lanza RegistrationAuthError."""
+    CredentialStore.save(sample_credentials, temp_credentials_file)
+    assert CredentialStore.exists(temp_credentials_file)
+
+    async def mock_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            401,
+            json={"error": "Unauthorized", "message": "Agente revocado"},
+        )
+
+    transport = httpx.MockTransport(mock_handler)
+    client = DashboardRegistrationClient(
+        dashboard_url="http://test-dashboard:8080",
+        transport=transport,
+    )
+
+    test_settings = Settings(
+        CREDENTIALS_FILE=str(temp_credentials_file),
+        VERIFY_CREDENTIALS_ON_BOOT=True,
+    )
+
+    with pytest.raises(RegistrationAuthError):
+        await auto_register_agent(settings=test_settings, client=client)
+
+    # Debe haber eliminado el archivo inválido de disco
+    assert not CredentialStore.exists(temp_credentials_file)
+
+
+@pytest.mark.asyncio
+async def test_auto_register_persisted_network_error_tolerates_and_proceeds(
+    temp_credentials_file: Path, sample_credentials: AgentCredentials
+) -> None:
+    """Si el Dashboard no está disponible en boot, el agente arranca tolerante con verified=False."""
+    CredentialStore.save(sample_credentials, temp_credentials_file)
+
+    async def mock_handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("Dashboard is temporarily down")
+
+    transport = httpx.MockTransport(mock_handler)
+    client = DashboardRegistrationClient(
+        dashboard_url="http://test-dashboard:8080",
+        transport=transport,
+    )
+
+    test_settings = Settings(
+        CREDENTIALS_FILE=str(temp_credentials_file),
+        VERIFY_CREDENTIALS_ON_BOOT=True,
+    )
+
+    creds = await auto_register_agent(settings=test_settings, client=client)
+    assert creds is not None
+    assert creds.agent_id == sample_credentials.agent_id
+    assert creds.verified is False
+
+
+def test_reload_credentials_in_memory(
+    temp_credentials_file: Path, sample_credentials: AgentCredentials
+) -> None:
+    """Valida la recarga explícita de credenciales modificadas en almacenamiento local."""
+    test_settings = Settings(
+        CREDENTIALS_FILE=str(temp_credentials_file),
+        AGENT_ID="old-agent-id",
+        PERMANENT_AGENT_SECRET=None,
+    )
+
+    # Antes de guardar
+    assert reload_credentials(test_settings) is None
+
+    # Guardar credenciales en disco
+    CredentialStore.save(sample_credentials, temp_credentials_file)
+
+    # Recargar
+    reloaded = reload_credentials(test_settings)
+    assert reloaded is not None
+    assert reloaded.agent_id == sample_credentials.agent_id
+    assert sample_credentials.agent_id == test_settings.AGENT_ID
+    assert sample_credentials.permanent_secret == test_settings.PERMANENT_AGENT_SECRET

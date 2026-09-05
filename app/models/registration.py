@@ -44,6 +44,10 @@ class AgentCredentials(BaseModel):
     registered_at: str | None = Field(
         default=None, description="Timestamp ISO en que se obtuvo la credencial"
     )
+    verified: bool = Field(
+        default=False,
+        description="Indica si la credencial fue verificada activamente con el Dashboard",
+    )
 
     model_config = {
         "extra": "ignore",

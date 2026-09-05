@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     REQUIRE_DASHBOARD_REGISTRATION: bool = Field(
         default=False, description="Exige registro exitoso obligatorio contra el Dashboard en boot"
     )
+    VERIFY_CREDENTIALS_ON_BOOT: bool = Field(
+        default=True,
+        description="Verifica activamente la credencial permanente contra el Dashboard en el arranque",
+    )
 
     # PostgreSQL para Checkpoints y tablas core_*
     POSTGRES_HOST: str = Field(default="jg_agente_postgres", description="Host de PostgreSQL")

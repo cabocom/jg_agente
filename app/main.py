@@ -41,6 +41,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # 3. Comprobación de credenciales y aprovisionamiento con Dashboard (Zero-Trust Bootstrap)
     credentials = await auto_register_agent(settings=settings, registry=registry)
     app.state.credentials = credentials
+    app.state.credentials_verified = credentials.verified if credentials else False
 
     yield
 
@@ -64,11 +65,15 @@ app.include_router(telemetry_router)
 @app.get("/", tags=["Root"])
 async def root() -> dict[str, Any]:
     """Endpoint raíz con metadatos del servicio."""
+    is_registered = bool(settings.PERMANENT_AGENT_SECRET)
+    is_verified = getattr(app.state, "credentials_verified", False)
     return {
         "service": "jg_agente",
         "version": __version__,
         "agent_id": settings.AGENT_ID,
         "environment": settings.ENV,
         "status": "online",
-        "registered": bool(settings.PERMANENT_AGENT_SECRET),
+        "registered": is_registered,
+        "credentials_verified": is_verified,
+        "dashboard_url": settings.DASHBOARD_URL,
     }

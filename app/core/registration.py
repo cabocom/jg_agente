@@ -5,7 +5,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from pydantic import ValidationError
@@ -265,6 +265,86 @@ class DashboardRegistrationClient:
                 raise last_exception
             raise DashboardConnectionError(final_msg) from last_exception
 
+    async def verify_credentials(
+        self,
+        agent_id: str,
+        permanent_secret: str,
+    ) -> dict[str, Any]:
+        """Verifica activamente la credencial permanente contra el endpoint de heartbeat del Dashboard."""
+        token = permanent_secret.strip()
+        aid = agent_id.strip()
+        if not token or not aid:
+            raise RegistrationAuthError("Identificador de agente o credencial permanente vacíos.")
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "X-Agent-ID": aid,
+            "X-Agent-Secret": token,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": f"jg_agente/{__version__}",
+        }
+
+        payload = {
+            "agent_id": aid,
+            "status": "ACTIVE",
+            "metrics": {
+                "source": "boot_verification",
+            },
+        }
+
+        endpoint_v1 = f"{self.dashboard_url}/api/v1/agents/heartbeat"
+        endpoint_fallback = f"{self.dashboard_url}/api/agents/heartbeat"
+
+        async with httpx.AsyncClient(timeout=self.timeout, transport=self.transport) as client:
+            try:
+                response = await client.post(endpoint_v1, json=payload, headers=headers)
+                if response.status_code == 404:
+                    response = await client.post(endpoint_fallback, json=payload, headers=headers)
+
+                if response.status_code == 200:
+                    data = response.json()
+                    logger.info(
+                        "Credenciales permanentes verificadas exitosamente con Dashboard (Agent ID: %s).",
+                        aid,
+                    )
+                    return cast(dict[str, Any], data)
+
+                if response.status_code in (401, 403):
+                    msg = (
+                        f"Credencial permanente rechazada o revocada por el Dashboard "
+                        f"(HTTP {response.status_code}): {response.text}"
+                    )
+                    logger.critical(msg)
+                    raise RegistrationAuthError(msg)
+
+                msg = f"Fallo al verificar credencial permanente (HTTP {response.status_code}): {response.text}"
+                logger.warning(msg)
+                raise RegistrationError(msg)
+
+            except (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError) as e:
+                msg = f"No fue posible contactar con el Dashboard ({self.dashboard_url}) para verificar credenciales: {e}"
+                logger.warning(msg)
+                raise DashboardConnectionError(msg) from e
+
+
+def reload_credentials(
+    settings: Settings,
+    store: type[CredentialStore] = CredentialStore,
+) -> AgentCredentials | None:
+    """Recarga las credenciales desde el almacenamiento local y sincroniza los settings en memoria."""
+    persisted = store.load(settings.CREDENTIALS_FILE)
+    if persisted is not None:
+        settings.AGENT_ID = persisted.agent_id
+        settings.PERMANENT_AGENT_SECRET = persisted.permanent_secret
+        logger.info(
+            "Credenciales recargadas exitosamente desde %s (Agent ID: %s).",
+            settings.CREDENTIALS_FILE,
+            persisted.agent_id,
+        )
+        return persisted
+    return None
+
 
 async def auto_register_agent(
     settings: Settings,
@@ -273,6 +353,12 @@ async def auto_register_agent(
     store: type[CredentialStore] = CredentialStore,
 ) -> AgentCredentials | None:
     """Comprueba credenciales existentes o ejecuta el registro mediante bootstrap token durante el boot."""
+    reg_client = client or DashboardRegistrationClient(
+        dashboard_url=settings.DASHBOARD_URL,
+        timeout=settings.DASHBOARD_REGISTRATION_TIMEOUT,
+        retries=settings.DASHBOARD_REGISTRATION_RETRIES,
+    )
+
     # 1. Comprobar si ya existe credencial permanente en variables de entorno / settings
     if (
         settings.PERMANENT_AGENT_SECRET
@@ -283,12 +369,27 @@ async def auto_register_agent(
             "Agente preautenticado mediante PERMANENT_AGENT_SECRET en configuración (Agent ID: %s).",
             settings.AGENT_ID,
         )
-        return AgentCredentials(
+        creds = AgentCredentials(
             agent_id=settings.AGENT_ID,
             permanent_secret=settings.PERMANENT_AGENT_SECRET,
             agent_name=settings.AGENT_NAME,
             dashboard_url=settings.DASHBOARD_URL,
         )
+
+        if settings.VERIFY_CREDENTIALS_ON_BOOT:
+            try:
+                await reg_client.verify_credentials(creds.agent_id, creds.permanent_secret)
+                creds.verified = True
+            except RegistrationAuthError:
+                logger.critical("Credenciales de entorno rechazadas por el Dashboard (HTTP 401).")
+                raise
+            except DashboardConnectionError as e:
+                logger.warning(
+                    "Dashboard no disponible temporalmente (%s). Continuando con credenciales de entorno.",
+                    e,
+                )
+
+        return creds
 
     # 2. Comprobar si existen credenciales persistidas en disco
     persisted = store.load(settings.CREDENTIALS_FILE)
@@ -299,9 +400,25 @@ async def auto_register_agent(
             persisted.agent_id,
             persisted.agent_name,
         )
-        # Sincronizar settings en memoria
         settings.AGENT_ID = persisted.agent_id
         settings.PERMANENT_AGENT_SECRET = persisted.permanent_secret
+
+        if settings.VERIFY_CREDENTIALS_ON_BOOT:
+            try:
+                await reg_client.verify_credentials(persisted.agent_id, persisted.permanent_secret)
+                persisted.verified = True
+            except RegistrationAuthError:
+                logger.critical(
+                    "Credenciales locales rechazadas o revocadas por el Dashboard (HTTP 401). Limpiando archivo local."
+                )
+                store.clear(settings.CREDENTIALS_FILE)
+                raise
+            except DashboardConnectionError as e:
+                logger.warning(
+                    "Dashboard no disponible temporalmente (%s). Continuando con credenciales locales.",
+                    e,
+                )
+
         return persisted
 
     # 3. Si no hay credenciales persistidas, verificar si se suministró AGENT_BOOTSTRAP_TOKEN
@@ -309,12 +426,6 @@ async def auto_register_agent(
     if bootstrap_token and bootstrap_token.strip():
         logger.info(
             "Detectado AGENT_BOOTSTRAP_TOKEN. Iniciando proceso de aprovisionamiento Zero-Trust con Dashboard..."
-        )
-
-        reg_client = client or DashboardRegistrationClient(
-            dashboard_url=settings.DASHBOARD_URL,
-            timeout=settings.DASHBOARD_REGISTRATION_TIMEOUT,
-            retries=settings.DASHBOARD_REGISTRATION_RETRIES,
         )
 
         capabilities_summary = registry.get_capabilities_summary() if registry is not None else None
@@ -341,6 +452,7 @@ async def auto_register_agent(
                 agent_name=response.name,
                 dashboard_url=settings.DASHBOARD_URL,
                 registered_at=response.registered_at,
+                verified=True,
             )
 
             # Persistir credenciales en disco de forma segura

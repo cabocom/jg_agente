@@ -245,5 +245,5 @@ Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de 
   - [x] `ISSUE-F07-T04`: Endpoints de telemetría `GET /capabilities`, `/health` y `/metrics`.
 - [ ] **Fase 08:** Bootstrap del Agente, Registro con Dashboard y Heartbeat (En progreso):
   - [x] `ISSUE-F08-T01`: Cliente de registro con jg_dashboard mediante bootstrap token (`DashboardRegistrationClient`, `CredentialStore`, `auto_register_agent` en lifespan, permisos 0600 y reintentos exponenciales).
-  - [ ] `ISSUE-F08-T02`: Persistencia de credencial permanente del agente.
+  - [x] `ISSUE-F08-T02`: Mecanismo de persistencia y recarga de credencial permanente (`CredentialStore.load`, `reload_credentials`, verificación activa con Dashboard en boot `verify_credentials`, tolerancia a fallos de red e invalidación ante rechazo 401).
   - [ ] `ISSUE-F08-T03`: Bucle periódico de heartbeat hacia Dashboard.
