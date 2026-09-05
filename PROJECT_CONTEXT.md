@@ -1,9 +1,9 @@
 # CONTEXTO DE PROYECTO: jg_agente
 
-**Versión del documento:** 2.19.0  
+**Versión del documento:** 2.20.0  
 **Fecha de consolidación:** 5 de septiembre de 2026  
 **Componente:** Execution Plane (Motor Autónomo de Ejecución)  
-**Estado:** Fase 07 iniciada con ISSUE-F07-T01 (`POST /executions/trigger` síncrono/asíncrono, HITL pause y persistencia core_executions). Fases 01 a 06 completadas (100%). 202 tests pasando en verde.  
+**Estado:** Fase 07 avanzada con ISSUE-F07-T01 (`POST /executions/trigger`) e ISSUE-F07-T02 (`GET /executions/{thread_id}`). Fases 01 a 06 completadas (100%). 207 tests pasando en verde.  
 
 ---
 

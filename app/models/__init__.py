@@ -4,6 +4,7 @@ from app.models.io import (
     AgentInput,
     AgentOutput,
     ExecutionStatus,
+    ExecutionThreadDetail,
     UserContext,
 )
 from app.models.state import (
@@ -42,6 +43,7 @@ __all__ = [
     "ExecutionError",
     "ExecutionPlan",
     "ExecutionStatus",
+    "ExecutionThreadDetail",
     "IntentModel",
     "PlanStep",
     "PolicyDecision",

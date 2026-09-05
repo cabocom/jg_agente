@@ -5,6 +5,10 @@ set -e
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
+# Forzar entorno determinista de testing para evitar llamadas a APIs externas
+export LLM_PROVIDER="${LLM_PROVIDER:-mock}"
+export CHECKPOINT_SAVER="${CHECKPOINT_SAVER:-memory}"
+
 # Determinar ejecutable de entorno virtual si existe localmente o en el workspace
 if [ -f "$PROJECT_ROOT/.venv/bin/ruff" ]; then
     VENV_BIN="$PROJECT_ROOT/.venv/bin"

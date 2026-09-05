@@ -150,3 +150,82 @@ class AgentOutput(BaseModel):
         default_factory=lambda: datetime.now(UTC),
         description="Timestamp UTC de conclusión o emisión del resultado",
     )
+
+
+class ExecutionThreadDetail(BaseModel):
+    """Detalle consolidado del estado actual, historial y checkpoints de un hilo de ejecución.
+
+    Permite al plano de control (Dashboard) o clientes autorizados inspeccionar
+    el progreso, pasos ejecutados, evaluación de riesgos, pausas HITL y diagnósticos.
+    """
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    thread_id: str = Field(
+        ...,
+        description="Identificador del hilo o sesión conversacional consultada",
+    )
+    execution_id: str | None = Field(
+        default=None,
+        description="Identificador de la última ejecución asociada al hilo",
+    )
+    status: ExecutionStatus | str = Field(
+        default=ExecutionStatus.IN_PROGRESS,
+        description="Estado operacional o final de la ejecución",
+    )
+    prompt: str | None = Field(
+        default=None,
+        description="Instrucción de entrada o prompt del usuario",
+    )
+    response: str | None = Field(
+        default=None,
+        description="Respuesta generada o mensaje de síntesis del agente",
+    )
+    current_step: int = Field(
+        default=0,
+        description="Índice del paso actual en el grafo o plan",
+    )
+    next_nodes: list[str] = Field(
+        default_factory=list,
+        description="Lista de nombres de nodos pendientes de ejecución en el checkpoint",
+    )
+    plan: dict[str, Any] | None = Field(
+        default=None,
+        description="Plan de ejecución estructurado activo si existe",
+    )
+    steps: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Historial cronológico de pasos y herramientas ejecutadas",
+    )
+    approval_status: str | None = Field(
+        default=None,
+        description="Estado de la resolución humana (pending, approved, rejected)",
+    )
+    requires_approval: bool = Field(
+        default=False,
+        description="Indica si la ejecución se encuentra pausada en espera de intervención humana (HITL)",
+    )
+    pending_approval_id: str | None = Field(
+        default=None,
+        description="Identificador de la acción o checkpoint pendiente de aprobación",
+    )
+    errors: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Lista de errores operacionales capturados durante el ciclo",
+    )
+    checkpoint_id: str | None = Field(
+        default=None,
+        description="Identificador del checkpoint persistente activo en el checkpointer",
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Metadatos complementarios de telemetría y contexto",
+    )
+    created_at: datetime | None = Field(
+        default=None,
+        description="Timestamp de inicio o recepción de la ejecución",
+    )
+    completed_at: datetime | None = Field(
+        default=None,
+        description="Timestamp de finalización de la ejecución si ha concluido",
+    )

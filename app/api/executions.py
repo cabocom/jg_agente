@@ -6,7 +6,7 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from langchain_core.messages import HumanMessage
 from langgraph.errors import GraphInterrupt
 from sqlalchemy import select
@@ -18,8 +18,8 @@ from app.core.llm import get_chat_model
 from app.core.registry import CapabilityRegistry
 from app.db.models import CoreExecution
 from app.db.session import async_session_factory, get_async_session
-from app.models.io import AgentInput, AgentOutput, ExecutionStatus
-from app.models.state import AgentExecutionStatus, AgentState
+from app.models.io import AgentInput, AgentOutput, ExecutionStatus, ExecutionThreadDetail
+from app.models.state import AgentExecutionStatus, AgentState, ApprovalStatus
 from app.security.guard import SecurityGuard
 
 logger = logging.getLogger("jg_agente.api.executions")
@@ -412,3 +412,222 @@ async def trigger_execution(
     # 4. Flujo Síncrono (por defecto)
     output = await execute_graph_pipeline(graph, input_data)
     return output
+
+
+@router.get(
+    "/{thread_id}",
+    response_model=ExecutionThreadDetail,
+    status_code=status.HTTP_200_OK,
+    summary="Consultar estado de una ejecución por thread_id",
+    description=(
+        "Recupera el estado operacional actual, historial de pasos ejecutados, evaluación de riesgos, "
+        "interrupciones HITL y errores acumulados del hilo de ejecución a partir del checkpointer y base de datos."
+    ),
+    responses={
+        200: {"description": "Detalle del hilo de ejecución recuperado con éxito."},
+        404: {"description": "Hilo de ejecución no encontrado."},
+    },
+)
+async def get_execution_by_thread_id(
+    thread_id: str,
+    graph: Any = Depends(get_agent_graph),
+    db: AsyncSession = Depends(get_async_session),
+) -> ExecutionThreadDetail:
+    """Consulta el estado, historial y checkpoints de una sesión o hilo de ejecución."""
+    # 1. Consultar estado en el checkpointer del grafo LangGraph
+    state_snapshot: Any = None
+    try:
+        config = {"configurable": {"thread_id": thread_id}}
+        state_snapshot = await graph.aget_state(config)
+    except Exception as exc:
+        logger.warning(
+            "No se pudo consultar el estado en el checkpointer para thread '%s': %s",
+            thread_id,
+            exc,
+        )
+
+    # 2. Consultar persistencia relacional en core_executions
+    db_record: CoreExecution | None = None
+    try:
+        query = (
+            select(CoreExecution)
+            .where(CoreExecution.thread_id == thread_id)
+            .order_by(CoreExecution.created_at.desc())
+        )
+        res = await db.execute(query)
+        db_record = res.scalars().first()
+    except Exception as db_err:
+        logger.warning(
+            "No se pudo consultar el registro en core_executions para thread '%s': %s",
+            thread_id,
+            db_err,
+        )
+
+    # 3. Si no existe en checkpointer ni en base de datos, responder 404
+    has_checkpoint = state_snapshot is not None and bool(getattr(state_snapshot, "values", None))
+    if not has_checkpoint and db_record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Hilo de ejecución '{thread_id}' no encontrado.",
+        )
+
+    vals: dict[str, Any] = state_snapshot.values if has_checkpoint else {}
+
+    # 4. Extraer y armonizar campos desde el snapshot y la BD
+    request_obj = vals.get("request")
+    output_obj = vals.get("output")
+
+    # Identificadores
+    execution_id: str | None = None
+    if request_obj and hasattr(request_obj, "execution_id"):
+        execution_id = str(request_obj.execution_id)
+    elif isinstance(request_obj, dict) and request_obj.get("execution_id"):
+        execution_id = str(request_obj["execution_id"])
+    elif db_record:
+        execution_id = db_record.execution_id
+
+    # Prompt
+    prompt: str | None = None
+    if request_obj and hasattr(request_obj, "prompt"):
+        prompt = str(request_obj.prompt)
+    elif isinstance(request_obj, dict) and request_obj.get("prompt"):
+        prompt = str(request_obj["prompt"])
+    elif db_record:
+        prompt = db_record.prompt
+
+    # Respuesta
+    response_text: str | None = None
+    if output_obj and hasattr(output_obj, "response"):
+        response_text = str(output_obj.response)
+    elif isinstance(output_obj, dict) and output_obj.get("response"):
+        response_text = str(output_obj["response"])
+    elif db_record:
+        response_text = db_record.response
+
+    # Nodos siguientes en LangGraph
+    next_nodes: list[str] = (
+        list(state_snapshot.next)
+        if state_snapshot and getattr(state_snapshot, "next", None)
+        else []
+    )
+
+    # Estado
+    raw_status = vals.get("status")
+    if next_nodes and ("human_approval" in next_nodes or "risk_assess" in next_nodes):
+        status_val: str = ExecutionStatus.WAITING_APPROVAL.value
+    elif raw_status:
+        status_val = raw_status.value if hasattr(raw_status, "value") else str(raw_status)
+        # Mapear estados operacionales a ExecutionStatus si es necesario
+        if status_val == AgentExecutionStatus.RESOLVED.value:
+            status_val = ExecutionStatus.COMPLETED.value
+        elif status_val == AgentExecutionStatus.AWAITING_APPROVAL.value:
+            status_val = ExecutionStatus.WAITING_APPROVAL.value
+    elif db_record:
+        status_val = db_record.status
+    else:
+        status_val = ExecutionStatus.IN_PROGRESS.value
+
+    # Plan
+    plan_obj = vals.get("plan")
+    plan_dict: dict[str, Any] | None = None
+    if plan_obj is not None:
+        if hasattr(plan_obj, "model_dump"):
+            plan_dict = plan_obj.model_dump(mode="json")
+        elif isinstance(plan_obj, dict):
+            plan_dict = plan_obj
+
+    # Pasos ejecutados
+    raw_steps = vals.get("execution_records") or []
+    steps_list: list[dict[str, Any]] = []
+    for rec in raw_steps:
+        if hasattr(rec, "model_dump"):
+            steps_list.append(rec.model_dump(mode="json"))
+        elif isinstance(rec, dict):
+            steps_list.append(rec)
+        else:
+            steps_list.append({"raw": str(rec)})
+
+    # Gobernanza HITL
+    appr_obj = vals.get("approval")
+    approval_status_val: str | None = None
+    if appr_obj is not None:
+        if hasattr(appr_obj, "status"):
+            approval_status_val = (
+                appr_obj.status.value if hasattr(appr_obj.status, "value") else str(appr_obj.status)
+            )
+        elif isinstance(appr_obj, dict) and appr_obj.get("status"):
+            approval_status_val = str(appr_obj["status"])
+    elif status_val == ExecutionStatus.WAITING_APPROVAL.value:
+        approval_status_val = ApprovalStatus.PENDING.value
+
+    requires_approval: bool = bool(
+        vals.get("requires_approval")
+        or vals.get("human_intervention_required")
+        or (next_nodes and "human_approval" in next_nodes)
+        or (db_record and db_record.requires_approval)
+    )
+
+    pending_approval_id: str | None = (
+        str(vals.get("pending_approval_id"))
+        if vals.get("pending_approval_id")
+        else (db_record.pending_approval_id if db_record else None)
+    )
+    if requires_approval and not pending_approval_id:
+        pending_approval_id = "human_approval_required"
+
+    # Errores
+    raw_errors = vals.get("errors") or []
+    errors_list: list[dict[str, Any]] = []
+    for err in raw_errors:
+        if hasattr(err, "model_dump"):
+            errors_list.append(err.model_dump(mode="json"))
+        elif isinstance(err, dict):
+            errors_list.append(err)
+        else:
+            errors_list.append({"message": str(err)})
+    if not errors_list and db_record and db_record.error:
+        errors_list.append({"message": db_record.error, "code": "DB_RECORD_ERROR"})
+
+    # Checkpoint ID
+    checkpoint_id: str | None = None
+    if state_snapshot and getattr(state_snapshot, "config", None):
+        cfg = state_snapshot.config.get("configurable", {})
+        checkpoint_id = cfg.get("checkpoint_id")
+
+    # Metadatos
+    metadata: dict[str, Any] = (
+        dict(db_record.metadata_) if (db_record and db_record.metadata_) else {}
+    )
+    if request_obj and hasattr(request_obj, "metadata"):
+        metadata.update(request_obj.metadata)
+    elif isinstance(request_obj, dict) and "metadata" in request_obj:
+        metadata.update(request_obj["metadata"])
+
+    # Fechas
+    created_at = db_record.created_at if db_record else None
+    if created_at is None and request_obj and hasattr(request_obj, "created_at"):
+        created_at = request_obj.created_at
+
+    completed_at = db_record.completed_at if db_record else None
+    if completed_at is None and output_obj and hasattr(output_obj, "completed_at"):
+        completed_at = output_obj.completed_at
+
+    return ExecutionThreadDetail(
+        thread_id=thread_id,
+        execution_id=execution_id,
+        status=status_val,
+        prompt=prompt,
+        response=response_text,
+        current_step=int(vals.get("current_step", len(steps_list))),
+        next_nodes=next_nodes,
+        plan=plan_dict,
+        steps=steps_list,
+        approval_status=approval_status_val,
+        requires_approval=requires_approval,
+        pending_approval_id=pending_approval_id,
+        errors=errors_list,
+        checkpoint_id=checkpoint_id,
+        metadata=metadata,
+        created_at=created_at,
+        completed_at=completed_at,
+    )
