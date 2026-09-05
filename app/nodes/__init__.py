@@ -2,6 +2,7 @@
 
 from app.nodes.conclude import conclude_node
 from app.nodes.execute import execute_node
+from app.nodes.human_approval import human_approval_node
 from app.nodes.observe import observe_node
 from app.nodes.plan import plan_node
 from app.nodes.reason import reason_node
@@ -10,6 +11,7 @@ from app.nodes.risk_assess import risk_assess_node
 __all__ = [
     "conclude_node",
     "execute_node",
+    "human_approval_node",
     "observe_node",
     "plan_node",
     "reason_node",

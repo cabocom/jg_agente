@@ -128,6 +128,7 @@ jg_agente/
 │   │   ├── __init__.py             # Exportación de nodos base del grafo
 │   │   ├── conclude.py             # Nodo base conclude: unificación de salida, formateo AgentOutput y métricas
 │   │   ├── execute.py              # Nodo base execute: ejecución secuencial, sandbox SecurityGuard y rollback_context
+│   │   ├── human_approval.py       # Nodo HITL: pausa en checkpoint con interrupt() y reanudación Command(resume)
 │   │   ├── observe.py              # Nodo opcional observe: telemetría agnóstica de entorno con ObserverEngine
 │   │   ├── plan.py                 # Nodo opcional plan: formulación de ExecutionPlan con pasos y dependencias
 │   │   ├── reason.py               # Nodo base reason: inferencia LLM, tool binding y decisión de flujo
@@ -169,7 +170,8 @@ jg_agente/
 │   ├── test_node_conclude.py
 │   ├── test_node_observe.py
 │   ├── test_node_plan.py
-│   └── test_node_risk_assess.py
+│   ├── test_node_risk_assess.py
+│   └── test_node_human_approval.py
 └── scripts/
     └── check.sh                    # Verificación integral (Ruff + MyPy + Pytest)
 ```

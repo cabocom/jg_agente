@@ -199,6 +199,17 @@ El nodo `risk_assess` (`app/nodes/risk_assess.py`) evalúa preventivamente el im
 5. **Bloqueo Preventivo:** Ante violaciones de seguridad detectadas, emite veredicto `DENY`, activa `circuit_breaker_active` y desvía la ejecución a `conclude` con estado `FAILED`.
 6. **Auditoría Estructurada:** Emite el evento `risk_assessment_completed` en `audit_trail` con el veredicto, nivel de riesgo máximo y métricas de tiempo (`duration_ms`).
 
+---
 
+## 11. Nodo de Pausa HITL y Reanudación Asíncrona: `human_approval`
 
+El nodo `human_approval` (`app/nodes/human_approval.py`) gestiona la suspensión no bloqueante del ciclo de vida del agente mediante checkpoints y su reanudación controlada por operadores:
 
+1. **Suspensión Nativa con `interrupt()`:** Al activarse cuando una operación requiere aprobación humana, invoca la primitiva `interrupt()` de LangGraph, serializando el snapshot en el checkpointer duradero (PostgreSQL o MemorySaver) y liberando inmediatamente los hilos y el event loop.
+2. **Payload Informativo para Operadores:** Expone al cliente o Dashboard administrativo los detalles completos de la operación (`action="human_approval_required"`, `risk_assessment`, `plan`, `thread_id`, `execution_id`).
+3. **Reanudación Polimórfica:** Permite reactivar la ejecución suministrando un comando `Command(resume=payload)` que admite `ApprovalRecord`, diccionarios con flags `approved`, o valores booleanos directos.
+4. **Bifurcación Determinista:**
+   - Si la decisión es de aprobación (`status=APPROVED`), actualiza el estado a `EXECUTING`, limpia las marcas de bloqueo (`requires_approval=False`, `human_intervention_required=False`), registra la auditoría `human_approval_completed` y enruta hacia `execute`.
+   - Si la decisión es de rechazo (`status=REJECTED`), actualiza el estado a `FAILED`, registra la auditoría `human_approval_rejected` y enruta hacia `conclude` para devolver una respuesta controlada de denegación.
+5. **Pase Transparente (Pass-Through):** Si el estado ya cuenta con autorización o rechazo previo, transiciona limpiamente sin emitir interrupciones redundantes.
+6. **Resiliencia en Ejecuciones Offline:** Si se invoca fuera del entorno runnable de LangGraph (e.g. tests unitarios directos), captura `RuntimeError` y devuelve el estado `AWAITING_APPROVAL` con auditoría sin colapsar el proceso.

@@ -22,7 +22,6 @@ from app.core.registry import CapabilityRegistry
 from app.models.state import (
     AgentExecutionStatus,
     AgentState,
-    ApprovalRecord,
     ApprovalStatus,
     AuditRecord,
     IntentModel,
@@ -108,29 +107,10 @@ async def default_human_approval_node(
     state: AgentState,
     registry: CapabilityRegistry,
 ) -> dict[str, Any]:
-    """Nodo de gestión de aprobación humana (HITL)."""
-    approval = state.get("approval")
-    approval_rec: ApprovalRecord
-    if isinstance(approval, dict):
-        approval_rec = ApprovalRecord(**approval)
-    elif isinstance(approval, ApprovalRecord):
-        approval_rec = approval
-    else:
-        approval_rec = ApprovalRecord(status=ApprovalStatus.PENDING)
+    """Nodo de gestión de aprobación humana (HITL) delegando en human_approval_node."""
+    from app.nodes.human_approval import human_approval_node
 
-    return {
-        "status": AgentExecutionStatus.AWAITING_APPROVAL
-        if approval_rec.status == ApprovalStatus.PENDING
-        else AgentExecutionStatus.EXECUTING,
-        "human_intervention_required": approval_rec.status == ApprovalStatus.PENDING,
-        "approval": approval_rec,
-        "audit_trail": [
-            AuditRecord(
-                event_type="human_approval_node_evaluated",
-                details={"status": approval_rec.status.value},
-            )
-        ],
-    }
+    return await human_approval_node(state, registry=registry)
 
 
 async def default_execute_node(
