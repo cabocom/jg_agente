@@ -2,6 +2,7 @@
 
 from app.nodes.conclude import conclude_node
 from app.nodes.execute import execute_node
+from app.nodes.observe import observe_node
 from app.nodes.reason import reason_node
 
-__all__ = ["conclude_node", "execute_node", "reason_node"]
+__all__ = ["conclude_node", "execute_node", "observe_node", "reason_node"]

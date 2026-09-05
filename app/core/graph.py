@@ -69,35 +69,10 @@ async def default_observe_node(
     state: AgentState,
     registry: CapabilityRegistry,
 ) -> dict[str, Any]:
-    """Nodo de observación: captura el estado del entorno mediante ObserverEngine si existe."""
-    observer = registry.get_observer()
-    snapshot: dict[str, Any] = {}
+    """Nodo de observación: captura el estado del entorno delegando en observe_node."""
+    from app.nodes.observe import observe_node
 
-    if observer is not None:
-        observe_fn = getattr(observer, "observe", None)
-        if callable(observe_fn):
-            res = observe_fn(state)
-            raw = await res if inspect.iscoroutine(res) else res
-            if isinstance(raw, dict):
-                snapshot = dict(raw)
-            elif raw is not None:
-                snapshot = {"observed": raw}
-        else:
-            snapshot = {"observer": observer.name, "status": "observed"}
-
-    return {
-        "status": AgentExecutionStatus.OBSERVING,
-        "environment_snapshot": snapshot,
-        "audit_trail": [
-            AuditRecord(
-                event_type="observe_completed",
-                details={
-                    "engine": observer.name if observer else "none",
-                    "keys": list(snapshot.keys()),
-                },
-            )
-        ],
-    }
+    return await observe_node(state, registry=registry)
 
 
 async def default_reason_node(

@@ -161,3 +161,16 @@ El nodo `conclude` (`app/nodes/conclude.py`) consolida el desenlace del ciclo co
 5. **Persistencia en el Estado:** Almacena el objeto en `state["output"]` para su inspección inmediata en el `StateSnapshot` de LangGraph antes de conectar con el nodo terminal `END`.
 6. **Auditoría Inmutable:** Emite el evento `execution_concluded` en `audit_trail`.
 
+---
+
+## 8. Nodo Opcional de Observación: `observe`
+
+El nodo `observe` (`app/nodes/observe.py`) captura telemetría y el estado del entorno de manera desacoplada previo a la invocación del LLM:
+
+1. **Activación Condicional:** Se intercala dinámicamente entre `START` y `reason` únicamente cuando existe un `ObserverEngine` registrado en `CapabilityRegistry`.
+2. **Invocación Polimórfica:** Localiza e invoca métodos de observación (`observe`, `discover`, `collect`), admitiendo corrutinas asíncronas o funciones síncronas con o sin inyección de `AgentState`.
+3. **Agnosticismo de Infraestructura:** El Core de `jg_agente` no asume ningún esquema de infraestructura propietario; la información capturada se vuelca limpiamente en `state["environment_snapshot"]`.
+4. **Resiliencia Operacional:** Las excepciones del motor de observación se capturan con registro de `ExecutionError(component="observe", fatal=False)` sin interrumpir el ciclo de vida del agente.
+5. **Auditoría y Métricas:** Emite el evento `observe_completed` en `state["audit_trail"]` con el tiempo de telemetría (`duration_ms`) y las claves detectadas.
+
+
