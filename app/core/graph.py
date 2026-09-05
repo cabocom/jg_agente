@@ -26,13 +26,11 @@ from app.models.state import (
     ApprovalRecord,
     ApprovalStatus,
     AuditRecord,
-    ExecutionError,
     ExecutionPlan,
     IntentModel,
     PlanStep,
     PolicyDecision,
     SecurityEvaluationResult,
-    StepExecutionRecord,
     StepStatus,
     VerificationStatus,
 )
@@ -264,97 +262,10 @@ async def default_execute_node(
     registry: CapabilityRegistry,
     security_guard: SecurityGuard,
 ) -> dict[str, Any]:
-    """Nodo de ejecución de acciones: invoca herramientas registradas bajo sandbox seguro."""
-    plan = state.get("plan")
-    records: list[StepExecutionRecord] = []
-    errors: list[ExecutionError] = []
+    """Nodo de ejecución de acciones: delega en execute_node bajo sandbox seguro."""
+    from app.nodes.execute import execute_node
 
-    steps_to_run: list[PlanStep] = []
-    if isinstance(plan, ExecutionPlan):
-        steps_to_run = plan.steps
-    elif isinstance(plan, dict) and "steps" in plan:
-        steps_to_run = [PlanStep(**s) if isinstance(s, dict) else s for s in plan["steps"]]
-
-    # Si no hay plan estructurado pero hay una herramienta disponible
-    if not steps_to_run:
-        tools = registry.list_tools()
-        if tools:
-            t = tools[0]
-            steps_to_run = [
-                PlanStep(
-                    step_id="direct-step-1",
-                    tool_name=t.name,
-                    tool_args={},
-                    risk_level=t.risk_level,
-                    reversible=t.reversible,
-                )
-            ]
-
-    for step in steps_to_run:
-        tool = registry.get_tool(step.tool_name)
-        if not tool:
-            err = ExecutionError(
-                code="TOOL_NOT_FOUND",
-                message=f"La herramienta '{step.tool_name}' no existe en el CapabilityRegistry.",
-                component="execute",
-                fatal=True,
-            )
-            errors.append(err)
-            records.append(
-                StepExecutionRecord(
-                    step_id=step.step_id,
-                    tool_name=step.tool_name,
-                    tool_args=step.tool_args,
-                    status=StepStatus.FAILED,
-                    error=err.message,
-                )
-            )
-            continue
-
-        tool_result = security_guard.execute_tool(
-            tool=tool,
-            tool_args=step.tool_args,
-            bypass_approval=(
-                state.get("approval") is not None
-                and getattr(state.get("approval"), "status", None) == ApprovalStatus.APPROVED
-            ),
-        )
-        if inspect.iscoroutine(tool_result.output):
-            tool_result.output = await tool_result.output
-
-        step_status = StepStatus.COMPLETED if tool_result.success else StepStatus.FAILED
-        records.append(
-            StepExecutionRecord(
-                step_id=step.step_id,
-                tool_name=step.tool_name,
-                tool_args=step.tool_args,
-                status=step_status,
-                output=tool_result.output,
-                error=tool_result.error,
-                duration_ms=tool_result.duration_ms,
-                rollback_context=tool_result.rollback_context,
-            )
-        )
-        if not tool_result.success and tool_result.error:
-            errors.append(
-                ExecutionError(
-                    code="TOOL_EXECUTION_FAILED",
-                    message=tool_result.error,
-                    component="execute",
-                )
-            )
-
-    return {
-        "status": AgentExecutionStatus.EXECUTING,
-        "execution_records": records,
-        "errors": errors,
-        "audit_trail": [
-            AuditRecord(
-                event_type="execute_completed",
-                details={"steps_executed": len(records), "errors": len(errors)},
-            )
-        ],
-    }
+    return await execute_node(state, registry, security_guard=security_guard)
 
 
 async def default_verify_node(

@@ -135,3 +135,16 @@ El nodo `reason` (`app/nodes/reason.py`) actúa como el centro de deliberación 
    - Si la interacción es un saludo o respuesta conversacional directa: Genera un `IntentModel` con `action_type = "conclude"`, emitiendo la respuesta textual del LLM en `AIMessage`.
 4. **Auditoría Estructurada:** Registra cada invocación en `audit_trail` bajo el tipo de evento `reasoning_completed`.
 
+---
+
+## 6. Nodo Actuador Troncal: `execute`
+
+El nodo `execute` (`app/nodes/execute.py`) actúa como el ejecutor físico de herramientas del agente:
+
+1. **Resolución Polimórfica:** Admite pasos estructurados procedentes de un `ExecutionPlan` (`state["plan"]`), llamadas directas `tool_calls` del LLM (`state["intent"]`), o ejecución base de herramientas registradas.
+2. **Sandbox y Gobernanza:** Toda invocación física pasa por `SecurityGuard.execute_tool()`, verificando permisos, niveles de riesgo, argumentos de entrada y directivas SSRF. Soporta `bypass_approval` en caso de autorización HITL confirmada (`ApprovalStatus.APPROVED`).
+3. **Preservación de Compensación (`rollback_context`):** Toda herramienta reversible deposita su estado en `StepExecutionRecord.rollback_context` para que el nodo posterior `rollback` pueda realizar compensaciones ordenadas.
+4. **Contención ante Fallos:** Si un paso falla, se registra `ExecutionError(code="TOOL_EXECUTION_FAILED")` y se aborta la ejecución de pasos dependientes posteriores.
+5. **Historial Conversacional (`ToolMessage`):** Genera mensajes `ToolMessage` asociados a cada `tool_call_id` para retroalimentar la memoria del LLM.
+6. **Métricas y Auditoría:** Registra `duration_ms` en cada paso y emite un registro `AuditRecord` bajo el evento `execute_completed`.
+

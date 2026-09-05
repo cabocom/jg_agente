@@ -1,0 +1,263 @@
+"""Nodo ejecutor de herramientas (execute) para jg_agente.
+
+Ejecuta de forma secuencial las herramientas autorizadas, bien procedan de un plan
+estructurado (ExecutionPlan) o de llamadas a herramientas emitidas por el LLM (tool_calls).
+Interpola las directivas de seguridad a través de SecurityGuard, mide tiempos de ejecución,
+captura fallos operacionales y preserva el contexto de compensación (rollback_context).
+"""
+
+import inspect
+import logging
+from datetime import UTC, datetime
+from typing import Any
+
+from langchain_core.messages import ToolMessage
+
+from app.core.registry import CapabilityRegistry
+from app.models.state import (
+    AgentExecutionStatus,
+    AgentState,
+    ApprovalRecord,
+    ApprovalStatus,
+    AuditRecord,
+    ExecutionError,
+    ExecutionPlan,
+    IntentModel,
+    PlanStep,
+    StepExecutionRecord,
+    StepStatus,
+)
+from app.models.tools import RiskLevel
+from app.security.guard import SecurityGuard, get_security_guard
+
+logger = logging.getLogger("jg_agente.nodes.execute")
+
+
+async def execute_node(
+    state: AgentState,
+    registry: CapabilityRegistry,
+    security_guard: SecurityGuard | None = None,
+) -> dict[str, Any]:
+    """Ejecuta secuencialmente herramientas autorizadas bajo sandbox y gobernanza HITL.
+
+    Args:
+        state: Estado global actual del agente (AgentState).
+        registry: Catálogo de capacidades para localizar las herramientas requeridas.
+        security_guard: Interceptor de seguridad opcional (usa singleton por defecto).
+
+    Returns:
+        Diccionario con las mutaciones de estado para LangGraph (execution_records,
+        errors, messages, audit_trail, status, y plan actualizado).
+    """
+    guard = security_guard or get_security_guard()
+
+    # 1. Metadatos de contexto de ejecución
+    execution_id: str | None = None
+    thread_id: str | None = None
+    req = state.get("request")
+    if req:
+        execution_id = getattr(req, "execution_id", None)
+        thread_id = getattr(req, "thread_id", None)
+
+    # 2. Comprobar autorización humana previa (HITL)
+    approval_val = state.get("approval")
+    approval_status: ApprovalStatus | str | None = None
+    if isinstance(approval_val, ApprovalRecord):
+        approval_status = approval_val.status
+    elif isinstance(approval_val, dict):
+        approval_status = approval_val.get("status")
+
+    bypass_approval = approval_status in (ApprovalStatus.APPROVED, ApprovalStatus.APPROVED.value)
+
+    # 3. Determinar los pasos u operaciones a ejecutar
+    raw_plan = state.get("plan")
+    plan: ExecutionPlan | None = None
+    steps_to_run: list[PlanStep] = []
+    is_tool_call_source = False
+
+    if isinstance(raw_plan, ExecutionPlan):
+        plan = raw_plan
+        steps_to_run = list(plan.steps)
+    elif isinstance(raw_plan, dict) and "steps" in raw_plan:
+        plan = ExecutionPlan(**raw_plan)
+        steps_to_run = list(plan.steps)
+
+    # Si no hay plan estructurado, inspeccionar llamadas directas de herramienta (tool_calls)
+    if not steps_to_run:
+        intent_val = state.get("intent")
+        tool_calls: list[dict[str, Any]] = []
+        if isinstance(intent_val, IntentModel) and intent_val.parameters:
+            tool_calls = intent_val.parameters.get("tool_calls", [])
+        elif isinstance(intent_val, dict) and "parameters" in intent_val:
+            tool_calls = intent_val.get("parameters", {}).get("tool_calls", [])
+
+        if tool_calls:
+            is_tool_call_source = True
+            for idx, tc in enumerate(tool_calls, start=1):
+                call_id = tc.get("id") or f"call_{idx}"
+                name = tc.get("name", "")
+                args = tc.get("args") or {}
+                if isinstance(args, str):
+                    args = {"input": args}
+                tool_def = registry.get_tool(name)
+                risk = tool_def.risk_level if tool_def else RiskLevel.LOW
+                rev = tool_def.reversible if tool_def else False
+                steps_to_run.append(
+                    PlanStep(
+                        step_id=call_id,
+                        tool_name=name,
+                        tool_args=args,
+                        description=f"Ejecución directa de {name}",
+                        risk_level=risk,
+                        reversible=rev,
+                    )
+                )
+
+    # Fallback si no hay plan ni tool_calls explícitos pero hay herramientas registradas
+    if not steps_to_run:
+        tools = registry.list_tools()
+        if tools:
+            first_tool = tools[0]
+            steps_to_run = [
+                PlanStep(
+                    step_id="direct-step-1",
+                    tool_name=first_tool.name,
+                    tool_args={},
+                    risk_level=first_tool.risk_level,
+                    reversible=first_tool.reversible,
+                )
+            ]
+
+    # 4. Ejecución secuencial de herramientas
+    records: list[StepExecutionRecord] = []
+    errors: list[ExecutionError] = []
+    tool_messages: list[ToolMessage] = []
+
+    for step in steps_to_run:
+        tool = registry.get_tool(step.tool_name)
+        if not tool:
+            err_msg = f"La herramienta '{step.tool_name}' no existe en el CapabilityRegistry."
+            logger.error("[execute_node] Error: %s", err_msg)
+            err = ExecutionError(
+                code="TOOL_NOT_FOUND",
+                message=err_msg,
+                component="execute",
+                fatal=True,
+            )
+            errors.append(err)
+            step.status = StepStatus.FAILED
+            records.append(
+                StepExecutionRecord(
+                    step_id=step.step_id,
+                    tool_name=step.tool_name,
+                    tool_args=step.tool_args,
+                    status=StepStatus.FAILED,
+                    error=err_msg,
+                    duration_ms=0.0,
+                    timestamp=datetime.now(UTC),
+                )
+            )
+            # Contención secuencial: abortar pasos subsiguientes
+            break
+
+        step.status = StepStatus.RUNNING
+        logger.info(
+            "[execute_node] Ejecutando paso '%s' con herramienta '%s' (riesgo: %s, reversible: %s)",
+            step.step_id,
+            tool.name,
+            tool.risk_level.value,
+            tool.reversible,
+        )
+
+        tool_result = guard.execute_tool(
+            tool=tool,
+            tool_args=step.tool_args,
+            bypass_approval=bypass_approval,
+            execution_id=execution_id,
+            thread_id=thread_id,
+        )
+
+        # Soporte para herramientas que devuelven corrutinas
+        if inspect.iscoroutine(tool_result.output):
+            tool_result.output = await tool_result.output
+
+        step_status = StepStatus.COMPLETED if tool_result.success else StepStatus.FAILED
+        step.status = step_status
+
+        record = StepExecutionRecord(
+            step_id=step.step_id,
+            tool_name=step.tool_name,
+            tool_args=step.tool_args,
+            status=step_status,
+            output=tool_result.output,
+            error=tool_result.error,
+            duration_ms=tool_result.duration_ms,
+            rollback_context=tool_result.rollback_context,
+            timestamp=datetime.now(UTC),
+        )
+        records.append(record)
+
+        # Si procede de un tool_call del LLM, emitir ToolMessage para la memoria
+        if is_tool_call_source:
+            msg_content = (
+                str(tool_result.output)
+                if tool_result.success
+                else f"Error ejecutando {tool.name}: {tool_result.error}"
+            )
+            tool_messages.append(
+                ToolMessage(
+                    content=msg_content,
+                    tool_call_id=step.step_id,
+                    name=step.tool_name,
+                )
+            )
+
+        # Manejo de fallos operacionales
+        if not tool_result.success:
+            err_desc = tool_result.error or f"Fallo en la ejecución de '{step.tool_name}'."
+            logger.warning(
+                "[execute_node] Paso '%s' falló: %s",
+                step.step_id,
+                err_desc,
+            )
+            errors.append(
+                ExecutionError(
+                    code="TOOL_EXECUTION_FAILED",
+                    message=err_desc,
+                    component="execute",
+                    fatal=False,
+                )
+            )
+            # Contención secuencial: abortar pasos posteriores tras el primer fallo
+            break
+
+    # 5. Consolidación de mutaciones de estado
+    success_count = sum(1 for r in records if r.status == StepStatus.COMPLETED)
+    failed_count = sum(1 for r in records if r.status == StepStatus.FAILED)
+
+    mutations: dict[str, Any] = {
+        "status": AgentExecutionStatus.EXECUTING,
+        "execution_records": records,
+        "errors": errors,
+        "audit_trail": [
+            AuditRecord(
+                event_type="execute_completed",
+                actor="execute_node",
+                details={
+                    "steps_executed": len(records),
+                    "success_count": success_count,
+                    "failed_count": failed_count,
+                    "tools": [r.tool_name for r in records],
+                },
+                timestamp=datetime.now(UTC),
+            )
+        ],
+    }
+
+    if tool_messages:
+        mutations["messages"] = tool_messages
+
+    if plan is not None:
+        mutations["plan"] = plan
+
+    return mutations

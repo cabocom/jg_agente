@@ -126,6 +126,7 @@ jg_agente/
 │   │   └── tools.py                # Contratos AgentTool y ToolResult
 │   ├── nodes/
 │   │   ├── __init__.py             # Exportación de nodos base del grafo
+│   │   ├── execute.py              # Nodo base execute: ejecución secuencial, sandbox SecurityGuard y rollback_context
 │   │   └── reason.py               # Nodo base reason: inferencia LLM, tool binding y decisión de flujo
 │   ├── plugins/
 │   │   ├── __init__.py             # Exportación BasePlugin, BaseEngine, PluginMetadata
@@ -159,7 +160,8 @@ jg_agente/
 │   ├── test_plugin_manager.py
 │   ├── test_boot_validation.py
 │   ├── test_graph_builder.py
-│   └── test_node_reason.py
+│   ├── test_node_reason.py
+│   └── test_node_execute.py
 └── scripts/
     └── check.sh                    # Verificación integral (Ruff + MyPy + Pytest)
 ```
@@ -207,6 +209,7 @@ Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de 
 - [ ] **Fase 05:** Ensamblado del Grafo LangGraph y Nodos Base:
   - [x] `ISSUE-F05-T01`: Implementación del `GraphBuilder` agnóstico de LangGraph (sin bifurcaciones de dominio y con `StateSnapshot` funcional).
   - [x] `ISSUE-F05-T02`: Implementación de nodo base: `reason` (inferencia LLM, tool binding dinámico y memoria conversacional).
-  - [ ] `ISSUE-F05-T03`: Implementación de nodo base: `plan`.
+  - [x] `ISSUE-F05-T03`: Implementación de nodo base: `execute` (ejecución secuencial sandboxed, SecurityGuard y rollback_context).
+  - [ ] `ISSUE-F05-T04`: Implementación de nodo base: `plan`.
 - [ ] **Fase 06:** Exposición API REST (`POST /executions/trigger`, HITL) y Bootstrap del Agente.
 - [ ] **Fase 07:** Integración con plugins de dominio y validación end-to-end.
