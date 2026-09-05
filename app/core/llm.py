@@ -323,12 +323,16 @@ def get_chat_model(
     if chosen_provider in ("mock", "fake", "test"):
         return MockChatModel(**kwargs)
 
-    if chosen_provider in ("openai", "custom", "ollama", "vllm"):
-        base_url = cfg.LLM_BASE_URL or (
-            "http://localhost:11434/v1"
-            if chosen_provider == "ollama"
-            else "https://api.openai.com/v1"
-        )
+    if chosen_provider in ("openai", "custom", "ollama", "vllm", "groq", "gemini"):
+        default_base_url = "https://api.openai.com/v1"
+        if chosen_provider == "ollama":
+            default_base_url = "http://localhost:11434/v1"
+        elif chosen_provider == "groq":
+            default_base_url = "https://api.groq.com/openai/v1"
+        elif chosen_provider == "gemini":
+            default_base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+        base_url = cfg.LLM_BASE_URL or default_base_url
         return OpenAICompatibleChatModel(
             model_name=chosen_model,
             api_key=cfg.LLM_API_KEY,
