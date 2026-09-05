@@ -1,9 +1,9 @@
 # CONTEXTO DE PROYECTO: jg_agente
 
-**Versión del documento:** 2.18.0  
+**Versión del documento:** 2.19.0  
 **Fecha de consolidación:** 5 de septiembre de 2026  
 **Componente:** Execution Plane (Motor Autónomo de Ejecución)  
-**Estado:** Fases 01, 02, 03, 04, 05 y 06 completadas (100%). Nodos observe, plan, risk_assess, human_approval, verify y rollback implementados e integrados en LangGraph. 196 tests pasando en verde.  
+**Estado:** Fase 07 iniciada con ISSUE-F07-T01 (`POST /executions/trigger` síncrono/asíncrono, HITL pause y persistencia core_executions). Fases 01 a 06 completadas (100%). 202 tests pasando en verde.  
 
 ---
 

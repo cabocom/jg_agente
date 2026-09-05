@@ -155,7 +155,12 @@ async def default_conclude_node(
 # ==========================================================
 
 
-def route_after_reason(state: AgentState, has_planner: bool, has_tools: bool) -> str:
+def route_after_reason(
+    state: AgentState,
+    has_planner: bool,
+    has_tools: bool,
+    has_risk_assessment: bool = False,
+) -> str:
     """Enruta desde 'reason' según la intención detectada y las capacidades disponibles."""
     intent = state.get("intent")
     action_type = ""
@@ -168,6 +173,8 @@ def route_after_reason(state: AgentState, has_planner: bool, has_tools: bool) ->
         return "conclude"
     if has_planner:
         return "plan"
+    if has_risk_assessment:
+        return "risk_assess"
     if has_tools:
         return "execute"
     return "conclude"
@@ -480,6 +487,8 @@ class GraphBuilder:
         reason_destinations: list[str] = ["conclude"]
         if topology.has_planner:
             reason_destinations.append("plan")
+        elif topology.has_risk_assessment:
+            reason_destinations.append("risk_assess")
         if has_tools:
             reason_destinations.append("execute")
 
@@ -489,6 +498,7 @@ class GraphBuilder:
                 s,
                 has_planner=topology.has_planner,
                 has_tools=has_tools,
+                has_risk_assessment=topology.has_risk_assessment and not topology.has_planner,
             ),
             path_map=list(set(reason_destinations)),
         )

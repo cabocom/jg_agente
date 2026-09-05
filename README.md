@@ -224,9 +224,15 @@ Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de 
   - [x] `ISSUE-F05-T02`: Implementación de nodo base: `reason` (inferencia LLM, tool binding dinámico y memoria conversacional).
   - [x] `ISSUE-F05-T03`: Implementación de nodo base: `execute` (ejecución secuencial sandboxed, SecurityGuard y rollback_context).
   - [x] `ISSUE-F05-T04`: Implementación de nodo base: `conclude` (unificación de salida, AgentOutput y métricas de tiempo).
-- [ ] **Fase 06:** Nodos Opcionales y Motores Cognitivos:
+- [x] **Fase 06:** Nodos Opcionales y Motores Cognitivos (100%):
   - [x] `ISSUE-F06-T01`: Implementación de nodo opcional: `observe` (telemetría de entorno desacoplada y ObserverEngine).
   - [x] `ISSUE-F06-T02`: Implementación de nodo opcional: `plan` (conversión de intent a ExecutionPlan estructurado con dependencias).
   - [x] `ISSUE-F06-T03`: Implementación de nodo de evaluación de riesgo y política HITL: `risk_assess` (RiskLevel >= HIGH y human_approval).
-- [ ] **Fase 07:** Exposición API REST (`POST /executions/trigger`, HITL) y Bootstrap del Agente.
-- [ ] **Fase 08:** Integración con plugins de dominio y validación end-to-end.
+  - [x] `ISSUE-F06-T04`: Implementación de nodo de pausa HITL y reanudación: `human_approval` (interrupción con interrupt() y checkpointing).
+  - [x] `ISSUE-F06-T05`: Implementación de nodos `verify` y `rollback` (verificación de anomalías y compensaciones automáticas reversibles).
+- [ ] **Fase 07:** Exposición API REST y Telemetría:
+  - [x] `ISSUE-F07-T01`: Endpoint `POST /executions/trigger` (ejecución síncrona/asíncrona, pausa HITL y persistencia en `core_executions`).
+  - [ ] `ISSUE-F07-T02`: Endpoint `GET /executions/{thread_id}`.
+  - [ ] `ISSUE-F07-T03`: Endpoints de resolución HITL `POST /executions/{thread_id}/approve` y `reject`.
+  - [ ] `ISSUE-F07-T04`: Endpoints de telemetría `GET /capabilities`, `/health` y `/metrics`.
+- [ ] **Fase 08:** Bootstrap del Agente, Integración con Plugins de Dominio y Validación End-to-End.

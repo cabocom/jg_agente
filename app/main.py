@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app import __version__
+from app.api.executions import router as executions_router
 from app.core.boot import init_agent_capabilities
 from app.core.config import settings
 from app.core.registry import CapabilityRegistry
@@ -52,6 +53,9 @@ app = FastAPI(
     version=__version__,
     lifespan=lifespan,
 )
+
+# Montar enrutadores REST de la API
+app.include_router(executions_router)
 
 
 @app.get("/", tags=["Root"])
