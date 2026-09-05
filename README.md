@@ -233,6 +233,6 @@ Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de 
 - [ ] **Fase 07:** Exposición API REST y Telemetría:
   - [x] `ISSUE-F07-T01`: Endpoint `POST /executions/trigger` (ejecución síncrona/asíncrona, pausa HITL y persistencia en `core_executions`).
   - [x] `ISSUE-F07-T02`: Endpoint `GET /executions/{thread_id}` (consulta de estado, checkpoints, historial de pasos, HITL y errores).
-  - [ ] `ISSUE-F07-T03`: Endpoints de resolución HITL `POST /executions/{thread_id}/approve` y `reject`.
+  - [x] `ISSUE-F07-T03`: Endpoints de resolución HITL `POST /executions/{thread_id}/approve` y `reject` (Command(resume=...) en LangGraph).
   - [ ] `ISSUE-F07-T04`: Endpoints de telemetría `GET /capabilities`, `/health` y `/metrics`.
 - [ ] **Fase 08:** Bootstrap del Agente, Integración con Plugins de Dominio y Validación End-to-End.

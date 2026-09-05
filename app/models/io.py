@@ -229,3 +229,30 @@ class ExecutionThreadDetail(BaseModel):
         default=None,
         description="Timestamp de finalización de la ejecución si ha concluido",
     )
+
+
+class HITLResolutionRequest(BaseModel):
+    """Payload para resolver una solicitud de intervención humana (HITL).
+
+    Permite al operador o plano de control (Dashboard) autorizar o rechazar
+    la continuación de un flujo de ejecución detenido en el nodo human_approval.
+    """
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    thread_id: str | None = Field(
+        default=None,
+        description="Identificador del hilo (opcional si se especifica directamente en la URL)",
+    )
+    approver: str = Field(
+        default="human_operator",
+        description="Identificador o nombre del usuario/operador que resuelve la acción",
+    )
+    notes: str | None = Field(
+        default=None,
+        description="Comentarios, justificación o notas de la decisión de aprobación o rechazo",
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Metadatos arbitrarios complementarios para auditoría",
+    )

@@ -234,8 +234,8 @@ async def human_approval_node(
 
     return {
         "status": final_status,
-        "human_intervention_required": not is_approved,
-        "requires_approval": not is_approved,
+        "human_intervention_required": False,
+        "requires_approval": False,
         "approval": approval_rec,
         "audit_trail": [audit],
     }

@@ -16,6 +16,7 @@ from app.models.io import AgentOutput, ExecutionStatus
 from app.models.state import (
     AgentExecutionStatus,
     AgentState,
+    ApprovalStatus,
     AuditRecord,
     IntentModel,
     StepStatus,
@@ -59,6 +60,25 @@ async def conclude_node(
     )
     has_failed_records = any(getattr(r, "status", None) == StepStatus.FAILED for r in records)
     has_fatal_errors = any(getattr(e, "fatal", False) for e in errors)
+
+    approval_val = state.get("approval")
+    is_rejected = False
+    if approval_val is not None:
+        appr_status = getattr(approval_val, "status", None) or (
+            approval_val.get("status") if isinstance(approval_val, dict) else None
+        )
+        is_rejected = appr_status in (
+            ApprovalStatus.REJECTED,
+            ApprovalStatus.REJECTED.value,
+            "rejected",
+        )
+
+    is_cancelled = (
+        state.get("status")
+        in (AgentExecutionStatus.CANCELLED, AgentExecutionStatus.CANCELLED.value, "cancelled")
+        or is_rejected
+    )
+
     is_failed = (
         has_failed_records
         or has_fatal_errors
@@ -66,9 +86,18 @@ async def conclude_node(
         or state.get("status") in (AgentExecutionStatus.FAILED, AgentExecutionStatus.ROLLING_BACK)
     )
 
-    final_agent_status = AgentExecutionStatus.FAILED if is_failed else AgentExecutionStatus.RESOLVED
-    final_output_status = ExecutionStatus.FAILED if is_failed else ExecutionStatus.COMPLETED
-    is_resolved = not is_failed
+    if is_cancelled:
+        final_agent_status = AgentExecutionStatus.FAILED
+        final_output_status = ExecutionStatus.CANCELLED
+        is_resolved = False
+    elif is_failed:
+        final_agent_status = AgentExecutionStatus.FAILED
+        final_output_status = ExecutionStatus.FAILED
+        is_resolved = False
+    else:
+        final_agent_status = AgentExecutionStatus.RESOLVED
+        final_output_status = ExecutionStatus.COMPLETED
+        is_resolved = True
 
     # 2. Medición y cálculo de tiempos de ejecución (execution_time_ms)
     execution_time_ms: float = 0.0
@@ -133,9 +162,19 @@ async def conclude_node(
 
     # F. Fallback canónico por defecto
     if not response_text:
-        response_text = (
-            "Ejecución finalizada con éxito." if is_resolved else "Ejecución concluida con errores."
-        )
+        if is_cancelled:
+            rejection_notes = (
+                getattr(approval_val, "notes", None)
+                if approval_val
+                else (approval_val.get("notes") if isinstance(approval_val, dict) else None)
+            )
+            response_text = str(
+                rejection_notes or "Ejecución cancelada por rechazo de operador (HITL)."
+            )
+        elif is_resolved:
+            response_text = "Ejecución finalizada con éxito."
+        else:
+            response_text = "Ejecución concluida con errores."
 
     # Asegurar que el último mensaje del historial contenga la respuesta resolutiva
     if not messages or not isinstance(messages[-1], AIMessage) or not messages[-1].content:
