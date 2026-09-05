@@ -32,16 +32,16 @@ echo "========================================"
 
 echo ""
 echo "1️⃣  [Ruff] Análisis de formato y linter..."
-"$RUFF" check app tests
-"$RUFF" format --check app tests
+"$RUFF" check app tests plugins
+"$RUFF" format --check app tests plugins
 
 echo ""
 echo "2️⃣  [MyPy] Chequeo estático de tipos estricto..."
-"$MYPY" app tests
+"$MYPY" app tests plugins
 
 echo ""
-echo "3️⃣  [Pytest] Ejecución de suite de tests..."
-"$PYTEST" tests
+echo "3️⃣  [Pytest] Ejecución de suite de tests (Core + Plugins)..."
+"$PYTEST" tests plugins
 
 echo ""
 echo "========================================"

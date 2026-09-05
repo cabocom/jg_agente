@@ -250,3 +250,5 @@ Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de 
   - [x] `ISSUE-F08-T01`: Cliente de registro con jg_dashboard mediante bootstrap token (`DashboardRegistrationClient`, `CredentialStore`, `auto_register_agent` en lifespan, permisos 0600 y reintentos exponenciales).
   - [x] `ISSUE-F08-T02`: Mecanismo de persistencia y recarga de credencial permanente (`CredentialStore.load`, `reload_credentials`, verificación activa con Dashboard en boot `verify_credentials`, tolerancia a fallos de red e invalidación ante rechazo 401).
   - [x] `ISSUE-F08-T03`: Bucle periódico de heartbeat hacia Dashboard (`HeartbeatService`, recolección portable de telemetría de memoria/uptime/capacidades, tolerancia a caídas de red y ciclo de vida en `lifespan`).
+- [ ] **Fase 09:** Plugin Conversacional (`jg_plugin_conversational`):
+  - [x] `ISSUE-F09-T01`: Estructura del paquete `jg_plugin_conversational` (`ConversationalPlugin`, `PLUGIN_CLASS`, `BasePlugin`, autodescubrimiento local/entry_point y tests autónomos en `plugins/jg_plugin_conversational/tests/`).

@@ -91,8 +91,8 @@ class Settings(BaseSettings):
 
     # Perfil de capacidades y plugins para validación en boot
     PLUGINS_DIR: str | None = Field(
-        default=None,
-        description="Directorio local alternativo para escaneo de plugins",
+        default="plugins",
+        description="Directorio local para escaneo y autodescubrimiento de plugins",
     )
     REQUIRED_PLUGINS: list[str] = Field(
         default_factory=list,

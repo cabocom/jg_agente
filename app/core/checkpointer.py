@@ -103,9 +103,7 @@ class DualPostgresSaver(PostgresSaver):
 
         return await asyncio.to_thread(self.put, config, checkpoint, metadata, new_versions)
 
-    async def aput_writes(
-        self, config: Any, writes: Any, task_id: Any, task_path: Any = ""
-    ) -> Any:
+    async def aput_writes(self, config: Any, writes: Any, task_id: Any, task_path: Any = "") -> Any:
         import asyncio
 
         return await asyncio.to_thread(self.put_writes, config, writes, task_id, task_path)
