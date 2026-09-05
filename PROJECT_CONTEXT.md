@@ -1,9 +1,9 @@
 # CONTEXTO DE PROYECTO: jg_agente
 
-**Versión del documento:** 2.22.0  
+**Versión del documento:** 2.23.0  
 **Fecha de consolidación:** 5 de septiembre de 2026  
 **Componente:** Execution Plane (Motor Autónomo de Ejecución)  
-**Estado:** Fase 07 completada al 100% con ISSUE-F07-T01 (`POST /trigger`), ISSUE-F07-T02 (`GET /{thread_id}`), ISSUE-F07-T03 (`POST /approve` y `/reject`) e ISSUE-F07-T04 (`GET /capabilities`, `/health` y `/metrics`). Fases 01 a 07 completadas (100%). 218 tests pasando en verde.  
+**Estado:** Fases 01 a 07 completadas (100%). Fase 08 en progreso: ISSUE-F08-T01 completado (Cliente de registro Zero-Trust con Dashboard mediante bootstrap token, almacenamiento seguro con permisos 0600 y orquestación en lifespan).
 
 ---
 

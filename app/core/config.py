@@ -17,7 +17,34 @@ class Settings(BaseSettings):
     )
     DEBUG: bool = Field(default=False, description="Modo depuración")
     AGENT_ID: str = Field(default="jg_agente_local", description="Identificador único del agente")
+    AGENT_NAME: str | None = Field(
+        default=None, description="Nombre descriptivo del agente para el Dashboard"
+    )
     AGENT_PORT: int = Field(default=8000, description="Puerto interno de escucha")
+
+    # Registro y comunicación con jg_dashboard (Control Plane)
+    DASHBOARD_URL: str = Field(
+        default="http://jg_dashboard:8080", description="URL base de jg_dashboard"
+    )
+    AGENT_BOOTSTRAP_TOKEN: str | None = Field(
+        default=None, description="Token temporal de registro de 24h emitido por Dashboard"
+    )
+    PERMANENT_AGENT_SECRET: str | None = Field(
+        default=None, description="Secreto permanente del agente emitido por Dashboard"
+    )
+    CREDENTIALS_FILE: str = Field(
+        default=".agent_credentials.json",
+        description="Ruta al archivo local para persistir credenciales de forma segura",
+    )
+    DASHBOARD_REGISTRATION_TIMEOUT: float = Field(
+        default=10.0, description="Timeout en segundos para registro con Dashboard"
+    )
+    DASHBOARD_REGISTRATION_RETRIES: int = Field(
+        default=3, description="Número de reintentos para registro ante fallos transitorios"
+    )
+    REQUIRE_DASHBOARD_REGISTRATION: bool = Field(
+        default=False, description="Exige registro exitoso obligatorio contra el Dashboard en boot"
+    )
 
     # PostgreSQL para Checkpoints y tablas core_*
     POSTGRES_HOST: str = Field(default="jg_agente_postgres", description="Host de PostgreSQL")

@@ -243,4 +243,7 @@ Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de 
   - [x] `ISSUE-F07-T02`: Endpoint `GET /executions/{thread_id}` (consulta de estado, checkpoints, historial de pasos, HITL y errores).
   - [x] `ISSUE-F07-T03`: Endpoints de resolución HITL `POST /executions/{thread_id}/approve` y `reject` (Command(resume=...) en LangGraph).
   - [x] `ISSUE-F07-T04`: Endpoints de telemetría `GET /capabilities`, `/health` y `/metrics`.
-- [ ] **Fase 08:** Bootstrap del Agente, Integración con Plugins de Dominio y Validación End-to-End.
+- [ ] **Fase 08:** Bootstrap del Agente, Registro con Dashboard y Heartbeat (En progreso):
+  - [x] `ISSUE-F08-T01`: Cliente de registro con jg_dashboard mediante bootstrap token (`DashboardRegistrationClient`, `CredentialStore`, `auto_register_agent` en lifespan, permisos 0600 y reintentos exponenciales).
+  - [ ] `ISSUE-F08-T02`: Persistencia de credencial permanente del agente.
+  - [ ] `ISSUE-F08-T03`: Bucle periódico de heartbeat hacia Dashboard.

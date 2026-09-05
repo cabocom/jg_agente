@@ -12,6 +12,11 @@ from app.models.io import (
     MetricsResponse,
     UserContext,
 )
+from app.models.registration import (
+    AgentCredentials,
+    AgentRegistrationPayload,
+    AgentRegistrationResponse,
+)
 from app.models.state import (
     AgentExecutionStatus,
     AgentState,
@@ -37,9 +42,12 @@ from app.models.tools import (
 )
 
 __all__ = [
+    "AgentCredentials",
     "AgentExecutionStatus",
     "AgentInput",
     "AgentOutput",
+    "AgentRegistrationPayload",
+    "AgentRegistrationResponse",
     "AgentState",
     "AgentTool",
     "ApprovalRecord",

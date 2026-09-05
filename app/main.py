@@ -11,6 +11,7 @@ from app import __version__
 from app.api import executions_router, telemetry_router
 from app.core.boot import init_agent_capabilities
 from app.core.config import settings
+from app.core.registration import auto_register_agent
 
 logger = logging.getLogger("jg_agente")
 logging.basicConfig(
@@ -21,7 +22,7 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Ciclo de vida de la aplicación con validación de boot e inicialización de plugins."""
+    """Ciclo de vida de la aplicación con validación de boot, registro y plugins."""
     logger.info(
         "Iniciando jg_agente v%s (Agent ID: %s, ENV: %s)",
         __version__,
@@ -37,9 +38,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # 2. Inicialización asíncrona de plugins
     await plugin_manager.startup()
 
+    # 3. Comprobación de credenciales y aprovisionamiento con Dashboard (Zero-Trust Bootstrap)
+    credentials = await auto_register_agent(settings=settings, registry=registry)
+    app.state.credentials = credentials
+
     yield
 
-    # 3. Apagado ordenado
+    # 4. Apagado ordenado
     logger.info("Deteniendo jg_agente...")
     await plugin_manager.shutdown()
 
@@ -65,4 +70,5 @@ async def root() -> dict[str, Any]:
         "agent_id": settings.AGENT_ID,
         "environment": settings.ENV,
         "status": "online",
+        "registered": bool(settings.PERMANENT_AGENT_SECRET),
     }
