@@ -19,6 +19,7 @@ from app.models.state import (
     AuditRecord,
     IntentModel,
     StepStatus,
+    VerificationStatus,
 )
 
 logger = logging.getLogger("jg_agente.nodes.conclude")
@@ -45,10 +46,24 @@ async def conclude_node(
     records = list(state.get("execution_records") or [])
 
     # 1. Determinar si la ejecución concluyó con éxito o fallo
+    v_results = list(state.get("verification_results") or [])
+    has_verification_fail = any(
+        (v.get("status") if isinstance(v, dict) else getattr(v, "status", None))
+        in (
+            VerificationStatus.FAIL,
+            VerificationStatus.FAIL.value,
+            VerificationStatus.DEGRADED,
+            VerificationStatus.DEGRADED.value,
+        )
+        for v in v_results
+    )
     has_failed_records = any(getattr(r, "status", None) == StepStatus.FAILED for r in records)
     has_fatal_errors = any(getattr(e, "fatal", False) for e in errors)
     is_failed = (
-        has_failed_records or has_fatal_errors or state.get("status") == AgentExecutionStatus.FAILED
+        has_failed_records
+        or has_fatal_errors
+        or has_verification_fail
+        or state.get("status") in (AgentExecutionStatus.FAILED, AgentExecutionStatus.ROLLING_BACK)
     )
 
     final_agent_status = AgentExecutionStatus.FAILED if is_failed else AgentExecutionStatus.RESOLVED
@@ -87,14 +102,22 @@ async def conclude_node(
             if resp:
                 response_text = str(resp).strip()
 
-    # C. Sintetizar a partir de las herramientas ejecutadas
+    # C. Sintetizar si hubo compensación automática (rollback)
+    rollback_recs = list(state.get("rollback_records") or [])
+    if not response_text and is_failed and rollback_recs:
+        response_text = (
+            f"La ejecución falló durante la verificación. Se ejecutó la compensación automática (rollback) "
+            f"de {len(rollback_recs)} paso(s) reversible(s)."
+        )
+
+    # D. Sintetizar a partir de las herramientas ejecutadas
     if not response_text and records:
         if is_failed:
             failed_steps = [r for r in records if getattr(r, "status", None) == StepStatus.FAILED]
             err_msg = (
                 failed_steps[0].error
                 if failed_steps and failed_steps[0].error
-                else "Fallo en herramienta"
+                else "Fallo en verificación u operación"
             )
             response_text = f"La ejecución falló durante el paso '{failed_steps[0].step_id}' ({failed_steps[0].tool_name}): {err_msg}"
         else:
@@ -104,11 +127,11 @@ async def conclude_node(
                 f"Herramientas ejecutadas con éxito ({tools_summary}). Resultado: {last_output}"
             )
 
-    # D. Sintetizar a partir de los errores registrados
+    # E. Sintetizar a partir de los errores registrados
     if not response_text and errors:
         response_text = f"La ejecución finalizó con error: {errors[-1].message}"
 
-    # E. Fallback canónico por defecto
+    # F. Fallback canónico por defecto
     if not response_text:
         response_text = (
             "Ejecución finalizada con éxito." if is_resolved else "Ejecución concluida con errores."

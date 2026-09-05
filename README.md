@@ -132,7 +132,9 @@ jg_agente/
 │   │   ├── observe.py              # Nodo opcional observe: telemetría agnóstica de entorno con ObserverEngine
 │   │   ├── plan.py                 # Nodo opcional plan: formulación de ExecutionPlan con pasos y dependencias
 │   │   ├── reason.py               # Nodo base reason: inferencia LLM, tool binding y decisión de flujo
-│   │   └── risk_assess.py          # Nodo de gobernanza HITL: evaluación de riesgos (SecurityGuard)
+│   │   ├── risk_assess.py          # Nodo de gobernanza HITL: evaluación de riesgos (SecurityGuard)
+│   │   ├── rollback.py             # Nodo de compensación: reversión automática en orden inverso ante fallos
+│   │   └── verify.py               # Nodo de verificación: comprobación activa post-ejecución con VerifierEngine
 │   ├── plugins/
 │   │   ├── __init__.py             # Exportación BasePlugin, BaseEngine, PluginMetadata
 │   │   └── base.py                 # Interfaz abstracta BasePlugin, ciclo de vida y BaseEngine
@@ -171,7 +173,8 @@ jg_agente/
 │   ├── test_node_observe.py
 │   ├── test_node_plan.py
 │   ├── test_node_risk_assess.py
-│   └── test_node_human_approval.py
+│   ├── test_node_human_approval.py
+│   └── test_nodes_verify_rollback.py
 └── scripts/
     └── check.sh                    # Verificación integral (Ruff + MyPy + Pytest)
 ```

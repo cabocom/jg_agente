@@ -6,9 +6,7 @@ Cumple con el principio de Agnosticismo Radical del Core: la topología se ensam
 exclusivamente por introspección de capacidades sin referencias a dominios ni banderas fijas.
 """
 
-import inspect
 from collections.abc import Callable
-from datetime import UTC, datetime
 from typing import Any, cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -20,10 +18,8 @@ from pydantic import BaseModel, Field
 
 from app.core.registry import CapabilityRegistry
 from app.models.state import (
-    AgentExecutionStatus,
     AgentState,
     ApprovalStatus,
-    AuditRecord,
     IntentModel,
     PolicyDecision,
     StepStatus,
@@ -128,80 +124,20 @@ async def default_verify_node(
     state: AgentState,
     registry: CapabilityRegistry,
 ) -> dict[str, Any]:
-    """Nodo de verificación: comprueba activamente los resultados post-ejecución."""
-    verifier = registry.get_verifier()
-    records = state.get("execution_records") or []
-    has_failed_steps = any(r.status == StepStatus.FAILED for r in records)
+    """Nodo de verificación: delega en verify_node."""
+    from app.nodes.verify import verify_node
 
-    v_status = VerificationStatus.FAIL if has_failed_steps else VerificationStatus.PASS
-    details: dict[str, Any] = {"verified_by": verifier.name if verifier else "core"}
-
-    if verifier is not None:
-        verify_fn = getattr(verifier, "verify", None)
-        if callable(verify_fn):
-            res = verify_fn(state)
-            if inspect.iscoroutine(res):
-                v_res = await res
-            else:
-                v_res = res
-            if isinstance(v_res, dict):
-                details.update(v_res)
-                if "status" in v_res:
-                    v_status = VerificationStatus(v_res["status"])
-
-    return {
-        "status": AgentExecutionStatus.VERIFYING,
-        "verification_results": [
-            {
-                "status": v_status.value,
-                "timestamp": datetime.now(UTC).isoformat(),
-                "details": details,
-            }
-        ],
-        "audit_trail": [
-            AuditRecord(
-                event_type="verification_completed",
-                details={"status": v_status.value, "details": details},
-            )
-        ],
-    }
+    return await verify_node(state, registry=registry)
 
 
 async def default_rollback_node(
     state: AgentState,
     registry: CapabilityRegistry,
 ) -> dict[str, Any]:
-    """Nodo de compensación (Rollback): revierte pasos reversibles ejecutados."""
-    records = state.get("execution_records") or []
-    rollback_traces: list[dict[str, Any]] = []
+    """Nodo de compensación (Rollback): delega en rollback_node."""
+    from app.nodes.rollback import rollback_node
 
-    # Revertir en orden inverso de ejecución
-    for rec in reversed(records):
-        if rec.status == StepStatus.COMPLETED and rec.rollback_context is not None:
-            tool = registry.get_tool(rec.tool_name)
-            if tool and tool.reversible:
-                res = tool.rollback(rec.rollback_context)
-                rollback_traces.append(
-                    {
-                        "step_id": rec.step_id,
-                        "tool_name": rec.tool_name,
-                        "success": res.success,
-                        "output": res.output,
-                        "error": res.error,
-                        "timestamp": datetime.now(UTC).isoformat(),
-                    }
-                )
-
-    return {
-        "status": AgentExecutionStatus.ROLLING_BACK,
-        "rollback_records": rollback_traces,
-        "audit_trail": [
-            AuditRecord(
-                event_type="rollback_completed",
-                details={"steps_reverted": len(rollback_traces)},
-            )
-        ],
-    }
+    return await rollback_node(state, registry=registry)
 
 
 async def default_conclude_node(

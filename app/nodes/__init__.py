@@ -7,6 +7,8 @@ from app.nodes.observe import observe_node
 from app.nodes.plan import plan_node
 from app.nodes.reason import reason_node
 from app.nodes.risk_assess import risk_assess_node
+from app.nodes.rollback import rollback_node
+from app.nodes.verify import verify_node
 
 __all__ = [
     "conclude_node",
@@ -16,4 +18,6 @@ __all__ = [
     "plan_node",
     "reason_node",
     "risk_assess_node",
+    "rollback_node",
+    "verify_node",
 ]

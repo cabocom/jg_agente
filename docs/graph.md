@@ -213,3 +213,27 @@ El nodo `human_approval` (`app/nodes/human_approval.py`) gestiona la suspensión
    - Si la decisión es de rechazo (`status=REJECTED`), actualiza el estado a `FAILED`, registra la auditoría `human_approval_rejected` y enruta hacia `conclude` para devolver una respuesta controlada de denegación.
 5. **Pase Transparente (Pass-Through):** Si el estado ya cuenta con autorización o rechazo previo, transiciona limpiamente sin emitir interrupciones redundantes.
 6. **Resiliencia en Ejecuciones Offline:** Si se invoca fuera del entorno runnable de LangGraph (e.g. tests unitarios directos), captura `RuntimeError` y devuelve el estado `AWAITING_APPROVAL` con auditoría sin colapsar el proceso.
+
+---
+
+## 12. Nodo de Verificación Activa: `verify`
+
+El nodo `verify` (`app/nodes/verify.py`) evalúa activamente el impacto y la integridad de las acciones completadas tras la etapa `execute`:
+
+1. **Invocación Polimórfica de VerifierEngine:** Se conecta dinámicamente si existe un `VerifierEngine` registrado en `CapabilityRegistry`. Invoca su método de comprobación (`verify(state)`), admitiendo retornos como diccionarios estructurados, enumeraciones `VerificationStatus` o booleanos directos.
+2. **Fallback Autónomo sin Motor:** Si el agente no cuenta con un `VerifierEngine` instalado, analiza automáticamente `execution_records` y `errors` para detectar pasos fallidos (`StepStatus.FAILED`) o errores fatales.
+3. **Registro Estructurado:** Almacena los resultados en `state["verification_results"]` con timestamp ISO, estado (`PASS`, `FAIL`, `DEGRADED`) y métricas de latencia.
+4. **Trazabilidad Inmutable:** Emite eventos `verification_completed` o `verification_failed` en `state["audit_trail"]` identificando el actor y los detalles de comprobación.
+5. **Enrutamiento Condicional (`route_after_verify`):** Si detecta un fallo y existen herramientas reversibles ejecutadas, bifurca hacia `rollback`; en caso contrario, continúa hacia `conclude`.
+
+---
+
+## 13. Nodo de Compensación Automática: `rollback`
+
+El nodo `rollback` (`app/nodes/rollback.py`) restituye el estado previo del sistema cuando la verificación detecta anomalías:
+
+1. **Orden Cronológico Inverso (LIFO):** Itera sobre los pasos completados (`reversed(execution_records)`), garantizando que las dependencias creadas en pasos posteriores se reviertan antes que los pasos iniciales.
+2. **Inyección de `rollback_context`:** Pasa a cada herramienta reversible (`tool.reversible == True`) el contexto exacto emitido durante su ejecución, permitiendo una compensación quirúrgica.
+3. **Aislamiento y Resiliencia (Best-Effort):** Las excepciones en una compensación particular son capturadas y registradas con `success=False` sin abortar el rollback de los pasos restantes.
+4. **Trazas y Auditoría:** Almacena el historial de compensaciones en `state["rollback_records"]` y emite el evento `rollback_completed` con métricas de pasos revertidos y tasa de éxito.
+5. **Señalización de Fallo:** Fija `state["status"] = AgentExecutionStatus.FAILED` y añade un `ExecutionError` fatal para asegurar que `conclude` sintetice la respuesta informativa adecuada para el usuario.
