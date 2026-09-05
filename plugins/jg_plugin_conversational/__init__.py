@@ -5,8 +5,15 @@ contrato formal BasePlugin del Execution Plane.
 """
 
 from jg_plugin_conversational.plugin import ConversationalPlugin
+from jg_plugin_conversational.weather import WeatherArgs, create_weather_tool
 
 PLUGIN_CLASS = ConversationalPlugin
 __version__ = "0.1.0"
 
-__all__ = ["ConversationalPlugin", "PLUGIN_CLASS", "__version__"]
+__all__ = [
+    "ConversationalPlugin",
+    "PLUGIN_CLASS",
+    "__version__",
+    "WeatherArgs",
+    "create_weather_tool",
+]

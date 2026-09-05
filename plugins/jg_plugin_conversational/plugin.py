@@ -28,16 +28,14 @@ class ConversationalPlugin(BasePlugin):
             author="Javier Gálvez",
             dependencies=[],
             jg_agente_version_min="0.1.0",
-            tags=["conversational", "nlp", "interaction"],
+            tags=["conversational", "nlp", "interaction", "weather"],
         )
 
     def register_tools(self) -> list[AgentTool]:
-        """Declara la lista de AgentTool provistas por el plugin conversacional.
+        """Declara la lista de AgentTool provistas por el plugin conversacional."""
+        from jg_plugin_conversational.weather import create_weather_tool
 
-        En esta fase estructural inicial retorna lista vacía. Las herramientas
-        específicas se incorporan en tareas sucesivas.
-        """
-        return []
+        return [create_weather_tool()]
 
     def register_engines(self) -> dict[str, BaseEngine]:
         """Declara los motores cognitivos provistos por el plugin.

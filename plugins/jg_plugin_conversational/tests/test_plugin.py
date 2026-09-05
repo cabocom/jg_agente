@@ -43,7 +43,8 @@ def test_register_tools_and_engines_contracts() -> None:
 
     tools = plugin.register_tools()
     assert isinstance(tools, list)
-    assert len(tools) == 0
+    assert len(tools) == 1
+    assert tools[0].name == "get_weather"
 
     engines = plugin.register_engines()
     assert isinstance(engines, dict)
@@ -72,25 +73,27 @@ async def test_async_lifecycle() -> None:
 
 def test_strict_isolation_no_devops_or_asterisk() -> None:
     """Garantiza ausencia total de dependencias o imports hacia DevOps o Asterisk directo."""
-    plugin_file = Path(__file__).parent.parent / "plugin.py"
-    assert plugin_file.exists(), f"No se encontró el archivo de plugin en {plugin_file}"
+    pkg_dir = Path(__file__).parent.parent
+    py_files = list(pkg_dir.glob("*.py"))
+    assert py_files, "No se encontraron archivos de código en el plugin"
 
-    tree = ast.parse(plugin_file.read_text(encoding="utf-8"))
     forbidden_terms = ["docker", "kubernetes", "k8s", "devops", "asterisk", "ari", "pjsip"]
 
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
+    for py_file in py_files:
+        tree = ast.parse(py_file.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    for term in forbidden_terms:
+                        assert term not in alias.name.lower(), (
+                            f"Import indebido detectado en {py_file.name}: {alias.name}"
+                        )
+            elif isinstance(node, ast.ImportFrom):
+                mod_name = node.module or ""
                 for term in forbidden_terms:
-                    assert term not in alias.name.lower(), (
-                        f"Import indebido detectado en plugin conversacional: {alias.name}"
+                    assert term not in mod_name.lower(), (
+                        f"ImportFrom indebido detectado en {py_file.name}: {mod_name}"
                     )
-        elif isinstance(node, ast.ImportFrom):
-            mod_name = node.module or ""
-            for term in forbidden_terms:
-                assert term not in mod_name.lower(), (
-                    f"ImportFrom indebido detectado en plugin conversacional: {mod_name}"
-                )
 
 
 def test_plugin_manager_autodiscovery() -> None:

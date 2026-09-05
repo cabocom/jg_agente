@@ -252,3 +252,4 @@ Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de 
   - [x] `ISSUE-F08-T03`: Bucle periódico de heartbeat hacia Dashboard (`HeartbeatService`, recolección portable de telemetría de memoria/uptime/capacidades, tolerancia a caídas de red y ciclo de vida en `lifespan`).
 - [ ] **Fase 09:** Plugin Conversacional (`jg_plugin_conversational`):
   - [x] `ISSUE-F09-T01`: Estructura del paquete `jg_plugin_conversational` (`ConversationalPlugin`, `PLUGIN_CLASS`, `BasePlugin`, autodescubrimiento local/entry_point y tests autónomos en `plugins/jg_plugin_conversational/tests/`).
+  - [x] `ISSUE-F09-T02`: Implementación de `WeatherTool` (`get_weather`, `WeatherArgs`, contrato `AgentTool`, protección anti-SSRF, modo dual Azure Maps / simulación determinista y tests en el plugin).
