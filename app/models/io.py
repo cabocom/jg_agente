@@ -256,3 +256,100 @@ class HITLResolutionRequest(BaseModel):
         default_factory=dict,
         description="Metadatos arbitrarios complementarios para auditoría",
     )
+
+
+class HealthComponentStatus(BaseModel):
+    """Estado de un componente o subsistema individual."""
+
+    model_config = ConfigDict(extra="allow")
+
+    status: str = Field(
+        ..., description="Estado del componente (connected, ready, disconnected, degraded)"
+    )
+    latency_ms: float | None = Field(
+        default=None, description="Latencia observada de sondeo en milisegundos"
+    )
+    details: dict[str, Any] = Field(
+        default_factory=dict, description="Detalles adicionales o configuración"
+    )
+    error: str | None = Field(
+        default=None, description="Error descriptivo si el componente no está saludable"
+    )
+
+
+class HealthResponse(BaseModel):
+    """Respuesta estructurada del chequeo de salud /health."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    status: str = Field(
+        default="healthy", description="Estado global del servicio (healthy, degraded, unhealthy)"
+    )
+    service: str = Field(default="jg_agente", description="Nombre del servicio")
+    version: str = Field(..., description="Versión activa del agente")
+    database: str = Field(default="unknown", description="Estado de conectividad con PostgreSQL")
+    database_error: str | None = Field(default=None, description="Error de base de datos si existe")
+    components: dict[str, HealthComponentStatus] = Field(
+        default_factory=dict,
+        description="Estado detallado por subsistema (database, llm, checkpointer)",
+    )
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="Timestamp UTC del chequeo de salud",
+    )
+
+
+class ExecutionMetrics(BaseModel):
+    """Métricas cuantitativas de ejecuciones del agente."""
+
+    model_config = ConfigDict(extra="allow")
+
+    total_executions: int = Field(
+        default=0, description="Total acumulado de ejecuciones registradas"
+    )
+    completed: int = Field(default=0, description="Total de ejecuciones finalizadas con éxito")
+    failed: int = Field(default=0, description="Total de ejecuciones fallidas")
+    cancelled: int = Field(
+        default=0, description="Total de ejecuciones canceladas por rechazo HITL"
+    )
+    waiting_approval: int = Field(
+        default=0, description="Total de ejecuciones pausadas en espera de aprobación"
+    )
+    in_progress: int = Field(default=0, description="Total de ejecuciones actualmente en curso")
+    avg_execution_time_ms: float = Field(
+        default=0.0, description="Tiempo promedio de ejecución en ms"
+    )
+    min_execution_time_ms: float = Field(
+        default=0.0, description="Tiempo mínimo de ejecución registrado en ms"
+    )
+    max_execution_time_ms: float = Field(
+        default=0.0, description="Tiempo máximo de ejecución registrado en ms"
+    )
+
+
+class MetricsResponse(BaseModel):
+    """Respuesta consolidada del endpoint /metrics."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    service: str = Field(default="jg_agente", description="Nombre del servicio")
+    version: str = Field(..., description="Versión activa del agente")
+    uptime_seconds: float = Field(
+        default=0.0, description="Segundos transcurridos desde el arranque"
+    )
+    executions: ExecutionMetrics = Field(
+        default_factory=ExecutionMetrics,
+        description="Métricas agregadas de rendimiento de ejecuciones",
+    )
+    capabilities: dict[str, int] = Field(
+        default_factory=dict,
+        description="Conteos de capacidades disponibles (tools, engines, plugins)",
+    )
+    hitl: dict[str, int] = Field(
+        default_factory=dict,
+        description="Estadísticas de gobernanza humana (approvals_requested, approvals_pending)",
+    )
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="Timestamp UTC de generación de métricas",
+    )

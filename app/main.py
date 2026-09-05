@@ -5,15 +5,12 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, Request, Response, status
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
+from fastapi import FastAPI
 
 from app import __version__
-from app.api.executions import router as executions_router
+from app.api import executions_router, telemetry_router
 from app.core.boot import init_agent_capabilities
 from app.core.config import settings
-from app.core.registry import CapabilityRegistry
 
 logger = logging.getLogger("jg_agente")
 logging.basicConfig(
@@ -56,6 +53,7 @@ app = FastAPI(
 
 # Montar enrutadores REST de la API
 app.include_router(executions_router)
+app.include_router(telemetry_router)
 
 
 @app.get("/", tags=["Root"])
@@ -67,44 +65,4 @@ async def root() -> dict[str, Any]:
         "agent_id": settings.AGENT_ID,
         "environment": settings.ENV,
         "status": "online",
-    }
-
-
-@app.get("/capabilities", tags=["Observability"])
-async def capabilities(request: Request) -> dict[str, Any]:
-    """Catálogo consolidado de herramientas, motores y plugins registrados en jg_agente."""
-    registry: CapabilityRegistry = (
-        getattr(request.app.state, "registry", None) or CapabilityRegistry()
-    )
-    return registry.get_capabilities_summary()
-
-
-@app.get("/health", tags=["Observability"])
-async def health(response: Response) -> dict[str, Any]:
-    """Chequeo de salud del agente y conectividad con PostgreSQL."""
-    db_status = "untested"
-    db_error = None
-
-    try:
-        engine = create_async_engine(
-            settings.async_database_url,
-            pool_pre_ping=True,
-            connect_args={"timeout": 3},
-        )
-        async with engine.connect() as conn:
-            await conn.execute(text("SELECT 1"))
-        await engine.dispose()
-        db_status = "connected"
-    except Exception as exc:
-        db_status = "disconnected"
-        db_error = str(exc)
-        logger.warning("Fallo en verificación de base de datos en /health: %s", exc)
-        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-
-    return {
-        "status": "healthy" if db_status == "connected" else "degraded",
-        "service": "jg_agente",
-        "version": __version__,
-        "database": db_status,
-        "database_error": db_error,
     }

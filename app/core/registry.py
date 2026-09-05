@@ -223,9 +223,11 @@ class CapabilityRegistry:
             "tools": [
                 {
                     "name": t.name,
+                    "description": t.description,
                     "category": t.category,
                     "risk_level": str(t.risk_level),
                     "read_only": t.read_only,
+                    "reversible": t.reversible,
                     "makes_http_requests": t.makes_http_requests,
                 }
                 for t in self._tools.values()

@@ -108,6 +108,10 @@ jg_agente/
 ├── app/
 │   ├── __init__.py                 # Versión del paquete
 │   ├── main.py                     # Bootstrap FastAPI y ciclo de vida
+│   ├── api/
+│   │   ├── __init__.py             # Exportación de enrutadores executions_router y telemetry_router
+│   │   ├── executions.py           # Endpoints POST /trigger, GET /{thread_id}, POST /approve, POST /reject
+│   │   └── telemetry.py            # Endpoints GET /capabilities, GET /health, GET /metrics
 │   ├── core/
 │   │   ├── boot.py                 # Validación en boot, comprobación de integridad y arranque
 │   │   ├── checkpointer.py         # PostgresSaver, MemorySaver y vistas core_checkpoints
@@ -174,7 +178,11 @@ jg_agente/
 │   ├── test_node_plan.py
 │   ├── test_node_risk_assess.py
 │   ├── test_node_human_approval.py
-│   └── test_nodes_verify_rollback.py
+│   ├── test_nodes_verify_rollback.py
+│   ├── test_api_executions_trigger.py
+│   ├── test_api_executions_get.py
+│   ├── test_api_executions_hitl.py
+│   └── test_api_telemetry.py
 └── scripts/
     └── check.sh                    # Verificación integral (Ruff + MyPy + Pytest)
 ```
@@ -230,9 +238,9 @@ Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de 
   - [x] `ISSUE-F06-T03`: Implementación de nodo de evaluación de riesgo y política HITL: `risk_assess` (RiskLevel >= HIGH y human_approval).
   - [x] `ISSUE-F06-T04`: Implementación de nodo de pausa HITL y reanudación: `human_approval` (interrupción con interrupt() y checkpointing).
   - [x] `ISSUE-F06-T05`: Implementación de nodos `verify` y `rollback` (verificación de anomalías y compensaciones automáticas reversibles).
-- [ ] **Fase 07:** Exposición API REST y Telemetría:
+- [x] **Fase 07:** Exposición API REST y Telemetría (100%):
   - [x] `ISSUE-F07-T01`: Endpoint `POST /executions/trigger` (ejecución síncrona/asíncrona, pausa HITL y persistencia en `core_executions`).
   - [x] `ISSUE-F07-T02`: Endpoint `GET /executions/{thread_id}` (consulta de estado, checkpoints, historial de pasos, HITL y errores).
   - [x] `ISSUE-F07-T03`: Endpoints de resolución HITL `POST /executions/{thread_id}/approve` y `reject` (Command(resume=...) en LangGraph).
-  - [ ] `ISSUE-F07-T04`: Endpoints de telemetría `GET /capabilities`, `/health` y `/metrics`.
+  - [x] `ISSUE-F07-T04`: Endpoints de telemetría `GET /capabilities`, `/health` y `/metrics`.
 - [ ] **Fase 08:** Bootstrap del Agente, Integración con Plugins de Dominio y Validación End-to-End.
