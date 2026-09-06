@@ -46,10 +46,11 @@ class DevOpsPlugin(BasePlugin):
     def register_tools(self) -> list[AgentTool]:
         """Declara la lista de AgentTool provistas por el plugin DevOps.
 
-        En esta fase de estructura y modelos, la lista inicial es vacía.
-        Las herramientas operativas se incorporarán en las siguientes tareas de la fase.
+        Registra DockerRestartTool (docker_restart) para reinicio seguro con compensación (rollback).
         """
-        return []
+        from jg_plugin_devops.docker_tools import create_docker_restart_tool
+
+        return [create_docker_restart_tool()]
 
     def register_engines(self) -> dict[str, BaseEngine]:
         """Declara los motores de dominio provistos por el plugin.

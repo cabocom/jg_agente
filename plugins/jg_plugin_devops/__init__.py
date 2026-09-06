@@ -5,6 +5,11 @@ cumpliendo el contrato formal BasePlugin del Execution Plane.
 """
 
 from jg_plugin_devops.discovery import InfraDiscoveryEngine
+from jg_plugin_devops.docker_tools import (
+    DockerRestartArgs,
+    DockerRestartTool,
+    create_docker_restart_tool,
+)
 from jg_plugin_devops.models.db import (
     DevopsBase,
     DevopsIncident,
@@ -40,6 +45,9 @@ __all__ = [
     "InfraDiscoveryEngine",
     "DAGPlannerEngine",
     "DevopsVerifierEngine",
+    "DockerRestartTool",
+    "DockerRestartArgs",
+    "create_docker_restart_tool",
     "PLUGIN_CLASS",
     "__version__",
     # Modelos Pydantic

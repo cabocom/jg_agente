@@ -82,7 +82,9 @@ def test_plan_from_incidents_dag_structure() -> None:
             assert step_ids.index(dep) < step_ids.index(step.step_id)
 
     # Verificar niveles de riesgo
-    docker_remed = next(s for s in plan.steps if s.tool_name == "restart_container")
+    docker_remed = next(
+        s for s in plan.steps if s.tool_name in ("restart_container", "docker_restart")
+    )
     assert docker_remed.risk_level == RiskLevel.HIGH
     assert docker_remed.reversible is True
 

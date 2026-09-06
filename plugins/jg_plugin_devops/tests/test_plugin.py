@@ -7,6 +7,7 @@ import pytest
 
 from app.core.plugin_manager import PluginManager
 from app.core.registry import CapabilityRegistry
+from app.models.tools import RiskLevel
 from app.plugins.base import BasePlugin, PluginMetadata
 from jg_plugin_devops import (
     PLUGIN_CLASS,
@@ -50,6 +51,10 @@ def test_register_tools_engines_models_contracts() -> None:
 
     tools = plugin.register_tools()
     assert isinstance(tools, list)
+    assert len(tools) == 1
+    assert tools[0].name == "docker_restart"
+    assert tools[0].risk_level == RiskLevel.HIGH
+    assert tools[0].reversible is True
 
     engines = plugin.register_engines()
     assert isinstance(engines, dict)

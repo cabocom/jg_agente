@@ -267,7 +267,8 @@ Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de 
   - [x] `ISSUE-F09-T01`: Estructura del paquete `jg_plugin_conversational` (`ConversationalPlugin`, `PLUGIN_CLASS`, `BasePlugin`, autodescubrimiento local/entry_point y tests autónomos en `plugins/jg_plugin_conversational/tests/`).
   - [x] `ISSUE-F09-T02`: Implementación de `WeatherTool` (`get_weather`, `WeatherArgs`, contrato `AgentTool`, protección anti-SSRF, modo dual Azure Maps / simulación determinista y tests en el plugin).
   - [x] `ISSUE-F09-T03`: Implementación de `NewsTool` (`get_news`, `NewsArgs`, contrato `AgentTool`, filtrado seguro de temas, validación SSRF, timeout de 5s, fallback determinista y tests en el plugin).
-- [ ] **Fase 11:** Plugin DevOps y Observabilidad de Infraestructura (`jg_plugin_devops`):
+- [x] **Fase 11:** Plugin DevOps y Observabilidad de Infraestructura (`jg_plugin_devops`) (100%):
   - [x] `ISSUE-F11-T01`: Estructura del paquete `jg_plugin_devops` (`DevOpsPlugin`, `PLUGIN_CLASS`, `BasePlugin`, modelos de dominio `InfraSnapshot`, esquemas ORM con prefijo `devops_` y tests autónomos en `plugins/jg_plugin_devops/tests/`).
   - [x] `ISSUE-F11-T02`: Implementación de `InfraDiscoveryEngine` y nodo `observe` en plugin DevOps (`InfraDiscoveryEngine`, `ObserverEngine`, recolección dual portable Host/Docker, detección de incidentes y poblado de `environment_snapshot`).
   - [x] `ISSUE-F11-T03`: Implementación de `DAGPlannerEngine` y `VerifierEngine` en plugin DevOps (`DAGPlannerEngine`, `DevopsVerifierEngine`, formulación DAG de remediación con `RiskLevel` y comprobación activa de resolución de incidentes).
+  - [x] `ISSUE-F11-T04`: Implementación de herramientas Docker con `rollback_func` en plugin DevOps (`DockerRestartTool`, `DockerRestartArgs`, contrato `AgentTool`, `risk_level=HIGH`, `reversible=True`, `rollback_context` con estado previo y compensación funcional).

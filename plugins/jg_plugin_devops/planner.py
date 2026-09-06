@@ -174,11 +174,15 @@ class DAGPlannerEngine(PlannerEngine):
                 step_counter += 1
 
                 remed_id = f"step-{step_counter}"
+                details = (
+                    inc.get("details", {}) if isinstance(inc, dict) else getattr(inc, "details", {})
+                )
+                container_target = details.get("container") or title
                 steps.append(
                     PlanStep(
                         step_id=remed_id,
-                        tool_name="restart_container",
-                        tool_args={"title": title},
+                        tool_name="docker_restart",
+                        tool_args={"container": container_target, "title": title},
                         description=f"Reiniciar contenedor para mitigar incidente: {title}",
                         risk_level=RiskLevel.HIGH,
                         reversible=True,
