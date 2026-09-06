@@ -215,20 +215,61 @@ La documentación exhaustiva del proyecto se encuentra disponible en [`docs/`](d
 - **[Seguridad y Auditoría](docs/security.md):** `SecurityGuard`, `SecurityAuditLogger`, trazabilidad inmutable y protección contra SSRF.
 - **[Plugins y Extensibilidad](docs/plugins.md):** `BasePlugin`, `BaseEngine`, `CapabilityRegistry` y `PluginManager`.
 - **[Grafo y Flujos Cognitivos](docs/graph.md):** `GraphBuilder` agnóstico, nodos canónicos y `StateSnapshot`.
+- **[Tareas Pendientes y Deuda Técnica](TODO-PENDIENTES.md):** Registro de mejoras pendientes para la auditoría técnica.
 
 ---
 
-## 7. Verificación de Calidad
+## 7. Despliegue Multi-Agente y Perfiles
 
-Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de tests:
+`jg_agente` utiliza una **única imagen Docker universal** para instanciar múltiples agentes especializados mediante la variable de entorno `ENABLED_PLUGINS`:
 
-```bash
-./scripts/check.sh
+```yaml
+# Ejemplo: Agente Conversacional Puro (Puerto 8001)
+jg_agente_conversacional:
+  image: jg_agente-jg_agente:latest
+  environment:
+    - PORT=8000
+    - ENABLED_PLUGINS=jg_plugin_conversational
+    - AGENT_NAME=Agente-Conversacional
+    - DATABASE_URL=postgresql+asyncpg://postgres:postgres@jg_agente_postgres:5432/jg_agente_db
+  ports:
+    - "8001:8000"
+
+# Ejemplo: Agente DevOps Autónomo con HITL (Puerto 8002)
+jg_agente_devops:
+  image: jg_agente-jg_agente:latest
+  environment:
+    - PORT=8000
+    - ENABLED_PLUGINS=jg_plugin_devops
+    - AGENT_NAME=Agente-DevOps
+    - DATABASE_URL=postgresql+asyncpg://postgres:postgres@jg_agente_postgres:5432/jg_agente_db
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+  ports:
+    - "8002:8000"
 ```
 
 ---
 
-## 8. Estado del Proyecto y Roadmap
+## 8. Verificación de Calidad y Suite de Tests
+
+La suite completa contiene **312 tests automatizados** cubriendo contratos, seguridad SSRF, SecurityGuard, grafos LangGraph, nodos HITL y plugins (`jg_plugin_conversational` y `jg_plugin_devops`).
+
+Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de tests en el entorno virtual de host:
+
+```bash
+# Verificación integral automatizada
+./scripts/check.sh
+
+# Ejecución directa con pytest
+.venv/bin/pytest tests/ plugins/
+```
+
+> **Nota:** La imagen de producción no incluye librerías de test (`pytest`), por lo que las pruebas se ejecutan directamente en el host o mediante contenedor con extras de testing instalados.
+
+---
+
+## 9. Estado del Proyecto y Roadmap
 
 - [x] **Fase 01:** Setup inicial, Dockerfile, docker-compose, scripts de verificación y CI/CD con GitLab.
 - [x] **Fase 02:** Contratos Core (`AgentInput`, `AgentOutput`, `AgentTool`, `ToolResult`, compensación de rollback, `AgentState`).
@@ -272,3 +313,5 @@ Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de 
   - [x] `ISSUE-F11-T02`: Implementación de `InfraDiscoveryEngine` y nodo `observe` en plugin DevOps (`InfraDiscoveryEngine`, `ObserverEngine`, recolección dual portable Host/Docker, detección de incidentes y poblado de `environment_snapshot`).
   - [x] `ISSUE-F11-T03`: Implementación de `DAGPlannerEngine` y `VerifierEngine` en plugin DevOps (`DAGPlannerEngine`, `DevopsVerifierEngine`, formulación DAG de remediación con `RiskLevel` y comprobación activa de resolución de incidentes).
   - [x] `ISSUE-F11-T04`: Implementación de herramientas Docker con `rollback_func` en plugin DevOps (`DockerRestartTool`, `DockerRestartArgs`, contrato `AgentTool`, `risk_level=HIGH`, `reversible=True`, `rollback_context` con estado previo y compensación funcional).
+
+Consulte [TODO-PENDIENTES.md](TODO-PENDIENTES.md) para el detalle de ítems pendientes y deuda técnica para la siguiente fase de desarrollo.
