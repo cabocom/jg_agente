@@ -158,6 +158,8 @@ jg_agente/
 │   └── jg_plugin_devops/           # Plugin DevOps y observabilidad de infraestructura
 │       ├── plugin.py               # DevOpsPlugin (BasePlugin)
 │       ├── discovery.py            # InfraDiscoveryEngine (ObserverEngine)
+│       ├── planner.py              # DAGPlannerEngine (PlannerEngine)
+│       ├── verifier.py             # DevopsVerifierEngine (VerifierEngine)
 │       ├── models/                 # Modelos de dominio (InfraSnapshot) y ORM (devops_*)
 │       └── tests/                  # Tests autónomos del plugin
 ├── docs/                           # Documentación técnica viva
@@ -268,3 +270,4 @@ Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de 
 - [ ] **Fase 11:** Plugin DevOps y Observabilidad de Infraestructura (`jg_plugin_devops`):
   - [x] `ISSUE-F11-T01`: Estructura del paquete `jg_plugin_devops` (`DevOpsPlugin`, `PLUGIN_CLASS`, `BasePlugin`, modelos de dominio `InfraSnapshot`, esquemas ORM con prefijo `devops_` y tests autónomos en `plugins/jg_plugin_devops/tests/`).
   - [x] `ISSUE-F11-T02`: Implementación de `InfraDiscoveryEngine` y nodo `observe` en plugin DevOps (`InfraDiscoveryEngine`, `ObserverEngine`, recolección dual portable Host/Docker, detección de incidentes y poblado de `environment_snapshot`).
+  - [x] `ISSUE-F11-T03`: Implementación de `DAGPlannerEngine` y `VerifierEngine` en plugin DevOps (`DAGPlannerEngine`, `DevopsVerifierEngine`, formulación DAG de remediación con `RiskLevel` y comprobación activa de resolución de incidentes).

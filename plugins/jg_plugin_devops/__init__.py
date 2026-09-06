@@ -28,7 +28,9 @@ from jg_plugin_devops.models.snapshot import (
     ProcessInfo,
     ServiceInfo,
 )
+from jg_plugin_devops.planner import DAGPlannerEngine
 from jg_plugin_devops.plugin import DevOpsPlugin
+from jg_plugin_devops.verifier import DevopsVerifierEngine
 
 PLUGIN_CLASS = DevOpsPlugin
 __version__ = "0.1.0"
@@ -36,6 +38,8 @@ __version__ = "0.1.0"
 __all__ = [
     "DevOpsPlugin",
     "InfraDiscoveryEngine",
+    "DAGPlannerEngine",
+    "DevopsVerifierEngine",
     "PLUGIN_CLASS",
     "__version__",
     # Modelos Pydantic

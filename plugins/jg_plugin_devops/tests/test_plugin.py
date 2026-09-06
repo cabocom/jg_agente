@@ -53,9 +53,16 @@ def test_register_tools_engines_models_contracts() -> None:
 
     engines = plugin.register_engines()
     assert isinstance(engines, dict)
+    assert len(engines) == 3
     assert "infra_discovery" in engines
     assert engines["infra_discovery"].name == "infra_discovery"
     assert engines["infra_discovery"].engine_type == "observer"
+    assert "dag_planner" in engines
+    assert engines["dag_planner"].name == "dag_planner"
+    assert engines["dag_planner"].engine_type == "planner"
+    assert "devops_verifier" in engines
+    assert engines["devops_verifier"].name == "devops_verifier"
+    assert engines["devops_verifier"].engine_type == "verifier"
 
     models = plugin.register_models()
     assert isinstance(models, dict)
