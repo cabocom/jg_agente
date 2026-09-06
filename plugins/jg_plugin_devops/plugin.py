@@ -27,6 +27,7 @@ class DevOpsPlugin(BasePlugin):
 
     def __init__(self) -> None:
         self._is_started: bool = False
+        self._discovery_engine: BaseEngine | None = None
 
     def get_plugin_metadata(self) -> PluginMetadata:
         """Retorna los metadatos canónicos del plugin DevOps."""
@@ -51,9 +52,13 @@ class DevOpsPlugin(BasePlugin):
     def register_engines(self) -> dict[str, BaseEngine]:
         """Declara los motores de dominio provistos por el plugin.
 
-        Motores como InfraDiscoveryEngine se integrarán en tareas subsiguientes.
+        Registra InfraDiscoveryEngine como ObserverEngine para el nodo observe.
         """
-        return {}
+        from jg_plugin_devops.discovery import InfraDiscoveryEngine
+
+        if self._discovery_engine is None:
+            self._discovery_engine = InfraDiscoveryEngine()
+        return {"infra_discovery": self._discovery_engine}
 
     def register_models(self) -> dict[str, type[BaseModel]]:
         """Registra los modelos Pydantic de infraestructura expuestos por el plugin."""
@@ -68,11 +73,15 @@ class DevOpsPlugin(BasePlugin):
     async def startup(self) -> None:
         """Inicialización asíncrona durante el arranque del agente."""
         logger.info("Inicializando DevOpsPlugin v0.1.0...")
+        if self._discovery_engine is not None:
+            await self._discovery_engine.startup()
         self._is_started = True
 
     async def shutdown(self) -> None:
         """Liberación asíncrona de recursos al detener el agente."""
         logger.info("Deteniendo DevOpsPlugin...")
+        if self._discovery_engine is not None:
+            await self._discovery_engine.shutdown()
         self._is_started = False
 
     async def health_check(self) -> dict[str, Any]:
@@ -82,6 +91,14 @@ class DevOpsPlugin(BasePlugin):
             "plugin": self.name,
             "version": "0.1.0",
             "started": self._is_started,
+            "engine": (
+                "started"
+                if (
+                    self._discovery_engine is not None
+                    and getattr(self._discovery_engine, "_is_started", False)
+                )
+                else "idle"
+            ),
         }
 
 

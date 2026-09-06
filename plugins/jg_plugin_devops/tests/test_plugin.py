@@ -53,6 +53,9 @@ def test_register_tools_engines_models_contracts() -> None:
 
     engines = plugin.register_engines()
     assert isinstance(engines, dict)
+    assert "infra_discovery" in engines
+    assert engines["infra_discovery"].name == "infra_discovery"
+    assert engines["infra_discovery"].engine_type == "observer"
 
     models = plugin.register_models()
     assert isinstance(models, dict)

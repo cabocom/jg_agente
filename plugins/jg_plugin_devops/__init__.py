@@ -4,6 +4,7 @@ Provee capacidades de gestión, observabilidad y operación de infraestructura
 cumpliendo el contrato formal BasePlugin del Execution Plane.
 """
 
+from jg_plugin_devops.discovery import InfraDiscoveryEngine
 from jg_plugin_devops.models.db import (
     DevopsBase,
     DevopsIncident,
@@ -34,6 +35,7 @@ __version__ = "0.1.0"
 
 __all__ = [
     "DevOpsPlugin",
+    "InfraDiscoveryEngine",
     "PLUGIN_CLASS",
     "__version__",
     # Modelos Pydantic
