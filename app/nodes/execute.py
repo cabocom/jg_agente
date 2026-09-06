@@ -118,21 +118,6 @@ async def execute_node(
                     )
                 )
 
-    # Fallback si no hay plan ni tool_calls explícitos pero hay herramientas registradas
-    if not steps_to_run:
-        tools = registry.list_tools()
-        if tools:
-            first_tool = tools[0]
-            steps_to_run = [
-                PlanStep(
-                    step_id="direct-step-1",
-                    tool_name=first_tool.name,
-                    tool_args={},
-                    risk_level=first_tool.risk_level,
-                    reversible=first_tool.reversible,
-                )
-            ]
-
     # 4. Ejecución secuencial de herramientas
     records: list[StepExecutionRecord] = []
     errors: list[ExecutionError] = []

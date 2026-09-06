@@ -4,6 +4,7 @@ Implementa DockerRestartTool bajo el contrato canónico AgentTool con nivel de r
 RiskLevel.HIGH, reversible=True, preservación de rollback_context y función de compensación.
 """
 
+import json
 import logging
 import os
 import re
@@ -408,3 +409,298 @@ class DockerRestartTool(AgentTool):
 def create_docker_restart_tool(**overrides: Any) -> AgentTool:
     """Factoría canónica para instanciar DockerRestartTool bajo el contrato AgentTool."""
     return DockerRestartTool(**overrides)
+
+
+class DockerListContainersArgs(BaseModel):
+    """Esquema de argumentos para listar contenedores Docker."""
+
+    all: bool = Field(
+        default=True,
+        description="Si es True enumera todos los contenedores (activos y parados); si es False solo los activos.",
+    )
+
+
+def list_containers_fn(
+    args: DockerListContainersArgs | None = None,
+    all: bool = True,
+    **kwargs: Any,
+) -> ToolResult:
+    """Consulta y lista los contenedores Docker en el host."""
+    start_time = time.perf_counter()
+    show_all = args.all if args is not None else all
+
+    is_simulated = os.getenv("DOCKER_SIMULATION_MODE", "").lower() in ("true", "1", "yes")
+    if is_simulated:
+        duration = round((time.perf_counter() - start_time) * 1000.0, 2)
+        sim_containers = [
+            {
+                "id": "c1a2b3c4d5e6",
+                "name": "jg_agente",
+                "status": "running",
+                "image": "jg_agente:latest",
+            },
+            {
+                "id": "d2e3f4a5b6c7",
+                "name": "jg_dashboard",
+                "status": "running",
+                "image": "jg_dashboard:latest",
+            },
+            {
+                "id": "e3f4a5b6c7d8",
+                "name": "jg_agente_postgres",
+                "status": "running",
+                "image": "postgres:16-alpine",
+            },
+            {
+                "id": "f4a5b6c7d8e9",
+                "name": "jg_dashboard_postgres",
+                "status": "running",
+                "image": "postgres:16-alpine",
+            },
+        ]
+        return ToolResult(
+            success=True,
+            output=json.dumps(sim_containers, indent=2, ensure_ascii=False),
+            duration_ms=duration,
+        )
+
+    client = get_docker_client()
+    if client is None:
+        duration = round((time.perf_counter() - start_time) * 1000.0, 2)
+        return ToolResult(
+            success=False,
+            output="",
+            error="No fue posible conectar con el daemon de Docker. Verifique que el socket /var/run/docker.sock esté montado.",
+            duration_ms=duration,
+        )
+
+    try:
+        containers = client.containers.list(all=show_all)
+        res_list = []
+        for c in containers:
+            img_tag = ""
+            if hasattr(c, "image") and getattr(c.image, "tags", None):
+                img_tag = c.image.tags[0]
+            elif hasattr(c, "image"):
+                img_tag = str(getattr(c.image, "short_id", getattr(c.image, "id", "")))
+            res_list.append(
+                {
+                    "id": str(getattr(c, "short_id", getattr(c, "id", ""))[:12]),
+                    "name": str(getattr(c, "name", "")).lstrip("/"),
+                    "status": str(getattr(c, "status", "unknown")),
+                    "image": img_tag,
+                }
+            )
+        duration = round((time.perf_counter() - start_time) * 1000.0, 2)
+        return ToolResult(
+            success=True,
+            output=json.dumps(res_list, indent=2, ensure_ascii=False),
+            duration_ms=duration,
+        )
+    except Exception as exc:
+        duration = round((time.perf_counter() - start_time) * 1000.0, 2)
+        return ToolResult(
+            success=False,
+            output="",
+            error=f"Fallo al listar contenedores Docker: {exc}",
+            duration_ms=duration,
+        )
+
+
+class DockerListContainersTool(AgentTool):
+    """Herramienta para listar y consultar el estado de todos los contenedores Docker."""
+
+    def __init__(self, **data: Any) -> None:
+        defaults: dict[str, Any] = {
+            "name": "docker_list_containers",
+            "description": (
+                "Lista y enumera los contenedores Docker en el host (id, nombre, imagen y estado). "
+                "Permite saber qué contenedores están corriendo o caídos."
+            ),
+            "category": "devops",
+            "version": "0.1.0",
+            "args_schema": DockerListContainersArgs,
+            "func": list_containers_fn,
+            "risk_level": RiskLevel.LOW,
+            "required_permissions": [],
+            "tool_type": ToolType.READ,
+            "read_only": True,
+            "reversible": False,
+            "idempotent": True,
+            "makes_http_requests": False,
+            "timeout_sec": 15.0,
+        }
+        defaults.update(data)
+        super().__init__(**defaults)
+
+
+def create_docker_list_containers_tool(**overrides: Any) -> AgentTool:
+    """Factoría canónica para instanciar DockerListContainersTool."""
+    return DockerListContainersTool(**overrides)
+
+
+class DockerInspectContainerArgs(BaseModel):
+    """Esquema de argumentos para inspeccionar un contenedor Docker específico."""
+
+    container: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        description="Nombre o identificador (ID/short_id) del contenedor Docker a inspeccionar. Ej: 'jg_agente', 'jg_dashboard'.",
+    )
+
+    @field_validator("container")
+    @classmethod
+    def validate_safe_container(cls, value: str) -> str:
+        cleaned = value.strip().lstrip("/")
+        if not cleaned:
+            raise ValueError("El identificador del contenedor no puede estar vacío.")
+        if not CONTAINER_NAME_REGEX.match(cleaned):
+            raise ValueError(f"Nombre o ID de contenedor no permitido: '{cleaned}'.")
+        return cleaned
+
+
+def inspect_container_fn(
+    args: DockerInspectContainerArgs | None = None,
+    container: str | None = None,
+    **kwargs: Any,
+) -> ToolResult:
+    """Obtiene los detalles exhaustivos y telemetría de un contenedor Docker."""
+    start_time = time.perf_counter()
+    target = ""
+    if args is not None:
+        target = args.container
+    else:
+        target = str(
+            container
+            or kwargs.get("container_name")
+            or kwargs.get("name")
+            or kwargs.get("title")
+            or ""
+        )
+    target = target.strip().lstrip("/")
+
+    if not target:
+        duration = round((time.perf_counter() - start_time) * 1000.0, 2)
+        return ToolResult(
+            success=False,
+            output="",
+            error="El nombre o ID del contenedor es obligatorio para docker_inspect_container.",
+            duration_ms=duration,
+        )
+
+    is_simulated = os.getenv("DOCKER_SIMULATION_MODE", "").lower() in ("true", "1", "yes")
+    if is_simulated:
+        duration = round((time.perf_counter() - start_time) * 1000.0, 2)
+        sim_data = {
+            "id": f"sim-{target[:12]}",
+            "name": target,
+            "status": "running",
+            "image": f"{target}:latest",
+            "state": {
+                "status": "running",
+                "running": True,
+                "restarting": False,
+                "health": "healthy",
+            },
+            "restart_count": 0,
+            "created": datetime.now(UTC).isoformat(),
+        }
+        return ToolResult(
+            success=True,
+            output=json.dumps(sim_data, indent=2, ensure_ascii=False),
+            duration_ms=duration,
+        )
+
+    client = get_docker_client()
+    if client is None:
+        duration = round((time.perf_counter() - start_time) * 1000.0, 2)
+        return ToolResult(
+            success=False,
+            output="",
+            error="No fue posible conectar con el daemon de Docker. Verifique que el socket /var/run/docker.sock esté montado.",
+            duration_ms=duration,
+        )
+
+    try:
+        c = client.containers.get(target)
+        attrs = getattr(c, "attrs", {})
+        state_info = attrs.get("State", {})
+        config_info = attrs.get("Config", {})
+        net_info = attrs.get("NetworkSettings", {}).get("Networks", {})
+        img_name = ""
+        if hasattr(c, "image") and getattr(c.image, "tags", None):
+            img_name = c.image.tags[0]
+        else:
+            img_name = str(config_info.get("Image", ""))
+
+        details = {
+            "id": str(getattr(c, "short_id", getattr(c, "id", ""))[:12]),
+            "name": str(getattr(c, "name", target)).lstrip("/"),
+            "status": str(getattr(c, "status", "unknown")),
+            "created": attrs.get("Created", ""),
+            "image": img_name,
+            "state": {
+                "status": state_info.get("Status", "unknown"),
+                "running": state_info.get("Running", False),
+                "restarting": state_info.get("Restarting", False),
+                "exit_code": state_info.get("ExitCode", 0),
+                "health": state_info.get("Health", {}).get("Status", "none"),
+            },
+            "restart_count": attrs.get("RestartCount", 0),
+            "networks": list(net_info.keys()),
+        }
+        duration = round((time.perf_counter() - start_time) * 1000.0, 2)
+        return ToolResult(
+            success=True,
+            output=json.dumps(details, indent=2, ensure_ascii=False),
+            duration_ms=duration,
+        )
+    except NotFound:
+        duration = round((time.perf_counter() - start_time) * 1000.0, 2)
+        return ToolResult(
+            success=False,
+            output="",
+            error=f"No se encontró el contenedor Docker '{target}'.",
+            duration_ms=duration,
+        )
+    except Exception as exc:
+        duration = round((time.perf_counter() - start_time) * 1000.0, 2)
+        return ToolResult(
+            success=False,
+            output="",
+            error=f"Fallo al inspeccionar contenedor '{target}': {exc}",
+            duration_ms=duration,
+        )
+
+
+class DockerInspectContainerTool(AgentTool):
+    """Herramienta para inspeccionar y obtener detalles técnicos de un contenedor Docker."""
+
+    def __init__(self, **data: Any) -> None:
+        defaults: dict[str, Any] = {
+            "name": "docker_inspect_container",
+            "description": (
+                "Obtiene los detalles, configuración, estado de salud y telemetría de un contenedor Docker específico. "
+                "Requiere el nombre o ID del contenedor a inspeccionar."
+            ),
+            "category": "devops",
+            "version": "0.1.0",
+            "args_schema": DockerInspectContainerArgs,
+            "func": inspect_container_fn,
+            "risk_level": RiskLevel.LOW,
+            "required_permissions": [],
+            "tool_type": ToolType.READ,
+            "read_only": True,
+            "reversible": False,
+            "idempotent": True,
+            "makes_http_requests": False,
+            "timeout_sec": 15.0,
+        }
+        defaults.update(data)
+        super().__init__(**defaults)
+
+
+def create_docker_inspect_container_tool(**overrides: Any) -> AgentTool:
+    """Factoría canónica para instanciar DockerInspectContainerTool."""
+    return DockerInspectContainerTool(**overrides)

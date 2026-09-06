@@ -85,32 +85,58 @@ class DAGPlannerEngine(PlannerEngine):
 
         steps: list[PlanStep] = []
 
-        # 2. Heurística 1: Plan de remediación a partir de incidentes detectados
-        env_snapshot = (state.get("environment_snapshot") or {}) if state else {}
-        incidents = env_snapshot.get("incidents") or []
+        # 2. Heurística 0: Si el LLM ya seleccionó llamadas a herramientas en reason_node, generar pasos correspondientes
+        tool_calls: list[dict[str, Any]] = []
+        if state is not None:
+            intent_val = state.get("intent")
+            if isinstance(intent_val, IntentModel) and intent_val.action_type == "act":
+                tool_calls = intent_val.parameters.get("tool_calls") or []
+            elif isinstance(intent_val, dict) and intent_val.get("action_type") == "act":
+                tool_calls = intent_val.get("parameters", {}).get("tool_calls") or []
 
-        if incidents:
-            steps = self._plan_from_incidents(incidents)
+        if tool_calls:
+            for idx, tc in enumerate(tool_calls, start=1):
+                t_name = tc.get("name") or tc.get("tool_name", f"tool-{idx}")
+                t_args = tc.get("args") or tc.get("tool_args", {})
+                if isinstance(t_args, str):
+                    try:
+                        t_args = json.loads(t_args)
+                    except Exception:
+                        t_args = {"raw_args": t_args}
+                t_risk = RiskLevel.LOW
+                if any(k in t_name.lower() for k in ("restart", "reiniciar", "stop", "detener")):
+                    t_risk = RiskLevel.HIGH
+                elif any(k in t_name.lower() for k in ("delete", "borrar", "destroy", "prune")):
+                    t_risk = RiskLevel.CRITICAL
+                steps.append(
+                    PlanStep(
+                        step_id=f"step-{idx}",
+                        tool_name=t_name,
+                        tool_args=t_args,
+                        description=f"Ejecución de herramienta '{t_name}'",
+                        risk_level=t_risk,
+                        reversible=t_risk in (RiskLevel.HIGH, RiskLevel.MEDIUM),
+                        dependencies=[f"step-{idx-1}"] if idx > 1 else [],
+                        status=StepStatus.PENDING,
+                    )
+                )
 
-        # 3. Heurística 2: Plan derivado de la instrucción o prompt del usuario si no hay incidentes
-        context_text = f"{prompt_text} {goal}".strip()
-        if not steps and context_text:
-            steps = self._plan_from_prompt(context_text)
+        # 3. Heurística 1: Plan derivado de la instrucción o prompt del usuario si no hay tool_calls
+        if not steps:
+            context_text = f"{prompt_text} {goal}".strip()
+            if context_text and not any(w in context_text.lower() for w in ("remediar incidentes", "reparar incidentes")):
+                steps = self._plan_from_prompt(context_text)
+
+        # 4. Heurística 2: Plan de remediación a partir de incidentes detectados si no hay pasos
+        if not steps:
+            env_snapshot = (state.get("environment_snapshot") or {}) if state else {}
+            incidents = env_snapshot.get("incidents") or []
+            if incidents:
+                steps = self._plan_from_incidents(incidents)
 
         # 4. Fallback estándar si no se pudieron derivar pasos específicos
         if not steps:
-            steps = [
-                PlanStep(
-                    step_id="step-1",
-                    tool_name="inspect_infrastructure_status",
-                    tool_args={"scope": "all"},
-                    description="Inspeccionar telemetría y estado general de la infraestructura",
-                    risk_level=RiskLevel.LOW,
-                    reversible=False,
-                    dependencies=[],
-                    status=StepStatus.PENDING,
-                )
-            ]
+            steps = []
 
         # 5. Cómputo del riesgo total y creación del plan
         estimated_risk = _compute_highest_risk(steps)
@@ -367,11 +393,25 @@ class DAGPlannerEngine(PlannerEngine):
             )
 
         # Acciones de sólo lectura / auditoría -> LOW
-        else:
+        elif any(
+            w in p_lower
+            for w in (
+                "consultar",
+                "inspeccionar",
+                "auditar",
+                "telemetria",
+                "telemetría",
+                "status",
+                "estado",
+                "monitor",
+                "métricas",
+                "metricas",
+            )
+        ):
             steps.append(
                 PlanStep(
                     step_id="step-1",
-                    tool_name="inspect_infrastructure_status",
+                    tool_name="inspect_resource_usage",
                     tool_args={"instruction": prompt},
                     description=f"Consultar telemetría e inspeccionar estado: {prompt}",
                     risk_level=RiskLevel.LOW,

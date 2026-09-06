@@ -294,3 +294,58 @@ PLUGIN_CLASS = LocalPlugin
     assert loaded[0].name == "local_sample"
     assert "local_sample" in pm.loaded_plugins
     assert registry.get_plugin("local_sample") is not None
+
+
+def test_plugin_manager_filters_by_enabled_plugins(tmp_path: Path) -> None:
+    """Verifica que PluginManager filtra y solo carga los plugins declarados en enabled_plugins."""
+    # Crear plugin A
+    dir_a = tmp_path / "pkg_a"
+    dir_a.mkdir()
+    (dir_a / "__init__.py").write_text("", encoding="utf-8")
+    (dir_a / "plugin.py").write_text(
+        """
+from app.plugins.base import BasePlugin, PluginMetadata
+
+class PluginA(BasePlugin):
+    def get_plugin_metadata(self) -> PluginMetadata:
+        return PluginMetadata(name="plugin_a", version="0.1.0", description="A", author="Test")
+    def register_tools(self): return []
+    def register_engines(self): return {}
+PLUGIN_CLASS = PluginA
+""",
+        encoding="utf-8",
+    )
+
+    # Crear plugin B
+    dir_b = tmp_path / "pkg_b"
+    dir_b.mkdir()
+    (dir_b / "__init__.py").write_text("", encoding="utf-8")
+    (dir_b / "plugin.py").write_text(
+        """
+from app.plugins.base import BasePlugin, PluginMetadata
+
+class PluginB(BasePlugin):
+    def get_plugin_metadata(self) -> PluginMetadata:
+        return PluginMetadata(name="plugin_b", version="0.1.0", description="B", author="Test")
+    def register_tools(self): return []
+    def register_engines(self): return {}
+PLUGIN_CLASS = PluginB
+""",
+        encoding="utf-8",
+    )
+
+    # Caso 1: Habilitar solo plugin_a por nombre
+    reg1 = CapabilityRegistry()
+    pm1 = PluginManager(registry=reg1, enabled_plugins=["plugin_a"])
+    loaded1 = pm1.load_plugins(plugins_dir=tmp_path, load_entrypoints=False, load_local=True)
+    assert len(loaded1) == 1
+    assert loaded1[0].name == "plugin_a"
+    assert "plugin_b" not in pm1.loaded_plugins
+
+    # Caso 2: Habilitar solo pkg_b por nombre de módulo string separado por comas
+    reg2 = CapabilityRegistry()
+    pm2 = PluginManager(registry=reg2, enabled_plugins="pkg_b")
+    loaded2 = pm2.load_plugins(plugins_dir=tmp_path, load_entrypoints=False, load_local=True)
+    assert len(loaded2) == 1
+    assert loaded2[0].name == "plugin_b"
+    assert "plugin_a" not in pm2.loaded_plugins

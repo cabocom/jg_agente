@@ -487,7 +487,7 @@ class GraphBuilder:
         reason_destinations: list[str] = ["conclude"]
         if topology.has_planner:
             reason_destinations.append("plan")
-        elif topology.has_risk_assessment:
+        if topology.has_risk_assessment:
             reason_destinations.append("risk_assess")
         if has_tools:
             reason_destinations.append("execute")
@@ -498,7 +498,7 @@ class GraphBuilder:
                 s,
                 has_planner=topology.has_planner,
                 has_tools=has_tools,
-                has_risk_assessment=topology.has_risk_assessment and not topology.has_planner,
+                has_risk_assessment=topology.has_risk_assessment,
             ),
             path_map=list(set(reason_destinations)),
         )

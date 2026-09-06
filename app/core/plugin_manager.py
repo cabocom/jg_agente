@@ -40,16 +40,31 @@ class PluginManager:
         registry: CapabilityRegistry | None = None,
         plugins_dir: Path | str | None = None,
         auto_register: bool = True,
+        enabled_plugins: list[str] | set[str] | str | None = None,
     ) -> None:
         self.registry: CapabilityRegistry = (
             registry if registry is not None else CapabilityRegistry()
         )
         self.plugins_dir: Path | None = Path(plugins_dir) if plugins_dir is not None else None
         self.auto_register: bool = auto_register
+        self.enabled_plugins: set[str] | None = self._parse_enabled_plugins(enabled_plugins)
 
         self._plugins: dict[str, BasePlugin] = {}
         self._load_order: list[str] = []
         self._is_started: bool = False
+
+    @staticmethod
+    def _parse_enabled_plugins(val: list[str] | set[str] | str | None) -> set[str] | None:
+        """Normaliza la especificación de plugins habilitados a un conjunto en minúsculas."""
+        if val is None:
+            return None
+        if isinstance(val, str):
+            items = [x.strip().lower() for x in val.split(",") if x.strip()]
+        else:
+            items = [str(x).strip().lower() for x in val if str(x).strip()]
+        if not items or "*" in items or "all" in items:
+            return None
+        return set(items)
 
     @property
     def loaded_plugins(self) -> dict[str, BasePlugin]:
@@ -172,6 +187,7 @@ class PluginManager:
         plugins_dir: Path | str | None = None,
         load_entrypoints: bool = True,
         load_local: bool = True,
+        enabled_plugins: list[str] | set[str] | str | None = None,
     ) -> list[BasePlugin]:
         """Descubre, valida dependencias, ordena e inicializa todos los plugins del entorno."""
         discovered_classes: list[type[BasePlugin]] = []
@@ -182,9 +198,32 @@ class PluginManager:
         if load_entrypoints:
             discovered_classes.extend(self.discover_entrypoints())
 
+        active_enabled = (
+            self._parse_enabled_plugins(enabled_plugins)
+            if enabled_plugins is not None
+            else self.enabled_plugins
+        )
+
         for plugin_cls in discovered_classes:
             try:
                 instance = plugin_cls()
+                meta = instance.get_plugin_metadata()
+                plugin_name = meta.name.lower()
+                module_name = plugin_cls.__module__.split(".")[0].lower()
+
+                if (
+                    active_enabled is not None
+                    and plugin_name not in active_enabled
+                    and module_name not in active_enabled
+                ):
+                    logger.info(
+                        "Omitiendo plugin '%s' (módulo '%s'): no está en ENABLED_PLUGINS (%s)",
+                        plugin_name,
+                        module_name,
+                        active_enabled,
+                    )
+                    continue
+
                 self.register_plugin_instance(instance)
             except (BootConflictError, PluginDependencyError):
                 raise

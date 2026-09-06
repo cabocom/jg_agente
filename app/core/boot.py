@@ -114,7 +114,11 @@ def init_agent_capabilities(
     pm = (
         plugin_manager
         if plugin_manager is not None
-        else PluginManager(registry=reg, plugins_dir=active_settings.PLUGINS_DIR)
+        else PluginManager(
+            registry=reg,
+            plugins_dir=active_settings.PLUGINS_DIR,
+            enabled_plugins=active_settings.ENABLED_PLUGINS,
+        )
     )
 
     logger.info("Cargando y autodescubriendo plugins para jg_agente...")

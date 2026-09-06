@@ -51,10 +51,14 @@ def test_register_tools_engines_models_contracts() -> None:
 
     tools = plugin.register_tools()
     assert isinstance(tools, list)
-    assert len(tools) == 1
-    assert tools[0].name == "docker_restart"
-    assert tools[0].risk_level == RiskLevel.HIGH
-    assert tools[0].reversible is True
+    assert len(tools) == 3
+    tool_names = [t.name for t in tools]
+    assert "docker_restart" in tool_names
+    assert "docker_list_containers" in tool_names
+    assert "docker_inspect_container" in tool_names
+    restart_tool = next(t for t in tools if t.name == "docker_restart")
+    assert restart_tool.risk_level == RiskLevel.HIGH
+    assert restart_tool.reversible is True
 
     engines = plugin.register_engines()
     assert isinstance(engines, dict)

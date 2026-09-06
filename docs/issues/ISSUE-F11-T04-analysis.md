@@ -31,7 +31,7 @@ El resultado de la ejecución genera un diccionario inmutable en `ToolResult.rol
     "previous_state": "exited",
     "post_state": "running",
     "action": "restart",
-    "timestamp": "2026-09-06T10:48:00Z"
+    "timestamp": "2026-09-06T10:48:00Z",
 }
 ```
 

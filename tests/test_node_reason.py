@@ -1,5 +1,7 @@
 """Tests unitarios e integrados para el nodo base reason y el subsistema LLM."""
 
+from typing import Any
+
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
@@ -271,3 +273,52 @@ class TestReasonNodeInGraphBuilder:
         ai_messages = [m for m in result["messages"] if isinstance(m, AIMessage)]
         assert len(ai_messages) >= 1
         assert "Respuesta final directa" in ai_messages[0].content
+
+    @pytest.mark.asyncio
+    async def test_capabilities_inquiry_routes_to_conclude_even_with_planner(self) -> None:
+        """Verifica que consultas sobre capacidades concluyen directamente sin saltar al planificador."""
+        from app.plugins.base import PlannerEngine
+
+        class DummyPlanner(PlannerEngine):
+            name: str = "test_planner"
+            engine_type: str = "planner"
+
+            def create_plan(self, state: Any = None) -> Any:
+                raise AssertionError(
+                    "El planificador NO debe ser invocado para consultas de capacidades."
+                )
+
+        registry = CapabilityRegistry()
+        registry.register_engine(DummyPlanner())
+
+        llm = MockChatModel(
+            response_content="Soy un agente inteligente. Mis capacidades incluyen gestión de contenedores Docker.",
+            auto_tool_calls=False,
+        )
+
+        state: AgentState = {
+            "request": AgentInput(
+                execution_id="exec-cap-01",
+                thread_id="th-cap-01",
+                prompt="dime que capacidades tienes",
+            ),
+            "messages": [],
+            "status": AgentExecutionStatus.IDLE,
+        }
+
+        output = await reason_node(state=state, registry=registry, llm=llm)
+
+        assert output["status"] == AgentExecutionStatus.REASONING
+        assert output["intent"].action_type == "conclude"
+        assert "capacidades" in str(output["intent"].parameters.get("response"))
+
+        # Validar en grafo compilado completo
+        builder = GraphBuilder(registry, llm=llm)
+        graph = builder.build()
+        config: RunnableConfig = {"configurable": {"thread_id": "th-cap-graph"}}
+        res = await graph.ainvoke(state, config=config)
+
+        assert res["status"] == AgentExecutionStatus.RESOLVED
+        assert res["is_resolved"] is True
+        assert res["intent"].action_type == "conclude"
+        assert res.get("plan") is None

@@ -21,6 +21,9 @@ class Settings(BaseSettings):
         default=None, description="Nombre descriptivo del agente para el Dashboard"
     )
     AGENT_PORT: int = Field(default=8000, description="Puerto interno de escucha")
+    AGENT_API_URL: str | None = Field(
+        default=None, description="URL accesible internamente para jg_dashboard"
+    )
 
     # Registro y comunicación con jg_dashboard (Control Plane)
     DASHBOARD_URL: str = Field(
@@ -93,6 +96,10 @@ class Settings(BaseSettings):
     PLUGINS_DIR: str | None = Field(
         default="plugins",
         description="Directorio local para escaneo y autodescubrimiento de plugins",
+    )
+    ENABLED_PLUGINS: str | None = Field(
+        default=None,
+        description="Filtro opcional de plugins a habilitar separados por coma (ej. 'jg_plugin_devops'). Si es None o vacío, se cargan todos.",
     )
     REQUIRED_PLUGINS: list[str] = Field(
         default_factory=list,

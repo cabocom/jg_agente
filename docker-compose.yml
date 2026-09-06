@@ -28,7 +28,7 @@ services:
       dockerfile: Dockerfile
     container_name: jg_agente
     restart: unless-stopped
-    user: "10001:10001"
+    user: "0:0"
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -55,10 +55,12 @@ services:
       GROQ_API_KEY: ${GLOBAL_GROQ_API_KEY:-${GROQ_API_KEY:-}}
       AZURE_MAPS_KEY: ${GLOBAL_AZURE_MAPS_KEY:-${AZURE_MAPS_KEY:-}}
       PLUGINS_DIR: ${PLUGINS_DIR:-plugins}
+      ENABLED_PLUGINS: ${ENABLED_PLUGINS:-}
     volumes:
       - jg_agente_data:/app/data
       - ./app:/app/app:ro
       - ./plugins:/app/plugins:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "${AGENT_PORT:-8001}:8000"
     networks:

@@ -33,10 +33,12 @@ logger = logging.getLogger("jg_agente.nodes.reason")
 
 
 def _is_simple_greeting_or_chat(prompt: str) -> bool:
-    """Determina si un estímulo es un saludo o interacción conversacional simple sin tarea operativa."""
+    """Determina si un estímulo es un saludo, interacción conversacional o consulta informativa sin tarea operativa."""
     if not prompt:
         return True
     p = prompt.strip().lower()
+
+    # 1. Saludos y fórmulas de cortesía
     greetings = {
         "hola",
         "saludos",
@@ -50,10 +52,119 @@ def _is_simple_greeting_or_chat(prompt: str) -> bool:
         "chao",
         "gracias",
     }
-    words = set(p.replace("¿", "").replace("?", "").replace("!", "").replace("¡", "").split())
+    cleaned = (
+        p.replace("¿", "")
+        .replace("?", "")
+        .replace("!", "")
+        .replace("¡", "")
+        .replace(",", " ")
+        .replace(".", " ")
+    )
+    words = set(cleaned.split())
     if words and words.issubset(greetings):
         return True
-    return len(words) <= 3 and any(g in words for g in ("hola", "saludos", "hey", "hello", "hi"))
+    if len(words) <= 3 and any(g in words for g in ("hola", "saludos", "hey", "hello", "hi")):
+        return True
+
+    # 2. Palabras operativas que SÍ requieren planificación o ejecución de herramientas
+    operational_keywords = {
+        "reinicia",
+        "reiniciar",
+        "reinicio",
+        "restart",
+        "reboot",
+        "apaga",
+        "apagar",
+        "detener",
+        "stop",
+        "arranca",
+        "arrancar",
+        "start",
+        "despliega",
+        "desplegar",
+        "deploy",
+        "escala",
+        "escalar",
+        "scale",
+        "mata",
+        "matar",
+        "kill",
+        "borra",
+        "borrar",
+        "eliminar",
+        "delete",
+        "ejecuta",
+        "ejecutar",
+        "run",
+        "aplica",
+        "aplicar",
+        "rollback",
+        "revertir",
+        "reparar",
+        "remediar",
+        "fix",
+        "remediate",
+        "restaura",
+        "restaurar",
+        "incidente",
+        "incident",
+        "alerta",
+        "alert",
+    }
+    if any(op in words for op in operational_keywords):
+        return False
+
+    # 3. Preguntas de capacidades, identidad, ayuda o información general
+    conversational_indicators = [
+        "capacidades",
+        "habilidades",
+        "herramientas",
+        "que puedes hacer",
+        "qué puedes hacer",
+        "que sabes hacer",
+        "qué sabes hacer",
+        "quien eres",
+        "quién eres",
+        "como te llamas",
+        "cómo te llamas",
+        "como funcionas",
+        "cómo funcionas",
+        "para que sirves",
+        "para qué sirves",
+        "ayuda",
+        "help",
+        "informacion",
+        "información",
+        "presentate",
+        "preséntate",
+        "explicate",
+        "explícate",
+        "dime que",
+        "dime qué",
+    ]
+    if any(indicator in p for indicator in conversational_indicators):
+        return True
+
+    # 4. Consultas en formato pregunta (dime, qué, quién, etc.) sin acción operativa
+    question_starters = (
+        "dime",
+        "cuenta",
+        "explica",
+        "que",
+        "qué",
+        "quien",
+        "quién",
+        "como",
+        "cómo",
+        "cual",
+        "cuál",
+        "cuales",
+        "cuáles",
+        "por que",
+        "por qué",
+    )
+    first_words = [w for w in cleaned.split() if w]
+    return bool(first_words and first_words[0] in question_starters)
 
 
 async def reason_node(

@@ -134,7 +134,32 @@ async def plan_node(
         )
         steps: list[PlanStep] = []
 
-        if registry is not None:
+        # Extraer tool_calls si fueron emitidas en reason_node
+        tcs: list[dict[str, Any]] = []
+        if isinstance(intent, IntentModel) and intent.parameters:
+            tcs = intent.parameters.get("tool_calls", [])
+        elif isinstance(intent, dict):
+            tcs = intent.get("parameters", {}).get("tool_calls", [])
+
+        if tcs:
+            for idx, tc in enumerate(tcs, start=1):
+                tc_name = tc.get("name") or tc.get("tool_name", f"tool-{idx}")
+                tc_args = tc.get("args") or tc.get("tool_args", {})
+                tool_def = registry.get_tool(tc_name) if registry else None
+                t_risk = tool_def.risk_level if tool_def else RiskLevel.LOW
+                t_rev = tool_def.reversible if tool_def else False
+                steps.append(
+                    PlanStep(
+                        step_id=f"step-{idx}",
+                        tool_name=tc_name,
+                        tool_args=tc_args if isinstance(tc_args, dict) else {},
+                        description=f"Ejecutar {tc_name}",
+                        risk_level=t_risk,
+                        reversible=t_rev,
+                        dependencies=[f"step-{idx-1}"] if idx > 1 else [],
+                    )
+                )
+        elif registry is not None:
             available_tools = registry.list_tools()
             if available_tools:
                 target_tool = available_tools[0]

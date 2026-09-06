@@ -78,6 +78,20 @@ async def _persist_or_update_execution(
             else (input_data.user_context if isinstance(input_data.user_context, dict) else None)
         )
 
+        safe_data = (
+            json.loads(json.dumps(data_payload, default=str)) if data_payload is not None else None
+        )
+        safe_params = (
+            json.loads(json.dumps(input_data.parameters, default=str))
+            if input_data.parameters is not None
+            else None
+        )
+        safe_meta = (
+            json.loads(json.dumps(input_data.metadata, default=str))
+            if input_data.metadata is not None
+            else None
+        )
+
         if record is None:
             record = CoreExecution(
                 execution_id=input_data.execution_id,
@@ -85,14 +99,14 @@ async def _persist_or_update_execution(
                 status=status_val,
                 prompt=input_data.prompt,
                 response=response_text,
-                parameters=input_data.parameters,
-                data=data_payload,
+                parameters=safe_params,
+                data=safe_data,
                 user_context=user_ctx_dict,
                 execution_time_ms=execution_time_ms,
                 requires_approval=requires_approval,
                 pending_approval_id=pending_approval_id,
                 error=error_msg,
-                metadata_=input_data.metadata,
+                metadata_=safe_meta,
                 created_at=input_data.created_at,
                 completed_at=completed_at,
             )
@@ -102,7 +116,7 @@ async def _persist_or_update_execution(
             if response_text is not None:
                 record.response = response_text
             if data_payload is not None:
-                record.data = data_payload
+                record.data = safe_data
             if execution_time_ms > 0:
                 record.execution_time_ms = execution_time_ms
             record.requires_approval = requires_approval

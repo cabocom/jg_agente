@@ -44,13 +44,18 @@ class DevOpsPlugin(BasePlugin):
         )
 
     def register_tools(self) -> list[AgentTool]:
-        """Declara la lista de AgentTool provistas por el plugin DevOps.
+        """Declara la lista de AgentTool provistas por el plugin DevOps."""
+        from jg_plugin_devops.docker_tools import (
+            create_docker_inspect_container_tool,
+            create_docker_list_containers_tool,
+            create_docker_restart_tool,
+        )
 
-        Registra DockerRestartTool (docker_restart) para reinicio seguro con compensación (rollback).
-        """
-        from jg_plugin_devops.docker_tools import create_docker_restart_tool
-
-        return [create_docker_restart_tool()]
+        return [
+            create_docker_restart_tool(),
+            create_docker_list_containers_tool(),
+            create_docker_inspect_container_tool(),
+        ]
 
     def register_engines(self) -> dict[str, BaseEngine]:
         """Declara los motores de dominio provistos por el plugin.

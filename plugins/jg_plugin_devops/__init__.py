@@ -6,8 +6,14 @@ cumpliendo el contrato formal BasePlugin del Execution Plane.
 
 from jg_plugin_devops.discovery import InfraDiscoveryEngine
 from jg_plugin_devops.docker_tools import (
+    DockerInspectContainerArgs,
+    DockerInspectContainerTool,
+    DockerListContainersArgs,
+    DockerListContainersTool,
     DockerRestartArgs,
     DockerRestartTool,
+    create_docker_inspect_container_tool,
+    create_docker_list_containers_tool,
     create_docker_restart_tool,
 )
 from jg_plugin_devops.models.db import (
@@ -48,6 +54,12 @@ __all__ = [
     "DockerRestartTool",
     "DockerRestartArgs",
     "create_docker_restart_tool",
+    "DockerListContainersTool",
+    "DockerListContainersArgs",
+    "create_docker_list_containers_tool",
+    "DockerInspectContainerTool",
+    "DockerInspectContainerArgs",
+    "create_docker_inspect_container_tool",
     "PLUGIN_CLASS",
     "__version__",
     # Modelos Pydantic

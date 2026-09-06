@@ -45,6 +45,7 @@ def collect_system_metrics(
         "tools_count": len(registry.list_tools()) if registry is not None else 0,
         "plugins_count": len(registry.list_plugins()) if registry is not None else 0,
         "engines_count": len(registry.list_engines()) if registry is not None else 0,
+        "api_url": os.getenv("AGENT_API_URL") or f"http://{os.getenv('AGENT_ID', 'jg_agente')}:8000",
         "timestamp": datetime.now(UTC).isoformat(),
         "platform": sys.platform,
     }
