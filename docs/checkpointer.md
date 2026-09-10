@@ -46,3 +46,12 @@ En PostgreSQL 9.3+, estas vistas sobre una sola tabla son automáticamente actua
 `get_checkpointer()` suministra la instancia activa según el entorno:
 - `get_postgres_checkpointer()`: Producción y persistencia duradera en PostgreSQL.
 - `get_memory_checkpointer()`: `MemorySaver` en memoria para suites de pruebas efímeras.
+
+---
+
+## 5. Aislamiento Multi-Agente en Checkpoints (GLOBAL-002 / ISSUE-AGENT-003)
+
+Para evitar colisiones de `thread_id` o contaminación cruzada de estados entre diferentes perfiles de agentes concurrentes:
+- Cada perfil de agente (`jg_agente_conversacional` y `jg_agente_devops`) se conecta a una base de datos PostgreSQL física independiente (`DATABASE_URL`).
+- Las tablas nativas de LangGraph (`checkpoints`, `checkpoint_blobs`, `checkpoint_writes`) y las vistas `core_checkpoints*` residen en esquemas completamente aislados por base de datos, garantizando que un hilo conversacional no pueda interferir ni leer los checkpoints o estados de un hilo DevOps.
+

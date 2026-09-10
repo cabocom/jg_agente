@@ -127,4 +127,29 @@ flowchart TD
    - Registra el evento `tool_executed` en el `SecurityAuditLogger`.
    - Retorna el `ToolResult`.
 
+---
 
+## 6. Autenticación y Anti-Replay en Execution Plane (GLOBAL-001 / ISSUE-AGENT-001)
+
+Para garantizar que únicamente el Control Plane autorizado (`jg_dashboard`) pueda disparar o alterar ejecuciones cognitivas en el agente, los endpoints de `executions_router` implementan verificación estricta de firma criptográfica HMAC-SHA256 con anti-replay:
+
+### 6.1 Cabeceras de Verificación
+- `X-Signature`: Firma hexadecimal calculada con el secreto permanente del agente.
+- `X-Timestamp`: Unix timestamp del momento de la emisión.
+- `X-Agent-ID`: Identificador único del agente que debe coincidir con `AGENT_ID` del entorno.
+
+### 6.2 Reconstrucción de la Petición Canónica
+El agente reconstruye determinísticamente la cadena canónica leyendo los bytes raw de la petición:
+```text
+canonical_string = METHOD\nPATH\nTIMESTAMP\nSHA256(RAW_BODY)
+```
+- `METHOD`: Método HTTP en mayúsculas (`POST`, `GET`).
+- `PATH`: Ruta canónica normalizada (ej. `/executions/trigger`).
+- `TIMESTAMP`: Valor del timestamp provisto en `X-Timestamp`.
+- `SHA256(RAW_BODY)`: Hash SHA-256 de los bytes exactos recibidos en el payload HTTP (o hash de cadena vacía si no hay cuerpo).
+
+### 6.3 Validaciones de Seguridad
+1. **Presencia de Cabeceras:** Ausencia de `X-Signature`, `X-Timestamp` o `X-Agent-ID` rechaza con `401 Unauthorized`.
+2. **Ventana Anti-Replay:** Si $|T_{\text{actual}} - T_{\text{header}}| > 300\text{ s}$ (5 minutos), la petición es rechazada inmediatamente con `401 Unauthorized` (`Timestamp fuera de la ventana permitida`).
+3. **Correspondencia de Agente:** Si `X-Agent-ID` no coincide con el `AGENT_ID` configurado en el agente, se rechaza con `401 Unauthorized`.
+4. **Verificación en Tiempo Constante:** La firma calculada se compara con `X-Signature` mediante `hmac.compare_digest` para prevenir ataques de canal lateral (timing attacks). La alteración de un solo byte en el cuerpo, ruta, método o timestamp invalida la firma.

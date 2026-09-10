@@ -74,3 +74,14 @@ alembic upgrade head
 # Revertir última migración
 alembic downgrade -1
 ```
+
+---
+
+## 5. Aislamiento Multi-Agente de Bases de Datos (GLOBAL-002 / ISSUE-AGENT-003)
+
+El servidor PostgreSQL de agentes (`jg_agente_postgres:5433`) provee aislamiento completo a nivel de conexión y base de datos para cada perfil:
+- `jg_agente_conversacional`: Base de datos dedicada para el agente conversacional.
+- `jg_agente_devops`: Base de datos dedicada para el agente devops.
+
+El script de inicialización `docker/postgres/init-databases.sh` crea ambas bases de datos con permisos plenos de forma idempotente en el arranque del contenedor. Cada perfil aplica sus propias migraciones de Alembic (`core_executions`, `core_audit_records`) garantizando que ningún agente comparta tablas físicas ni IDs de ejecución.
+
