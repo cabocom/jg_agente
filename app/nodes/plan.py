@@ -156,7 +156,7 @@ async def plan_node(
                         description=f"Ejecutar {tc_name}",
                         risk_level=t_risk,
                         reversible=t_rev,
-                        dependencies=[f"step-{idx-1}"] if idx > 1 else [],
+                        dependencies=[f"step-{idx - 1}"] if idx > 1 else [],
                     )
                 )
         elif registry is not None:

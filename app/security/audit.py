@@ -13,7 +13,6 @@ from typing import Any
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-
 from app.db.models import CoreAuditRecord
 from app.models.io import AgentInput, UserContext
 from app.models.state import (
@@ -43,6 +42,7 @@ class SecurityAuditLogger:
         self._history: list[AuditRecord] = []
         if session_factory is None:
             from app.db.session import async_session_factory
+
             self._session_factory = async_session_factory
         else:
             self._session_factory = session_factory

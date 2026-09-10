@@ -17,7 +17,7 @@ No obstante, la auditoría exhaustiva del código fuente revela cinco ítems pen
 | :--- | :--- | :--- | :--- | :--- |
 | **ITEM-AG-01** | Migraciones DDL automáticas para modelos ORM de Plugins | MEDIA | `PENDIENTE` | `alembic/`, `plugins/jg_plugin_devops/` |
 | **ITEM-AG-02** | Aislamiento y proxy de seguridad para el socket Docker (`/var/run/docker.sock`) | ALTA | `PENDIENTE / RIESGO` | `docker-compose.yml`, `plugins/jg_plugin_devops/` |
-| **ITEM-AG-03** | Autenticación estricta en endpoints de ejecución (`/executions/*`) | MEDIA | `PARCIALMENTE IMPLEMENTADO` | `app/api/executions.py` |
+| **ITEM-AG-03** | Autenticación estricta en endpoints de ejecución (`/executions/*`) | MEDIA | `IMPLEMENTADO` (GLOBAL-001) | `app/api/executions.py`, `app/security/auth.py` |
 | **ITEM-AG-04** | Orquestación multi-agente e invocación delegada (`AgentProxy`) | BAJA | `NO IMPLEMENTADO` (Post-MVP) | `app/core/` |
 | **ITEM-AG-05** | Entorno de ejecución de tests (`pytest`) en imagen Docker de desarrollo | BAJA | `PENDIENTE` | `Dockerfile`, CI/CD |
 
@@ -61,17 +61,16 @@ No obstante, la auditoría exhaustiva del código fuente revela cinco ítems pen
 
 ### ITEM-AG-03: Autenticación estricta en endpoints de ejecución (`/executions/*`)
 - **Severidad:** MEDIA
-- **Estado:** `PARCIALMENTE IMPLEMENTADO`
+- **Estado:** `IMPLEMENTADO (GLOBAL-001 / ISSUE-AGENT-001)`
 - **Comportamiento Esperado:**
-  Toda petición entrante a los endpoints `POST /executions/trigger`, `GET /executions/{thread_id}`, `POST /executions/{thread_id}/approve` y `POST /executions/{thread_id}/reject` debe exigir obligatoriamente una cabecera de autenticación con el secreto permanente (`Authorization: Bearer <permanent_secret>`) o firma HMAC, validada contra el almacén local seguro (`CredentialStore`).
-- **Comportamiento Actual:**
-  Los endpoints de la API de ejecuciones confían implícitamente en el perímetro de red privada de Docker. La cabecera `Authorization` se inspecciona de manera opcional o se omite en peticiones internas directas, lo que permitiría a cualquier contenedor en la misma red disparar ejecuciones arbitrarias si la red no está adecuadamente aislada.
-- **Acciones Necesarias para Resolución:**
-  1. Añadir una dependencia FastAPI de seguridad estricta (`verify_control_plane_auth`) a nivel del router `executions_router`.
-  2. Contrastar el token recibido con el secreto permanente cargado en `CredentialStore`.
+  Toda petición entrante a los endpoints `POST /executions/trigger`, `GET /executions/{thread_id}`, `POST /executions/{thread_id}/approve` y `POST /executions/{thread_id}/reject` debe exigir obligatoriamente una cabecera de autenticación con el secreto permanente o firma HMAC canónica validada contra el almacén local seguro (`CredentialStore` o `PERMANENT_AGENT_SECRET`).
+- **Resolución Implementada:**
+  Se ha implementado el módulo de autenticación criptográfica `app/security/auth.py` con verificación estricta de firma HMAC-SHA256 (`canonical_string = METHOD\nPATH\nTIMESTAMP\nSHA256(RAW_BODY)`), control anti-replay ($\le 300$s) y comprobación del `X-Agent-ID`. La dependencia FastAPI `verify_control_plane_auth` protege todo el router `/executions` en `app/api/executions.py`.
 - **Archivos de Referencia:**
   - [app/api/executions.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/api/executions.py)
-  - [app/core/credentials.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/core/credentials.py)
+  - [app/security/auth.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/security/auth.py)
+  - [tests/test_api_executions_auth.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/tests/test_api_executions_auth.py)
+  - [docs/issues/ISSUE-AGENT-001-walkthrough.md](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/docs/issues/ISSUE-AGENT-001-walkthrough.md)
 
 ---
 

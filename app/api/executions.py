@@ -1,6 +1,7 @@
 """Endpoints REST para el control y disparo de ejecuciones cognitivas en jg_agente."""
 
 import contextlib
+import json
 import logging
 import time
 from datetime import UTC, datetime
@@ -26,11 +27,16 @@ from app.models.io import (
     HITLResolutionRequest,
 )
 from app.models.state import AgentExecutionStatus, AgentState, ApprovalStatus
+from app.security.auth import verify_control_plane_auth
 from app.security.guard import SecurityGuard
 
 logger = logging.getLogger("jg_agente.api.executions")
 
-router = APIRouter(prefix="/executions", tags=["Executions"])
+router = APIRouter(
+    prefix="/executions",
+    tags=["Executions"],
+    dependencies=[Depends(verify_control_plane_auth)],
+)
 
 
 def get_agent_graph(request: Request) -> Any:

@@ -1,14 +1,15 @@
 # CONTEXTO DE PROYECTO: jg_agente
 
-**Versión del documento:** 2.26.0  
-**Fecha de consolidación:** 6 de septiembre de 2026  
+**Versión del documento:** 2.27.0  
+**Fecha de consolidación:** 10 de septiembre de 2026  
 **Componente:** Execution Plane (Motor Autónomo de Ejecución)  
-**Estado:** Fases 01 a 11 completadas (100%).  
+**Estado:** Fases 01 a 11 completadas (100%). Post-Auditoría Codex en curso.  
 - Fase 08 completada: Cliente de registro Zero-Trust, bootstrap tokens, CredentialStore (permisos POSIX 0600) y heartbeat periódico.  
 - Fase 11 completada: Extracción e integración de plugins especializados (`jg_plugin_conversational` y `jg_plugin_devops`).  
 - Despliegue Multi-Agente Unificado: Soporte de múltiples perfiles desde la misma imagen Docker mediante `ENABLED_PLUGINS` (`jg_agente_conversacional` en :8001 y `jg_agente_devops` en :8002).  
 - Persistencia Core: Tablas `core_executions` y `core_audit_records` migradas y activas en la base compartida `jg_agente_postgres` (puerto 5433).  
-- Suite de Pruebas: 312 tests automatizados pasando al 100%.
+- Post-Auditoría Codex (GLOBAL-001 / ISSUE-AGENT-001): Autenticación estricta y anti-replay en router `/executions` con firma canónica HMAC-SHA256 (`METHOD\nPATH\nTIMESTAMP\nSHA256(BODY)`), ventana de 300s y validación de `X-Agent-ID`.  
+- Suite de Pruebas: Suite completa pasando al 100%.
 
 ---
 
@@ -256,12 +257,17 @@ El ciclo de confianza y aprovisionamiento entre `jg_agente` y `jg_dashboard` sig
 ```
 
 ### Endpoints del Agente (API Interna)
-- `POST /executions/trigger`: Inicia una ejecución síncrona o asíncrona.
-- `GET /executions/{thread_id}`: Consulta estado actual, checkpoints e historial.
-- `POST /executions/{thread_id}/approve`: Reanuda un flujo pausado por HITL.
-- `POST /executions/{thread_id}/reject`: Cancela un flujo pausado por HITL.
+- `POST /executions/trigger`: Inicia una ejecución síncrona o asíncrona *(Requiere HMAC `X-Signature`, `X-Timestamp`, `X-Agent-ID`)*.
+- `GET /executions/{thread_id}`: Consulta estado actual, checkpoints e historial *(Requiere HMAC `X-Signature`, `X-Timestamp`, `X-Agent-ID`)*.
+- `POST /executions/{thread_id}/approve`: Reanuda un flujo pausado por HITL *(Requiere HMAC `X-Signature`, `X-Timestamp`, `X-Agent-ID`)*.
+- `POST /executions/{thread_id}/reject`: Cancela un flujo pausado por HITL *(Requiere HMAC `X-Signature`, `X-Timestamp`, `X-Agent-ID`)*.
 - `GET /capabilities`: Devuelve catálogo de tools, engines y versiones cargadas.
 - `GET /health` y `GET /metrics`: Telemetría y estado de salud.
+
+> [!NOTE]
+> **Contrato Canónico de Autenticación (`/executions/*`):**
+> `canonical_string = METHOD\nPATH\nTIMESTAMP\nSHA256(RAW_BODY)`  
+> La firma HMAC-SHA256 se valida con ventana anti-replay de $\pm 300$ segundos contra el secreto permanente del agente. Cualquier discrepancia responde con HTTP 401 Unauthorized.
 
 ---
 

@@ -5,6 +5,7 @@ asigna niveles de riesgo estrictos (RiskLevel) y deriva planes automáticos a pa
 de incidentes detectados en environment_snapshot o peticiones del usuario.
 """
 
+import json
 import logging
 import time
 import uuid
@@ -116,7 +117,7 @@ class DAGPlannerEngine(PlannerEngine):
                         description=f"Ejecución de herramienta '{t_name}'",
                         risk_level=t_risk,
                         reversible=t_risk in (RiskLevel.HIGH, RiskLevel.MEDIUM),
-                        dependencies=[f"step-{idx-1}"] if idx > 1 else [],
+                        dependencies=[f"step-{idx - 1}"] if idx > 1 else [],
                         status=StepStatus.PENDING,
                     )
                 )
@@ -124,7 +125,9 @@ class DAGPlannerEngine(PlannerEngine):
         # 3. Heurística 1: Plan derivado de la instrucción o prompt del usuario si no hay tool_calls
         if not steps:
             context_text = f"{prompt_text} {goal}".strip()
-            if context_text and not any(w in context_text.lower() for w in ("remediar incidentes", "reparar incidentes")):
+            if context_text and not any(
+                w in context_text.lower() for w in ("remediar incidentes", "reparar incidentes")
+            ):
                 steps = self._plan_from_prompt(context_text)
 
         # 4. Heurística 2: Plan de remediación a partir de incidentes detectados si no hay pasos
