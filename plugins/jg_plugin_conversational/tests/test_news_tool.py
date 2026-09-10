@@ -1,5 +1,6 @@
 """Tests unitarios y de integración para NewsTool y NewsArgs en jg_plugin_conversational."""
 
+import socket
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -7,6 +8,7 @@ from pydantic import ValidationError
 
 from app.core.registry import CapabilityRegistry
 from app.models.tools import AgentTool, RiskLevel, ToolResult
+from app.security.ssrf import SSRFValidationError
 from jg_plugin_conversational.news import (
     NewsArgs,
     create_news_tool,
@@ -123,7 +125,13 @@ def test_news_xml_parsing_mocked_http() -> None:
     mock_client_instance = MagicMock()
     mock_client_instance.get.return_value = mock_resp
 
-    with patch("httpx.Client") as mock_client_cls:
+    with (
+        patch(
+            "socket.getaddrinfo",
+            return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("195.55.100.1", 443))],
+        ),
+        patch("httpx.Client") as mock_client_cls,
+    ):
         mock_client_cls.return_value.__enter__.return_value = mock_client_instance
         result = get_news_fn(NewsArgs(topic="general", limit=2))
 
@@ -137,6 +145,34 @@ def test_news_xml_parsing_mocked_http() -> None:
         result.metadata["articles"][0]["title"]
         == "Aprobado el nuevo paquete de medidas para el sector científico"
     )
+
+
+def test_news_offline_dns_failure_fallback() -> None:
+    """Verifica que la ausencia de DNS en entornos offline o aislados conmuta a simulación."""
+    with patch(
+        "socket.getaddrinfo",
+        side_effect=socket.gaierror(-3, "Temporary failure in name resolution"),
+    ):
+        result = get_news_fn(NewsArgs(topic="deportes", limit=2))
+
+    assert isinstance(result, ToolResult)
+    assert result.success is True
+    assert "Últimas noticias de actualidad" in result.output
+    assert result.metadata.get("source") == "simulated"
+    assert result.metadata.get("topic") == "deportes"
+    assert len(result.metadata.get("articles", [])) == 2
+
+
+def test_news_real_ssrf_violation_raises() -> None:
+    """Verifica que una violación real de SSRF (ej. IP privada) eleva SSRFValidationError y no simulación."""
+    with (
+        patch(
+            "socket.getaddrinfo",
+            return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))],
+        ),
+        pytest.raises(SSRFValidationError),
+    ):
+        get_news_fn(NewsArgs(topic="general", limit=2))
 
 
 def test_conversational_plugin_register_news_tool() -> None:

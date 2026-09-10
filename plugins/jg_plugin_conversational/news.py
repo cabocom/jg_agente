@@ -117,6 +117,7 @@ def get_news_fn(
     topic: str | None = None,
     limit: int | None = None,
     query: str | None = None,
+    validator: Any = None,
     **kwargs: Any,
 ) -> ToolResult:
     """Consulta titulares de noticias desde Europa Press RSS o fallback determinista."""
@@ -133,79 +134,101 @@ def get_news_fn(
     # 1. Validación de seguridad SSRF contra el validador central del Core
     from app.security.ssrf import SSRFValidationError, get_ssrf_validator
 
-    validator = get_ssrf_validator()
-    is_valid, reason = validator.validate_url(rss_url)
+    ssrf_validator = validator or kwargs.get("ssrf_validator") or get_ssrf_validator()
+    is_valid, reason = ssrf_validator.validate_url(rss_url)
+
+    is_dns_failure = False
     if not is_valid:
-        logger.error("Bloqueo SSRF al intentar consultar RSS de noticias: %s (%s)", rss_url, reason)
-        raise SSRFValidationError(f"Destino de noticias no autorizado por política SSRF: {reason}")
+        reason_str = (reason or "").lower()
+        if (
+            "resolución dns" in reason_str
+            or "resolver" in reason_str
+            or "dns" in reason_str
+            or "nodename nor servname" in reason_str
+        ):
+            logger.warning(
+                "Ausencia de resolución DNS al validar RSS de noticias (%s): %s. "
+                "Conmutando a simulación determinista.",
+                rss_url,
+                reason,
+            )
+            is_dns_failure = True
+        else:
+            logger.error(
+                "Bloqueo SSRF al intentar consultar RSS de noticias: %s (%s)", rss_url, reason
+            )
+            raise SSRFValidationError(
+                f"Destino de noticias no autorizado por política SSRF: {reason}"
+            )
 
-    try:
-        # 2. Intento de consulta en vivo vía HTTP
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)",
-            "Accept": "application/rss+xml, application/xml, text/xml",
-        }
+    if not is_dns_failure:
+        try:
+            # 2. Intento de consulta en vivo vía HTTP
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)",
+                "Accept": "application/rss+xml, application/xml, text/xml",
+            }
 
-        with httpx.Client(timeout=5.0) as client:
-            resp = client.get(rss_url, headers=headers)
-            if resp.status_code == 200 and resp.content:
-                # 3. Parseo seguro de XML
-                root = ET.fromstring(resp.content)
-                items = root.findall(".//item")
+            with httpx.Client(timeout=5.0) as client:
+                resp = client.get(rss_url, headers=headers)
+                if resp.status_code == 200 and resp.content:
+                    # 3. Parseo seguro de XML
+                    root = ET.fromstring(resp.content)
+                    items = root.findall(".//item")
 
-                if items:
-                    articles: list[dict[str, str]] = []
-                    for item in items[:limit]:
-                        title_elem = item.find("title")
-                        desc_elem = item.find("description")
-                        link_elem = item.find("link")
+                    if items:
+                        articles: list[dict[str, str]] = []
+                        for item in items[:limit]:
+                            title_elem = item.find("title")
+                            desc_elem = item.find("description")
+                            link_elem = item.find("link")
 
-                        title = (
-                            title_elem.text.strip()
-                            if title_elem is not None and title_elem.text
-                            else "Sin título"
+                            title = (
+                                title_elem.text.strip()
+                                if title_elem is not None and title_elem.text
+                                else "Sin título"
+                            )
+                            desc = (
+                                desc_elem.text.strip()
+                                if desc_elem is not None and desc_elem.text
+                                else ""
+                            )
+                            link = (
+                                link_elem.text.strip()
+                                if link_elem is not None and link_elem.text
+                                else ""
+                            )
+
+                            # Limpieza de etiquetas HTML en descripción si existieran
+                            clean_desc = re.sub(r"<[^>]+>", "", desc).strip()
+                            articles.append({"title": title, "summary": clean_desc, "link": link})
+
+                        duration = round((time.perf_counter() - start_time) * 1000.0, 2)
+                        output_lines = [
+                            f"Últimas noticias de Europa Press (tema: {topic}):",
+                        ]
+                        for idx, art in enumerate(articles, 1):
+                            output_lines.append(f"{idx}. {art['title']}")
+                            if art["summary"]:
+                                output_lines.append(f"   {art['summary']}")
+
+                        return ToolResult(
+                            success=True,
+                            output="\n".join(output_lines),
+                            duration_ms=duration,
+                            metadata={
+                                "topic": topic,
+                                "count": len(articles),
+                                "articles": articles,
+                                "source": "europapress_rss",
+                            },
                         )
-                        desc = (
-                            desc_elem.text.strip()
-                            if desc_elem is not None and desc_elem.text
-                            else ""
-                        )
-                        link = (
-                            link_elem.text.strip()
-                            if link_elem is not None and link_elem.text
-                            else ""
-                        )
 
-                        # Limpieza de etiquetas HTML en descripción si existieran
-                        clean_desc = re.sub(r"<[^>]+>", "", desc).strip()
-                        articles.append({"title": title, "summary": clean_desc, "link": link})
-
-                    duration = round((time.perf_counter() - start_time) * 1000.0, 2)
-                    output_lines = [
-                        f"Últimas noticias de Europa Press (tema: {topic}):",
-                    ]
-                    for idx, art in enumerate(articles, 1):
-                        output_lines.append(f"{idx}. {art['title']}")
-                        if art["summary"]:
-                            output_lines.append(f"   {art['summary']}")
-
-                    return ToolResult(
-                        success=True,
-                        output="\n".join(output_lines),
-                        duration_ms=duration,
-                        metadata={
-                            "topic": topic,
-                            "count": len(articles),
-                            "articles": articles,
-                            "source": "europapress_rss",
-                        },
-                    )
-
-    except Exception as exc:
-        logger.warning(
-            "Fallo de red o parseo al consultar Europa Press RSS (%s). Conmutando a simulación.",
-            exc,
-        )
+        except Exception as exc:
+            logger.warning(
+                "Fallo de red o parseo al consultar Europa Press RSS (%s). Conmutando a simulación.",
+                exc,
+            )
 
     # 4. Fallback a simulación determinista (offline / dev / tests)
     simulated = _get_simulated_news(topic, limit)
