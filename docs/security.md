@@ -118,14 +118,15 @@ flowchart TD
     AllowExec --> Audit
 ```
 
-### 5.2 Interceptor de Ejecución (`execute_tool`)
+### 5.2 Interceptor Asíncrono de Ejecución (`execute_tool`) (ISSUE-AGENT-004)
 1. **Decisión `DENY`:** Devuelve `ToolResult(success=False, error="SecurityGuard DENY...")` **sin invocar `func`**.
 2. **Decisión `REQUIRE_HUMAN_APPROVAL`:** Devuelve `ToolResult(success=False, requires_approval=True...)` **sin invocar `func`**, señalizando al orquestador LangGraph que debe pausarse en el checkpointer.
 3. **Decisión `ALLOW`:**
    - Sanitiza entradas (`sanitize_arguments`: remueve caracteres nulos y normaliza espacios).
-   - Invoca `func(**sanitized_args)` calculando la duración exacta en milisegundos (`duration_ms`).
-   - Registra el evento `tool_executed` en el `SecurityAuditLogger`.
-   - Retorna el `ToolResult`.
+   - **Imposición de `timeout_sec`:** Envuelve la invocación bajo `asyncio.wait_for(..., timeout=tool.timeout_sec)`.
+   - **Ejecución No Bloqueante de Herramientas Síncronas:** Las funciones síncronas se despachan a un hilo worker mediante `asyncio.to_thread(_invoke_sync)` para evitar bloquear el bucle de eventos o congelar los workers del agente.
+   - **Manejo de `TimeoutError`:** Si la herramienta supera `tool.timeout_sec`, captura la excepción, registra el fallo en `SecurityAuditLogger` y retorna `ToolResult(success=False, error="TimeoutError: ...", metadata={"timed_out": True})`.
+   - Si la herramienta culmina exitosamente, registra el evento `tool_executed` en el `SecurityAuditLogger` con la duración exacta (`duration_ms`) y retorna el `ToolResult`.
 
 ---
 

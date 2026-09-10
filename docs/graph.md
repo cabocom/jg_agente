@@ -142,9 +142,9 @@ El nodo `reason` (`app/nodes/reason.py`) actúa como el centro de deliberación 
 El nodo `execute` (`app/nodes/execute.py`) actúa como el ejecutor físico de herramientas del agente:
 
 1. **Resolución Polimórfica:** Admite pasos estructurados procedentes de un `ExecutionPlan` (`state["plan"]`), llamadas directas `tool_calls` del LLM (`state["intent"]`), o ejecución base de herramientas registradas.
-2. **Sandbox y Gobernanza:** Toda invocación física pasa por `SecurityGuard.execute_tool()`, verificando permisos, niveles de riesgo, argumentos de entrada y directivas SSRF. Soporta `bypass_approval` en caso de autorización HITL confirmada (`ApprovalStatus.APPROVED`).
+2. **Sandbox y Gobernanza (ISSUE-AGENT-004):** Toda invocación física pasa por `await SecurityGuard.execute_tool()`, verificando permisos, niveles de riesgo, argumentos de entrada y directivas SSRF. Impone de forma estricta `asyncio.wait_for(..., timeout=tool.timeout_sec)` ejecutando herramientas síncronas en `asyncio.to_thread` sin bloquear workers. Soporta `bypass_approval` en caso de autorización HITL confirmada (`ApprovalStatus.APPROVED`).
 3. **Preservación de Compensación (`rollback_context`):** Toda herramienta reversible deposita su estado en `StepExecutionRecord.rollback_context` para que el nodo posterior `rollback` pueda realizar compensaciones ordenadas.
-4. **Contención ante Fallos:** Si un paso falla, se registra `ExecutionError(code="TOOL_EXECUTION_FAILED")` y se aborta la ejecución de pasos dependientes posteriores.
+4. **Contención ante Fallos y Timeouts:** Si un paso falla o agota su tiempo límite, se marca `step.status = StepStatus.FAILED`, se registra `ExecutionError` (`code="TOOL_TIMEOUT"` o `"TOOL_EXECUTION_FAILED"`) y se aborta la ejecución de pasos dependientes posteriores para evitar fallos encadenados.
 5. **Historial Conversacional (`ToolMessage`):** Genera mensajes `ToolMessage` asociados a cada `tool_call_id` para retroalimentar la memoria del LLM.
 6. **Métricas y Auditoría:** Registra `duration_ms` en cada paso y emite un registro `AuditRecord` bajo el evento `execute_completed`.
 

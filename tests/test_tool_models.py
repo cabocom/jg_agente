@@ -182,6 +182,26 @@ class TestAgentTool:
         assert result.error is not None
         assert "Fallo forzado" in result.error
 
+    def test_agent_tool_run_timeout_handling(self) -> None:
+        import time
+
+        def _slow_fn(**kwargs: Any) -> str:
+            time.sleep(0.4)
+            return "ok"
+
+        tool = AgentTool(
+            name="slow_tool",
+            description="Herramienta lenta",
+            category="test",
+            func=_slow_fn,
+            timeout_sec=0.1,
+        )
+        result = tool.run()
+        assert isinstance(result, ToolResult)
+        assert result.success is False
+        assert "TimeoutError" in (result.error or "")
+        assert result.metadata.get("timed_out") is True
+
     def test_agent_tool_rollback_execution(self) -> None:
         tool = AgentTool(
             name="rollbackable",

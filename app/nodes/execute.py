@@ -6,6 +6,7 @@ Interpola las directivas de seguridad a través de SecurityGuard, mide tiempos d
 captura fallos operacionales y preserva el contexto de compensación (rollback_context).
 """
 
+import asyncio
 import inspect
 import logging
 from datetime import UTC, datetime
@@ -27,7 +28,7 @@ from app.models.state import (
     StepExecutionRecord,
     StepStatus,
 )
-from app.models.tools import RiskLevel
+from app.models.tools import RiskLevel, ToolResult
 from app.security.guard import SecurityGuard, get_security_guard
 
 logger = logging.getLogger("jg_agente.nodes.execute")
@@ -159,17 +160,50 @@ async def execute_node(
             tool.reversible,
         )
 
-        tool_result = guard.execute_tool(
-            tool=tool,
-            tool_args=step.tool_args,
-            bypass_approval=bypass_approval,
-            execution_id=execution_id,
-            thread_id=thread_id,
-        )
+        timeout_sec = getattr(tool, "timeout_sec", 30.0) or 30.0
+        try:
+            tool_result = await asyncio.wait_for(
+                guard.execute_tool(
+                    tool=tool,
+                    tool_args=step.tool_args,
+                    bypass_approval=bypass_approval,
+                    execution_id=execution_id,
+                    thread_id=thread_id,
+                ),
+                timeout=timeout_sec,
+            )
+        except TimeoutError:
+            err_desc = (
+                f"TimeoutError: La ejecución del paso '{step.step_id}' con herramienta "
+                f"'{tool.name}' superó el límite de {timeout_sec}s."
+            )
+            logger.warning("[execute_node] %s", err_desc)
+            tool_result = ToolResult(
+                success=False,
+                error=err_desc,
+                duration_ms=timeout_sec * 1000.0,
+                metadata={"timeout_sec": timeout_sec, "timed_out": True},
+            )
 
-        # Soporte para herramientas que devuelven corrutinas
+        # Soporte para herramientas que devuelven corrutinas (retrocompatibilidad)
         if inspect.iscoroutine(tool_result.output):
-            tool_result.output = await tool_result.output
+            try:
+                tool_result.output = await asyncio.wait_for(
+                    tool_result.output,
+                    timeout=timeout_sec,
+                )
+            except TimeoutError:
+                err_desc = (
+                    f"TimeoutError: La corrutina de salida de '{tool.name}' "
+                    f"superó el límite de {timeout_sec}s."
+                )
+                logger.warning("[execute_node] %s", err_desc)
+                tool_result = ToolResult(
+                    success=False,
+                    error=err_desc,
+                    duration_ms=timeout_sec * 1000.0,
+                    metadata={"timeout_sec": timeout_sec, "timed_out": True},
+                )
 
         step_status = StepStatus.COMPLETED if tool_result.success else StepStatus.FAILED
         step.status = step_status
@@ -210,9 +244,10 @@ async def execute_node(
                 step.step_id,
                 err_desc,
             )
+            is_timeout = bool(tool_result.metadata.get("timed_out"))
             errors.append(
                 ExecutionError(
-                    code="TOOL_EXECUTION_FAILED",
+                    code="TOOL_TIMEOUT" if is_timeout else "TOOL_EXECUTION_FAILED",
                     message=err_desc,
                     component="execute",
                     fatal=False,

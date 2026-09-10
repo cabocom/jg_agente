@@ -5,6 +5,7 @@ estableciendo la especificación estricta para capacidades ejecutables,
 análisis de riesgo, esquemas de argumentos, y capacidades de compensación.
 """
 
+import concurrent.futures
 import time
 from collections.abc import Callable
 from enum import StrEnum
@@ -157,10 +158,18 @@ class AgentTool(BaseModel):
         return self
 
     def run(self, *args: Any, **kwargs: Any) -> ToolResult:
-        """Ejecuta la herramienta de forma síncrona retornando un ToolResult."""
+        """Ejecuta la herramienta de forma síncrona respetando timeout_sec."""
         start_time = time.perf_counter()
+        timeout = self.timeout_sec or 30.0
+
+        def _exec() -> Any:
+            return self.func(*args, **kwargs)
+
         try:
-            res = self.func(*args, **kwargs)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_exec)
+                res = future.result(timeout=timeout)
+
             duration = (time.perf_counter() - start_time) * 1000
 
             if isinstance(res, ToolResult):
@@ -185,6 +194,15 @@ class AgentTool(BaseModel):
                     output=res,
                     duration_ms=round(duration, 2),
                 )
+        except TimeoutError:
+            duration = (time.perf_counter() - start_time) * 1000
+            return ToolResult(
+                success=False,
+                output="",
+                error=f"TimeoutError: La herramienta '{self.name}' superó el tiempo límite de {timeout}s",
+                duration_ms=round(duration, 2),
+                metadata={"timeout_sec": timeout, "timed_out": True},
+            )
         except Exception as exc:
             duration = (time.perf_counter() - start_time) * 1000
             return ToolResult(

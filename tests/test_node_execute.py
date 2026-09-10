@@ -439,3 +439,97 @@ class TestExecuteNode:
         assert rec.tool_name == "tool_a"
         assert rec.status == StepStatus.COMPLETED
         assert result["is_resolved"] is True
+
+    @pytest.mark.asyncio
+    async def test_execute_node_tool_timeout_marks_step_failed_and_halts(
+        self, test_registry: CapabilityRegistry
+    ) -> None:
+        """Verifica que un timeout en herramienta marque StepStatus.FAILED y contenga el plan."""
+        import asyncio
+
+        async def _slow_tool_fn(**kwargs: Any) -> ToolResult:
+            await asyncio.sleep(0.5)
+            return ToolResult(success=True, output="slow_done")
+
+        test_registry.register_tool(
+            AgentTool(
+                name="timeout_tool",
+                description="Herramienta lenta con timeout",
+                category="test",
+                func=_slow_tool_fn,
+                risk_level=RiskLevel.LOW,
+                timeout_sec=0.1,
+            )
+        )
+
+        plan = ExecutionPlan(
+            plan_id="plan-timeout-1",
+            goal="Probar timeout en herramientas",
+            steps=[
+                PlanStep(
+                    step_id="step-timeout-1",
+                    tool_name="timeout_tool",
+                    tool_args={},
+                ),
+                PlanStep(
+                    step_id="step-should-not-run",
+                    tool_name="tool_a",
+                    tool_args={"text": "hello"},
+                ),
+            ],
+        )
+
+        state: AgentState = {"plan": plan}
+        result = await execute_node(state, test_registry)
+
+        records = result["execution_records"]
+        assert len(records) == 1
+        assert records[0].status == StepStatus.FAILED
+        assert "TimeoutError" in (records[0].error or "")
+
+        assert plan.steps[0].status == StepStatus.FAILED
+        assert plan.steps[1].status == StepStatus.PENDING
+
+        errors = result["errors"]
+        assert len(errors) == 1
+        assert errors[0].code == "TOOL_TIMEOUT"
+
+    @pytest.mark.asyncio
+    async def test_execute_node_sync_tool_timeout(self, test_registry: CapabilityRegistry) -> None:
+        """Verifica que una herramienta síncrona bloqueante aplique timeout sin colgar el worker."""
+        import time
+
+        def _slow_sync_tool_fn(**kwargs: Any) -> ToolResult:
+            time.sleep(0.4)
+            return ToolResult(success=True, output="sync_slow_done")
+
+        test_registry.register_tool(
+            AgentTool(
+                name="sync_timeout_tool",
+                description="Herramienta síncrona lenta",
+                category="test",
+                func=_slow_sync_tool_fn,
+                risk_level=RiskLevel.LOW,
+                timeout_sec=0.1,
+            )
+        )
+
+        plan = ExecutionPlan(
+            plan_id="plan-sync-timeout",
+            goal="Probar timeout en herramienta síncrona",
+            steps=[
+                PlanStep(
+                    step_id="step-sync-timeout",
+                    tool_name="sync_timeout_tool",
+                    tool_args={},
+                )
+            ],
+        )
+
+        state: AgentState = {"plan": plan}
+        result = await execute_node(state, test_registry)
+
+        records = result["execution_records"]
+        assert len(records) == 1
+        assert records[0].status == StepStatus.FAILED
+        assert "TimeoutError" in (records[0].error or "")

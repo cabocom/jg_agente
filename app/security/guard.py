@@ -8,6 +8,8 @@ Interpone una capa de seguridad determinista previa a la invocación de herramie
 5. Auditoría inmutable de todas las decisiones y ejecuciones (SecurityAuditLogger).
 """
 
+import asyncio
+import inspect
 import logging
 import re
 import time
@@ -245,7 +247,7 @@ class SecurityGuard:
         self.audit_logger.record(eval_res, execution_id=execution_id)
         return eval_res
 
-    def execute_tool(
+    async def execute_tool(
         self,
         tool: AgentTool,
         tool_args: dict[str, Any],
@@ -254,11 +256,12 @@ class SecurityGuard:
         execution_id: str | None = None,
         thread_id: str | None = None,
     ) -> ToolResult:
-        """Interpola validación de seguridad, sanitización y auditoría antes de invocar la tool.
+        """Interpola validación de seguridad, sanitización, timeout y auditoría antes de invocar la tool.
 
         - Si la decisión es DENY: Devuelve ToolResult con fallo sin invocar la función.
         - Si la decisión es REQUIRE_HUMAN_APPROVAL: Devuelve ToolResult señalizando pausa HITL (salvo bypass_approval=True).
-        - Si la decisión es ALLOW (o aprobada): Sanitiza entradas, invoca la herramienta y audita el resultado.
+        - Si la decisión es ALLOW (o aprobada): Sanitiza entradas, ejecuta bajo asyncio.wait_for(timeout=tool.timeout_sec)
+          sin bloquear los workers del agente, y audita el resultado.
         """
         caller_perms = list(caller_permissions or [])
         if bypass_approval and isinstance(tool, AgentTool):
@@ -296,23 +299,65 @@ class SecurityGuard:
                 },
             )
 
-        # Decisión ALLOW (o HITL aprobado): Sanitizar entradas e invocar físicamente la herramienta
+        # Decisión ALLOW (o HITL aprobado): Sanitizar entradas e invocar físicamente la herramienta con timeout
         sanitized_args = self.sanitize_arguments(tool_args)
         start_time = time.perf_counter()
+        timeout_sec = getattr(tool, "timeout_sec", 30.0) or 30.0
 
         try:
-            try:
-                raw_res = tool.func(**sanitized_args)
-            except TypeError:
-                if tool.args_schema:
-                    parsed_args = tool.args_schema(**sanitized_args)
-                    raw_res = tool.func(parsed_args)
-                else:
+
+            def _invoke_sync() -> Any:
+                try:
+                    return tool.func(**sanitized_args)
+                except TypeError:
+                    if tool.args_schema:
+                        parsed_args = tool.args_schema(**sanitized_args)
+                        return tool.func(parsed_args)
                     raise
-            tool_res: ToolResult = (
-                raw_res
-                if isinstance(raw_res, ToolResult)
-                else ToolResult(success=True, output=raw_res)
+
+            if inspect.iscoroutinefunction(tool.func):
+
+                async def _invoke_async() -> Any:
+                    try:
+                        return await tool.func(**sanitized_args)
+                    except TypeError:
+                        if tool.args_schema:
+                            parsed_args = tool.args_schema(**sanitized_args)
+                            return await tool.func(parsed_args)
+                        raise
+
+                raw_res = await asyncio.wait_for(_invoke_async(), timeout=timeout_sec)
+            else:
+                raw_res = await asyncio.wait_for(
+                    asyncio.to_thread(_invoke_sync),
+                    timeout=timeout_sec,
+                )
+                if inspect.iscoroutine(raw_res):
+                    raw_res = await asyncio.wait_for(raw_res, timeout=timeout_sec)
+
+            duration_ms = (time.perf_counter() - start_time) * 1000.0
+            if isinstance(raw_res, ToolResult):
+                tool_res = raw_res
+                if tool_res.duration_ms <= 0.0:
+                    tool_res.duration_ms = duration_ms
+            else:
+                tool_res = ToolResult(
+                    success=True,
+                    output=raw_res,
+                    duration_ms=duration_ms,
+                )
+        except TimeoutError:
+            duration_ms = (time.perf_counter() - start_time) * 1000.0
+            err_msg = (
+                f"TimeoutError: La herramienta '{tool.name}' superó el tiempo límite "
+                f"de {timeout_sec}s."
+            )
+            logger.warning("[SecurityGuard] %s", err_msg)
+            tool_res = ToolResult(
+                success=False,
+                error=err_msg,
+                duration_ms=duration_ms,
+                metadata={"timeout_sec": timeout_sec, "timed_out": True},
             )
         except Exception as exc:
             duration_ms = (time.perf_counter() - start_time) * 1000.0

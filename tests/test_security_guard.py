@@ -1,5 +1,7 @@
 """Pruebas unitarias para el interceptor de seguridad SecurityGuard."""
 
+import asyncio
+import time
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -198,9 +200,9 @@ class TestSecurityGuardHITLGate:
 
 
 class TestSecurityGuardExecution:
-    """Pruebas completas del interceptor execute_tool."""
+    """Pruebas completas del interceptor execute_tool con control de timeout y concurrencia."""
 
-    def test_execute_tool_denied_does_not_invoke_func(self) -> None:
+    async def test_execute_tool_denied_does_not_invoke_func(self) -> None:
         audit = SecurityAuditLogger(auto_persist=False)
         guard = SecurityGuard(audit_logger=audit)
 
@@ -214,7 +216,7 @@ class TestSecurityGuardExecution:
             required_permissions=["admin:delete"],
         )
 
-        res = guard.execute_tool(
+        res = await guard.execute_tool(
             tool=tool,
             tool_args={"path": "/etc/hosts"},
             caller_permissions=[],
@@ -224,7 +226,7 @@ class TestSecurityGuardExecution:
         assert "DENY" in (res.error or "")
         mock_func.assert_not_called()
 
-    def test_execute_tool_hitl_signals_approval_needed(self) -> None:
+    async def test_execute_tool_hitl_signals_approval_needed(self) -> None:
         audit = SecurityAuditLogger(auto_persist=False)
         guard = SecurityGuard(audit_logger=audit)
 
@@ -238,13 +240,13 @@ class TestSecurityGuardExecution:
             risk_level=RiskLevel.HIGH,
         )
 
-        res = guard.execute_tool(tool=tool, tool_args={})
+        res = await guard.execute_tool(tool=tool, tool_args={})
         assert res.success is False
         assert "REQUIRE_HUMAN_APPROVAL" in (res.error or "")
         assert res.metadata.get("requires_approval") is True
         mock_func.assert_not_called()
 
-    def test_execute_tool_allowed_sanitizes_and_runs(self) -> None:
+    async def test_execute_tool_allowed_sanitizes_and_runs(self) -> None:
         audit = SecurityAuditLogger(auto_persist=False)
         guard = SecurityGuard(audit_logger=audit)
 
@@ -260,13 +262,92 @@ class TestSecurityGuardExecution:
 
         # Entrada con espacios y caracteres nulos a sanitizar
         tool_args = {"query": "  hola mundo\x00  "}
-        res = guard.execute_tool(tool=tool, tool_args=tool_args)
+        res = await guard.execute_tool(tool=tool, tool_args=tool_args)
 
         assert res.success is True
         assert "hola mundo" in str(res.output)
         # Verificar que se auditó la ejecución de la herramienta
         history = audit.get_history()
         assert any(r.event_type == "tool_executed" for r in history)
+
+    async def test_execute_tool_async_tool_success(self) -> None:
+        audit = SecurityAuditLogger(auto_persist=False)
+        guard = SecurityGuard(audit_logger=audit)
+
+        async def _async_func(**kwargs: Any) -> ToolResult:
+            await asyncio.sleep(0.01)
+            return ToolResult(success=True, output="async_ok")
+
+        tool = AgentTool(
+            name="async_sample",
+            description="Async tool",
+            category="test",
+            args_schema=DummyArgs,
+            func=_async_func,
+            risk_level=RiskLevel.LOW,
+        )
+
+        res = await guard.execute_tool(tool=tool, tool_args={"query": "test"})
+        assert res.success is True
+        assert res.output == "async_ok"
+
+    async def test_execute_tool_async_tool_timeout(self) -> None:
+        audit = SecurityAuditLogger(auto_persist=False)
+        guard = SecurityGuard(audit_logger=audit)
+
+        async def _slow_async_func(**kwargs: Any) -> ToolResult:
+            await asyncio.sleep(0.5)
+            return ToolResult(success=True, output="never_reached")
+
+        tool = AgentTool(
+            name="slow_async_tool",
+            description="Slow async tool",
+            category="test",
+            args_schema=DummyArgs,
+            func=_slow_async_func,
+            risk_level=RiskLevel.LOW,
+            timeout_sec=0.1,
+        )
+
+        res = await guard.execute_tool(tool=tool, tool_args={"query": "timeout"})
+        assert res.success is False
+        assert "TimeoutError" in (res.error or "")
+        assert res.metadata.get("timed_out") is True
+        assert res.metadata.get("timeout_sec") == 0.1
+
+        # Auditoría inmutable de fallo por timeout
+        history = audit.get_history()
+        assert any(
+            r.event_type == "tool_executed" and r.details.get("success") is False for r in history
+        )
+
+    async def test_execute_tool_sync_tool_timeout_does_not_block_worker(self) -> None:
+        audit = SecurityAuditLogger(auto_persist=False)
+        guard = SecurityGuard(audit_logger=audit)
+
+        def _slow_sync_func(**kwargs: Any) -> ToolResult:
+            time.sleep(0.4)
+            return ToolResult(success=True, output="never_reached")
+
+        tool = AgentTool(
+            name="slow_sync_tool",
+            description="Slow sync tool",
+            category="test",
+            args_schema=DummyArgs,
+            func=_slow_sync_func,
+            risk_level=RiskLevel.LOW,
+            timeout_sec=0.1,
+        )
+
+        start = time.perf_counter()
+        res = await guard.execute_tool(tool=tool, tool_args={"query": "timeout"})
+        elapsed = time.perf_counter() - start
+
+        assert res.success is False
+        assert "TimeoutError" in (res.error or "")
+        assert res.metadata.get("timed_out") is True
+        # El timeout debe cancelarse oportunamente (~0.1s - 0.25s) sin bloquear indefinidamente
+        assert elapsed < 0.35
 
 
 def test_singleton_guard_factory() -> None:
