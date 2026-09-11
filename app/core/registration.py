@@ -1,6 +1,7 @@
 """Módulo de registro con jg_dashboard mediante bootstrap token y persistencia de credenciales."""
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -58,28 +59,42 @@ class CredentialStore:
 
     @classmethod
     def save(cls, credentials: AgentCredentials, path: Path | str | None = None) -> None:
-        """Guarda las credenciales en formato JSON aplicando permisos restrictivos 0600 en POSIX."""
+        """Guarda las credenciales de forma atómica en formato JSON aplicando permisos 0600 en POSIX."""
         target = cls.resolve_path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
 
         data = credentials.model_dump(mode="json")
         json_content = json.dumps(data, indent=2, ensure_ascii=False)
 
-        # Escribir archivo
-        target.write_text(json_content, encoding="utf-8")
+        # Archivo temporal en el mismo directorio para garantizar atomicidad de os.replace en el mismo filesystem
+        tmp_target = target.with_name(f"{target.name}.tmp")
 
-        # Aplicar permisos 0600 (lectura/escritura sólo para el propietario) en POSIX
-        if os.name == "posix":
-            try:
-                os.chmod(target, 0o600)
-            except OSError as e:
-                logger.warning(
-                    "No se pudieron restringir los permisos a 0600 en %s: %s",
-                    target,
-                    e,
-                )
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        fd = os.open(tmp_target, flags, 0o600)
+        try:
+            if os.name == "posix":
+                try:
+                    os.fchmod(fd, 0o600)
+                except OSError as e:
+                    logger.warning(
+                        "No se pudieron restringir los permisos a 0600 en descriptor de %s: %s",
+                        tmp_target,
+                        e,
+                    )
+            with open(fd, "w", encoding="utf-8", closefd=True) as f:
+                f.write(json_content)
+                f.flush()
+                os.fsync(f.fileno())
 
-        logger.info("Credenciales del agente guardadas de forma segura en: %s", target)
+            # Reemplazo atómico
+            os.replace(tmp_target, target)
+        except Exception:
+            if tmp_target.exists():
+                with contextlib.suppress(OSError):
+                    tmp_target.unlink(missing_ok=True)
+            raise
+
+        logger.info("Credenciales del agente guardadas atómicamente en: %s", target)
 
     @classmethod
     def load(cls, path: Path | str | None = None) -> AgentCredentials | None:

@@ -1,7 +1,7 @@
 # CONTEXTO DE PROYECTO: jg_agente
 
-**Versión del documento:** 2.31.0  
-**Fecha de consolidación:** 10 de septiembre de 2026  
+**Versión del documento:** 2.32.0  
+**Fecha de consolidación:** 11 de septiembre de 2026  
 **Componente:** Execution Plane (Motor Autónomo de Ejecución)  
 **Estado:** Fases 01 a 11 completadas (100%). Post-Auditoría Codex en curso.  
 - Fase 08 completada: Cliente de registro Zero-Trust, bootstrap tokens, CredentialStore (permisos POSIX 0600) y heartbeat periódico.  
@@ -12,7 +12,8 @@
 - Post-Auditoría Codex (ISSUE-AGENT-004): Imposición estricta de `timeout_sec` en `SecurityGuard.execute_tool()`, `execute_node()` y `AgentTool.run()`, con despacho no bloqueante (`asyncio.to_thread`), captura de `TimeoutError`, emisión de `TOOL_TIMEOUT` y contención del plan (`StepStatus.FAILED`).  
 - Post-Auditoría Codex (ISSUE-AGENT-005): Desacoplamiento de DNS en entornos offline para `NewsTool` (`plugins/jg_plugin_conversational`), conmutando a fallback determinista en caso de indisponibilidad DNS y preservando íntegra la protección SSRF para accesos a redes privadas.  
 - Post-Auditoría Codex (ISSUE-AGENT-006): Semántica y propagación de errores en persistencia de ejecuciones; eliminación del silenciamiento ciego en `_persist_or_update_execution`, elevación de `PersistenceError`, logging en nivel `ERROR` y exposición tipada de degradación en `AgentOutput.metadata["persistence"]` (`PersistenceMetadata`).  
-- Suite de Pruebas: Suite completa pasando al 100% (338 tests).
+- Post-Auditoría Codex (ISSUE-AGENT-007): Persistencia atómica y permisos POSIX en `CredentialStore.save()`; creación en archivo temporal `.tmp` con permisos `0600` desde el descriptor (`os.open` y `os.fchmod`), sincronización forzada a hardware con `os.fsync()` y sustitución atómica con `os.replace()`.  
+- Suite de Pruebas: Suite completa pasando al 100% (340 tests).
 
 ---
 

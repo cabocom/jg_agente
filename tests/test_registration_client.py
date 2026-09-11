@@ -4,6 +4,7 @@ import os
 import stat
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -70,6 +71,69 @@ def test_credential_store_save_and_load(
     assert loaded.agent_name == sample_credentials.agent_name
     assert loaded.dashboard_url == sample_credentials.dashboard_url
     assert loaded.registered_at == sample_credentials.registered_at
+
+
+def test_credential_store_save_atomic_fsync_and_replace(
+    temp_credentials_file: Path, sample_credentials: AgentCredentials
+) -> None:
+    """Valida que save() escribe en .tmp, ejecuta os.fsync y os.replace atómico."""
+    fsync_called = False
+    replace_called = False
+    real_fsync = os.fsync
+    real_replace = os.replace
+
+    def spy_fsync(fd: int) -> None:
+        nonlocal fsync_called
+        fsync_called = True
+        real_fsync(fd)
+
+    def spy_replace(src: Path | str, dst: Path | str) -> None:
+        nonlocal replace_called
+        replace_called = True
+        tmp_path = Path(src)
+        assert tmp_path.name.endswith(".tmp")
+        assert tmp_path.exists()
+        real_replace(src, dst)
+
+    with (
+        patch("os.fsync", side_effect=spy_fsync),
+        patch("os.replace", side_effect=spy_replace),
+    ):
+        CredentialStore.save(sample_credentials, temp_credentials_file)
+
+    assert fsync_called is True
+    assert replace_called is True
+    assert CredentialStore.exists(temp_credentials_file)
+    tmp_file = temp_credentials_file.with_name(f"{temp_credentials_file.name}.tmp")
+    assert not tmp_file.exists()
+
+
+def test_credential_store_save_atomic_failure_cleanup(
+    temp_credentials_file: Path, sample_credentials: AgentCredentials
+) -> None:
+    """Valida que si ocurre un fallo durante la escritura, el .tmp se limpia y el target previo no se corrompe."""
+    # Pre-crear credencial previa válida
+    CredentialStore.save(sample_credentials, temp_credentials_file)
+    original_content = temp_credentials_file.read_text(encoding="utf-8")
+
+    tmp_file = temp_credentials_file.with_name(f"{temp_credentials_file.name}.tmp")
+
+    with (
+        patch("os.fsync", side_effect=OSError("Disk I/O error simulated")),
+        pytest.raises(OSError, match="Disk I/O error simulated"),
+    ):
+        updated_creds = AgentCredentials(
+            agent_id="new-agent",
+            permanent_secret="new-secret",
+            agent_name="New Agent",
+            dashboard_url="http://new-dashboard:8080",
+        )
+        CredentialStore.save(updated_creds, temp_credentials_file)
+
+    # El archivo temporal debe haberse limpiado
+    assert not tmp_file.exists()
+    # El archivo previo no debe haberse truncado ni corrompido
+    assert temp_credentials_file.read_text(encoding="utf-8") == original_content
 
 
 def test_credential_store_missing_or_corrupted(temp_credentials_file: Path) -> None:
