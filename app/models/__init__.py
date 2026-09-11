@@ -10,6 +10,8 @@ from app.models.io import (
     HealthResponse,
     HITLResolutionRequest,
     MetricsResponse,
+    PersistenceMetadata,
+    PersistenceStatus,
     UserContext,
 )
 from app.models.registration import (
@@ -63,6 +65,8 @@ __all__ = [
     "HITLResolutionRequest",
     "IntentModel",
     "MetricsResponse",
+    "PersistenceMetadata",
+    "PersistenceStatus",
     "PlanStep",
     "PolicyDecision",
     "RiskLevel",

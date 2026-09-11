@@ -94,6 +94,37 @@ class AgentInput(BaseModel):
     )
 
 
+class PersistenceStatus(StrEnum):
+    """Estados de persistencia para el seguimiento de almacenamiento durable."""
+
+    PERSISTED = "persisted"
+    DEGRADED = "degraded"
+    FAILED = "failed"
+
+
+class PersistenceMetadata(BaseModel):
+    """Metadatos tipados sobre el estado de almacenamiento durable en core_executions."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    status: PersistenceStatus = Field(
+        default=PersistenceStatus.PERSISTED,
+        description="Estado de la persistencia de la ejecución",
+    )
+    persisted: bool = Field(
+        default=True,
+        description="Indica si el estado fue almacenado durablemente en base de datos",
+    )
+    error: str | None = Field(
+        default=None,
+        description="Mensaje descriptivo del error en caso de fallo o degradación",
+    )
+    error_type: str | None = Field(
+        default=None,
+        description="Tipo de excepción o código del error de persistencia",
+    )
+
+
 class AgentOutput(BaseModel):
     """Contrato formal de salida emitido por el ciclo cognitivo del agente.
 

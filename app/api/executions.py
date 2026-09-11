@@ -17,6 +17,7 @@ from app.core.checkpointer import get_checkpointer
 from app.core.graph import GraphBuilder
 from app.core.llm import get_chat_model
 from app.core.registry import CapabilityRegistry
+from app.db.exceptions import PersistenceError
 from app.db.models import CoreExecution
 from app.db.session import async_session_factory, get_async_session
 from app.models.io import (
@@ -25,6 +26,8 @@ from app.models.io import (
     ExecutionStatus,
     ExecutionThreadDetail,
     HITLResolutionRequest,
+    PersistenceMetadata,
+    PersistenceStatus,
 )
 from app.models.state import AgentExecutionStatus, AgentState, ApprovalStatus
 from app.security.auth import verify_control_plane_auth
@@ -71,8 +74,8 @@ async def _persist_or_update_execution(
     pending_approval_id: str | None = None,
     error_msg: str | None = None,
     completed_at: datetime | None = None,
-) -> CoreExecution | None:
-    """Crea o actualiza el registro de la ejecución en la tabla core_executions de forma segura y tolerante a fallos."""
+) -> CoreExecution:
+    """Crea o actualiza el registro de la ejecución en la tabla core_executions de forma transaccional."""
     try:
         query = select(CoreExecution).where(CoreExecution.execution_id == input_data.execution_id)
         result = await db.execute(query)
@@ -139,12 +142,16 @@ async def _persist_or_update_execution(
     except Exception as exc:
         with contextlib.suppress(Exception):
             await db.rollback()
-        logger.warning(
-            "No se pudo persistir en core_executions (%s). Continuando en memoria: %s",
+        logger.error(
+            "Fallo crítico al persistir ejecución '%s' en core_executions: %s",
             input_data.execution_id,
             exc,
+            exc_info=True,
         )
-        return None
+        raise PersistenceError(
+            f"Fallo en persistencia de ejecución {input_data.execution_id}: {exc}",
+            original_error=exc,
+        ) from exc
 
 
 async def execute_graph_pipeline(
@@ -223,8 +230,23 @@ async def execute_graph_pipeline(
                         requires_approval=True,
                         pending_approval_id=agent_output.pending_approval_id,
                     )
-            except Exception as db_err:
-                logger.warning("Fallo al actualizar DB tras HITL pause: %s", db_err)
+                agent_output.metadata["persistence"] = PersistenceMetadata(
+                    status=PersistenceStatus.PERSISTED,
+                    persisted=True,
+                ).model_dump()
+            except (PersistenceError, Exception) as db_err:
+                logger.error(
+                    "Fallo al actualizar DB tras HITL pause en '%s': %s",
+                    input_data.execution_id,
+                    db_err,
+                    exc_info=True,
+                )
+                agent_output.metadata["persistence"] = PersistenceMetadata(
+                    status=PersistenceStatus.DEGRADED,
+                    persisted=False,
+                    error=str(db_err),
+                    error_type=type(db_err).__name__,
+                ).model_dump()
 
             return agent_output
 
@@ -263,8 +285,23 @@ async def execute_graph_pipeline(
                     error_msg=agent_output.error,
                     completed_at=agent_output.completed_at,
                 )
-        except Exception as db_err:
-            logger.warning("Fallo al actualizar DB tras finalización: %s", db_err)
+            agent_output.metadata["persistence"] = PersistenceMetadata(
+                status=PersistenceStatus.PERSISTED,
+                persisted=True,
+            ).model_dump()
+        except (PersistenceError, Exception) as db_err:
+            logger.error(
+                "Fallo al actualizar DB tras finalización en '%s': %s",
+                input_data.execution_id,
+                db_err,
+                exc_info=True,
+            )
+            agent_output.metadata["persistence"] = PersistenceMetadata(
+                status=PersistenceStatus.DEGRADED,
+                persisted=False,
+                error=str(db_err),
+                error_type=type(db_err).__name__,
+            ).model_dump()
 
         return agent_output
 
@@ -323,8 +360,23 @@ async def execute_graph_pipeline(
                     requires_approval=True,
                     pending_approval_id=agent_output.pending_approval_id,
                 )
-        except Exception as db_err:
-            logger.warning("Fallo al actualizar DB tras HITL pause: %s", db_err)
+            agent_output.metadata["persistence"] = PersistenceMetadata(
+                status=PersistenceStatus.PERSISTED,
+                persisted=True,
+            ).model_dump()
+        except (PersistenceError, Exception) as db_err:
+            logger.error(
+                "Fallo al actualizar DB tras HITL pause en '%s': %s",
+                input_data.execution_id,
+                db_err,
+                exc_info=True,
+            )
+            agent_output.metadata["persistence"] = PersistenceMetadata(
+                status=PersistenceStatus.DEGRADED,
+                persisted=False,
+                error=str(db_err),
+                error_type=type(db_err).__name__,
+            ).model_dump()
 
         return agent_output
 
@@ -354,8 +406,23 @@ async def execute_graph_pipeline(
                     error_msg=str(exc),
                     completed_at=datetime.now(UTC),
                 )
-        except Exception:
-            pass
+            agent_output.metadata["persistence"] = PersistenceMetadata(
+                status=PersistenceStatus.PERSISTED,
+                persisted=True,
+            ).model_dump()
+        except (PersistenceError, Exception) as db_err:
+            logger.error(
+                "Degradación de persistencia al registrar fallo no controlado en '%s': %s",
+                input_data.execution_id,
+                db_err,
+                exc_info=True,
+            )
+            agent_output.metadata["persistence"] = PersistenceMetadata(
+                status=PersistenceStatus.DEGRADED,
+                persisted=False,
+                error=str(db_err),
+                error_type=type(db_err).__name__,
+            ).model_dump()
 
         return agent_output
 
@@ -406,11 +473,31 @@ async def trigger_execution(
 ) -> Any:
     """Punto de entrada principal para la ejecución de agentes en jg_agente."""
     # 1. Registrar o asegurar registro inicial en DB
-    await _persist_or_update_execution(
-        db,
-        input_data=input_data,
-        status_val=ExecutionStatus.IN_PROGRESS.value,
-    )
+    initial_persistence: PersistenceMetadata
+    try:
+        await _persist_or_update_execution(
+            db,
+            input_data=input_data,
+            status_val=ExecutionStatus.IN_PROGRESS.value,
+        )
+        initial_persistence = PersistenceMetadata(
+            status=PersistenceStatus.PERSISTED,
+            persisted=True,
+        )
+    except (PersistenceError, Exception) as p_err:
+        logger.error(
+            "Degradación de persistencia al registrar inicio de ejecución '%s': %s",
+            input_data.execution_id,
+            p_err,
+            exc_info=True,
+        )
+        initial_persistence = PersistenceMetadata(
+            status=PersistenceStatus.DEGRADED,
+            persisted=False,
+            error=str(p_err),
+            error_type=type(p_err).__name__,
+        )
+    input_data.metadata["persistence"] = initial_persistence.model_dump()
 
     # 2. Flujo Asíncrono (sync=False o indicado en parámetros)
     async_requested = (
@@ -780,17 +867,35 @@ async def _resolve_hitl_execution(
         thread_id=thread_id,
         prompt=getattr(req_data, "prompt", "HITL Decision") if req_data else "HITL Decision",
     )
-    await _persist_or_update_execution(
-        db,
-        input_data=dummy_input,
-        status_val=agent_output.status.value,
-        response_text=agent_output.response,
-        data_payload=agent_output.data,
-        execution_time_ms=agent_output.execution_time_ms,
-        requires_approval=False,
-        pending_approval_id=None,
-        completed_at=datetime.now(UTC),
-    )
+    try:
+        await _persist_or_update_execution(
+            db,
+            input_data=dummy_input,
+            status_val=agent_output.status.value,
+            response_text=agent_output.response,
+            data_payload=agent_output.data,
+            execution_time_ms=agent_output.execution_time_ms,
+            requires_approval=False,
+            pending_approval_id=None,
+            completed_at=datetime.now(UTC),
+        )
+        agent_output.metadata["persistence"] = PersistenceMetadata(
+            status=PersistenceStatus.PERSISTED,
+            persisted=True,
+        ).model_dump()
+    except (PersistenceError, Exception) as db_err:
+        logger.error(
+            "Degradación de persistencia al actualizar resolución HITL en '%s': %s",
+            agent_output.execution_id,
+            db_err,
+            exc_info=True,
+        )
+        agent_output.metadata["persistence"] = PersistenceMetadata(
+            status=PersistenceStatus.DEGRADED,
+            persisted=False,
+            error=str(db_err),
+            error_type=type(db_err).__name__,
+        ).model_dump()
 
     return agent_output
 
