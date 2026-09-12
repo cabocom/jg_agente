@@ -71,6 +71,10 @@ class AgentInput(BaseModel):
         validation_alias=AliasChoices("thread_id", "session_id"),
         description="Identificador de la sesión o hilo conversacional persistente",
     )
+    correlation_id: str | None = Field(
+        default=None,
+        description="Identificador único de correlación distribuida (X-Correlation-ID)",
+    )
     prompt: str = Field(
         ...,
         validation_alias=AliasChoices("prompt", "message"),
@@ -143,6 +147,10 @@ class AgentOutput(BaseModel):
         validation_alias=AliasChoices("thread_id", "session_id"),
         description="Identificador de la sesión o hilo conversacional asociado",
     )
+    correlation_id: str | None = Field(
+        default=None,
+        description="Identificador único de correlación distribuida (X-Correlation-ID)",
+    )
     status: ExecutionStatus = Field(
         default=ExecutionStatus.COMPLETED,
         description="Estado final o actual de la ejecución",
@@ -199,6 +207,10 @@ class ExecutionThreadDetail(BaseModel):
     execution_id: str | None = Field(
         default=None,
         description="Identificador de la última ejecución asociada al hilo",
+    )
+    correlation_id: str | None = Field(
+        default=None,
+        description="Identificador único de correlación distribuida (X-Correlation-ID)",
     )
     status: ExecutionStatus | str = Field(
         default=ExecutionStatus.IN_PROGRESS,

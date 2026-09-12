@@ -223,6 +223,10 @@ class AuditRecord(BaseModel):
     event_type: str = Field(..., description="Tipo de evento registrado")
     actor: str = Field(default="agent", description="Entidad o componente emisor")
     details: dict[str, Any] = Field(default_factory=dict, description="Detalles del evento")
+    correlation_id: str | None = Field(
+        default=None,
+        description="Identificador único de correlación distribuida (X-Correlation-ID)",
+    )
     timestamp: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         description="Timestamp UTC del evento",
@@ -314,6 +318,7 @@ class AgentState(TypedDict, total=False):
 
     # 1. Petición y Estímulo
     request: AgentInput
+    correlation_id: str | None
 
     # 2. Historial conversacional y mensajería
     messages: Annotated[list[BaseMessage], add_messages]

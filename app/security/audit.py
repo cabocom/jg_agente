@@ -13,6 +13,7 @@ from typing import Any
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.correlation import get_correlation_id
 from app.db.models import CoreAuditRecord
 from app.models.io import AgentInput, UserContext
 from app.models.state import (
@@ -33,6 +34,11 @@ class SecurityAuditLogger:
     Mantiene una traza inmutable en memoria y persiste de forma asíncrona no bloqueante
     en la tabla core_audit_records de la base de datos PostgreSQL.
     """
+
+    @staticmethod
+    def _resolve_correlation_id(correlation_id: str | None = None) -> str | None:
+        """Resuelve el correlation_id explícito o lo recupera del contexto asíncrono activo."""
+        return correlation_id or get_correlation_id()
 
     def __init__(
         self,
@@ -128,6 +134,7 @@ class SecurityAuditLogger:
         self,
         evaluation: SecurityEvaluationResult,
         execution_id: str | None = None,
+        correlation_id: str | None = None,
     ) -> AuditRecord:
         """Registra el resultado formal de una evaluación de seguridad (SecurityGuard)."""
         log_msg = (
@@ -142,6 +149,7 @@ class SecurityAuditLogger:
         else:
             logger.info(log_msg)
 
+        cid = self._resolve_correlation_id(correlation_id)
         details: dict[str, Any] = {
             "decision": evaluation.decision.value,
             "operation": evaluation.operation,
@@ -153,6 +161,8 @@ class SecurityAuditLogger:
             "can_cause_data_loss": evaluation.can_cause_data_loss,
             "result": evaluation.decision.value,
         }
+        if cid:
+            details["correlation_id"] = cid
         if execution_id:
             details["execution_id"] = execution_id
 
@@ -160,6 +170,7 @@ class SecurityAuditLogger:
             event_type="security_decision",
             actor="security_guard",
             details=details,
+            correlation_id=cid,
             timestamp=evaluation.evaluated_at,
         )
         self._history.append(record)
@@ -169,6 +180,7 @@ class SecurityAuditLogger:
     def record_stimulus(
         self,
         input_data: AgentInput,
+        correlation_id: str | None = None,
     ) -> AuditRecord:
         """Registra la recepción de un nuevo estímulo de entrada (AgentInput)."""
         actor = "external_caller"
@@ -186,6 +198,9 @@ class SecurityAuditLogger:
             else input_data.user_context
         )
 
+        cid = self._resolve_correlation_id(
+            correlation_id or input_data.correlation_id or input_data.metadata.get("correlation_id")
+        )
         details: dict[str, Any] = {
             "execution_id": input_data.execution_id,
             "thread_id": input_data.thread_id,
@@ -195,11 +210,14 @@ class SecurityAuditLogger:
             "risk_level": RiskLevel.LOW.value,
             "result": "received",
         }
+        if cid:
+            details["correlation_id"] = cid
 
         record = AuditRecord(
             event_type="stimulus_received",
             actor=actor,
             details=details,
+            correlation_id=cid,
             timestamp=datetime.now(UTC),
         )
         self._history.append(record)
@@ -214,8 +232,10 @@ class SecurityAuditLogger:
         risk_level: RiskLevel = RiskLevel.LOW,
         execution_id: str | None = None,
         thread_id: str | None = None,
+        correlation_id: str | None = None,
     ) -> AuditRecord:
         """Registra la ejecución física o mock de una herramienta (AgentTool)."""
+        cid = self._resolve_correlation_id(correlation_id)
         details: dict[str, Any] = {
             "tool_name": tool_name,
             "tool_args": tool_args,
@@ -227,6 +247,8 @@ class SecurityAuditLogger:
             "has_rollback": result.rollback_context is not None,
             "thread_id": thread_id,
         }
+        if cid:
+            details["correlation_id"] = cid
         if execution_id:
             details["execution_id"] = execution_id
 
@@ -234,6 +256,7 @@ class SecurityAuditLogger:
             event_type="tool_executed",
             actor="tool_executor",
             details=details,
+            correlation_id=cid,
             timestamp=datetime.now(UTC),
         )
         self._history.append(record)
@@ -247,6 +270,7 @@ class SecurityAuditLogger:
         execution_id: str | None = None,
         thread_id: str | None = None,
         reason: str | None = None,
+        correlation_id: str | None = None,
     ) -> AuditRecord:
         """Registra una transición de estado en el ciclo operacional del agente."""
         old_val = (
@@ -256,6 +280,7 @@ class SecurityAuditLogger:
             new_status.value if isinstance(new_status, AgentExecutionStatus) else str(new_status)
         )
 
+        cid = self._resolve_correlation_id(correlation_id)
         details: dict[str, Any] = {
             "old_status": old_val,
             "new_status": new_val,
@@ -264,6 +289,8 @@ class SecurityAuditLogger:
             "risk_level": RiskLevel.LOW.value,
             "result": "transitioned",
         }
+        if cid:
+            details["correlation_id"] = cid
         if execution_id:
             details["execution_id"] = execution_id
 
@@ -271,6 +298,7 @@ class SecurityAuditLogger:
             event_type="state_transition",
             actor="orchestrator",
             details=details,
+            correlation_id=cid,
             timestamp=datetime.now(UTC),
         )
         self._history.append(record)
@@ -282,8 +310,10 @@ class SecurityAuditLogger:
         approval: ApprovalRecord,
         execution_id: str | None = None,
         thread_id: str | None = None,
+        correlation_id: str | None = None,
     ) -> AuditRecord:
         """Registra la solicitud o resolución de una aprobación humana (HITL)."""
+        cid = self._resolve_correlation_id(correlation_id)
         details: dict[str, Any] = {
             "status": approval.status.value,
             "approver": approval.approver,
@@ -293,6 +323,8 @@ class SecurityAuditLogger:
             "result": approval.status.value,
             "thread_id": thread_id,
         }
+        if cid:
+            details["correlation_id"] = cid
         if execution_id:
             details["execution_id"] = execution_id
 
@@ -300,6 +332,7 @@ class SecurityAuditLogger:
             event_type="approval_decided",
             actor=approval.approver or "human_operator",
             details=details,
+            correlation_id=cid,
             timestamp=approval.decided_at or datetime.now(UTC),
         )
         self._history.append(record)
@@ -314,9 +347,14 @@ class SecurityAuditLogger:
         execution_id: str | None = None,
         risk_level: RiskLevel | str | None = None,
         result: Any = None,
+        correlation_id: str | None = None,
     ) -> AuditRecord:
         """Registra un evento estructurado genérico en auditoría."""
         event_details = dict(details)
+        cid = self._resolve_correlation_id(correlation_id or event_details.get("correlation_id"))
+        if cid:
+            event_details["correlation_id"] = cid
+
         if risk_level is not None:
             r_val = risk_level.value if isinstance(risk_level, RiskLevel) else str(risk_level)
             event_details["risk_level"] = r_val
@@ -335,6 +373,7 @@ class SecurityAuditLogger:
             event_type=event_type,
             actor=actor,
             details=event_details,
+            correlation_id=cid,
             timestamp=datetime.now(UTC),
         )
         self._history.append(record)
@@ -345,8 +384,14 @@ class SecurityAuditLogger:
         self,
         record: AuditRecord,
         execution_id: str | None = None,
+        correlation_id: str | None = None,
     ) -> AuditRecord:
         """Ingesta un objeto AuditRecord preexistente y programa su persistencia."""
+        cid = self._resolve_correlation_id(correlation_id or record.correlation_id)
+        if cid:
+            record.correlation_id = cid
+            if "correlation_id" not in record.details:
+                record.details["correlation_id"] = cid
         self._history.append(record)
         self._schedule_persistence(record, execution_id)
         return record

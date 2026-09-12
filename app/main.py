@@ -11,14 +11,18 @@ from app import __version__
 from app.api import executions_router, telemetry_router
 from app.core.boot import init_agent_capabilities
 from app.core.config import settings
+from app.core.correlation import CorrelationIdMiddleware, CorrelationLogFilter
 from app.core.heartbeat import HeartbeatService
 from app.core.registration import auto_register_agent
 
 logger = logging.getLogger("jg_agente")
+correlation_filter = CorrelationLogFilter()
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] (%(name)s) %(message)s",
+    format="%(asctime)s [%(levelname)s] (%(name)s) %(correlation_id)s%(message)s",
 )
+for handler in logging.root.handlers:
+    handler.addFilter(correlation_filter)
 
 
 @asynccontextmanager
@@ -66,6 +70,9 @@ app = FastAPI(
     version=__version__,
     lifespan=lifespan,
 )
+
+# Middleware para inyección y propagación de X-Correlation-ID
+app.add_middleware(CorrelationIdMiddleware)
 
 # Montar enrutadores REST de la API
 app.include_router(executions_router)

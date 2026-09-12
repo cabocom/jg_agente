@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.checkpointer import get_checkpointer
+from app.core.correlation import get_correlation_id
 from app.core.graph import GraphBuilder
 from app.core.llm import get_chat_model
 from app.core.registry import CapabilityRegistry
@@ -161,10 +162,20 @@ async def execute_graph_pipeline(
     """Ejecuta el ciclo del grafo LangGraph con captura de pausas HITL y finalización."""
     start_time = time.perf_counter()
     thread_id = input_data.thread_id
-    config = {"configurable": {"thread_id": thread_id}}
+    cid = (
+        input_data.correlation_id
+        or (
+            input_data.metadata.get("correlation_id")
+            if isinstance(input_data.metadata, dict)
+            else None
+        )
+        or get_correlation_id()
+    )
+    config = {"configurable": {"thread_id": thread_id, "correlation_id": cid}}
 
     initial_state: AgentState = {
         "request": input_data,
+        "correlation_id": cid,
         "messages": [HumanMessage(content=input_data.prompt)],
         "status": AgentExecutionStatus.OBSERVING,
         "current_step": 0,
@@ -344,6 +355,11 @@ async def execute_graph_pipeline(
                 error_type=type(db_err).__name__,
             ).model_dump()
 
+        if cid:
+            agent_output.correlation_id = cid
+            if "correlation_id" not in agent_output.metadata:
+                agent_output.metadata["correlation_id"] = cid
+
         return agent_output
 
     except GraphInterrupt as interrupt_ex:
@@ -419,6 +435,11 @@ async def execute_graph_pipeline(
                 error_type=type(db_err).__name__,
             ).model_dump()
 
+        if cid:
+            agent_output.correlation_id = cid
+            if "correlation_id" not in agent_output.metadata:
+                agent_output.metadata["correlation_id"] = cid
+
         return agent_output
 
     except Exception as exc:
@@ -464,6 +485,11 @@ async def execute_graph_pipeline(
                 error=str(db_err),
                 error_type=type(db_err).__name__,
             ).model_dump()
+
+        if cid:
+            agent_output.correlation_id = cid
+            if "correlation_id" not in agent_output.metadata:
+                agent_output.metadata["correlation_id"] = cid
 
         return agent_output
 
@@ -513,6 +539,21 @@ async def trigger_execution(
     db: AsyncSession = Depends(get_async_session),
 ) -> Any:
     """Punto de entrada principal para la ejecución de agentes en jg_agente."""
+    # 0. Sincronizar e inyectar correlation_id
+    cid = (
+        get_correlation_id()
+        or input_data.correlation_id
+        or (
+            input_data.metadata.get("correlation_id")
+            if isinstance(input_data.metadata, dict)
+            else None
+        )
+    )
+    if cid:
+        input_data.correlation_id = cid
+        if "correlation_id" not in input_data.metadata:
+            input_data.metadata["correlation_id"] = cid
+
     # 1. Registrar o asegurar registro inicial en DB
     initial_persistence: PersistenceMetadata
     try:
@@ -554,6 +595,7 @@ async def trigger_execution(
         accepted_output = AgentOutput(
             execution_id=input_data.execution_id,
             thread_id=input_data.thread_id,
+            correlation_id=cid,
             status=ExecutionStatus.IN_PROGRESS,
             response="Ejecución aceptada y encolada en segundo plano.",
             metadata=input_data.metadata,
@@ -795,9 +837,18 @@ async def get_execution_by_thread_id(
     if completed_at is None and output_obj and hasattr(output_obj, "completed_at"):
         completed_at = output_obj.completed_at
 
+    req_cid = getattr(request_obj, "correlation_id", None) if request_obj is not None else None
+    correlation_id: str | None = (
+        vals.get("correlation_id")
+        or req_cid
+        or (metadata.get("correlation_id") if isinstance(metadata, dict) else None)
+        or get_correlation_id()
+    )
+
     return ExecutionThreadDetail(
         thread_id=thread_id,
         execution_id=execution_id,
+        correlation_id=correlation_id,
         status=status_val,
         prompt=prompt,
         response=response_text,
