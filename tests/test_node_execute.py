@@ -533,3 +533,129 @@ class TestExecuteNode:
         assert len(records) == 1
         assert records[0].status == StepStatus.FAILED
         assert "TimeoutError" in (records[0].error or "")
+
+    @pytest.mark.asyncio
+    async def test_execute_node_granular_hitl_approval_blocks_unapproved_step(
+        self, test_registry: CapabilityRegistry
+    ) -> None:
+        """Verifica que la aprobación HITL concedida a un paso específico NO se propague
+        indiscriminadamente a pasos secundarios de riesgo [AGENTE-SEC-05]."""
+        test_registry.register_tool(
+            AgentTool(
+                name="step1_high_tool",
+                description="Herramienta aprobada",
+                category="test",
+                func=lambda **kwargs: ToolResult(success=True, output="step1_ok"),
+                risk_level=RiskLevel.HIGH,
+            )
+        )
+        test_registry.register_tool(
+            AgentTool(
+                name="step2_destructive_tool",
+                description="Herramienta destructiva no aprobada",
+                category="test",
+                func=lambda **kwargs: ToolResult(success=True, output="step2_disaster"),
+                risk_level=RiskLevel.CRITICAL,
+            )
+        )
+
+        plan = ExecutionPlan(
+            plan_id="plan-sec-05",
+            goal="Probar contención granular de aprobación",
+            steps=[
+                PlanStep(
+                    step_id="step-approved-01",
+                    tool_name="step1_high_tool",
+                    risk_level=RiskLevel.HIGH,
+                ),
+                PlanStep(
+                    step_id="step-unapproved-02",
+                    tool_name="step2_destructive_tool",
+                    risk_level=RiskLevel.CRITICAL,
+                ),
+            ],
+        )
+
+        # Operador humano aprobó EXCLUSIVAMENTE 'step-approved-01'
+        state: AgentState = {
+            "plan": plan,
+            "approval": ApprovalRecord(
+                status=ApprovalStatus.APPROVED,
+                approver="sre-operator",
+                approved_step_ids=["step-approved-01"],
+                approved_tool_names=["step1_high_tool"],
+            ),
+        }
+
+        result = await execute_node(state, test_registry)
+        records = result["execution_records"]
+
+        assert len(records) == 2
+        # Paso 1 aprobado: se ejecutó con éxito
+        assert records[0].step_id == "step-approved-01"
+        assert records[0].status == StepStatus.COMPLETED
+        assert records[0].output == "step1_ok"
+
+        # Paso 2 no aprobado: bloqueado por SecurityGuard sin ejecutar
+        assert records[1].step_id == "step-unapproved-02"
+        assert records[1].status == StepStatus.FAILED
+        assert "REQUIRE_HUMAN_APPROVAL" in (records[1].error or "")
+        assert records[1].output != "step2_disaster"
+
+    @pytest.mark.asyncio
+    async def test_execute_node_allows_all_when_all_steps_approved(
+        self, test_registry: CapabilityRegistry
+    ) -> None:
+        """Verifica que si ambos pasos fueron explícitamente aprobados, ambos se ejecuten."""
+        test_registry.register_tool(
+            AgentTool(
+                name="step1_op",
+                description="Paso 1",
+                category="test",
+                func=lambda **kwargs: ToolResult(success=True, output="step1_done"),
+                risk_level=RiskLevel.HIGH,
+            )
+        )
+        test_registry.register_tool(
+            AgentTool(
+                name="step2_op",
+                description="Paso 2",
+                category="test",
+                func=lambda **kwargs: ToolResult(success=True, output="step2_done"),
+                risk_level=RiskLevel.HIGH,
+            )
+        )
+
+        plan = ExecutionPlan(
+            plan_id="plan-sec-05-both",
+            goal="Probar aprobación completa",
+            steps=[
+                PlanStep(
+                    step_id="step-1",
+                    tool_name="step1_op",
+                    risk_level=RiskLevel.HIGH,
+                ),
+                PlanStep(
+                    step_id="step-2",
+                    tool_name="step2_op",
+                    risk_level=RiskLevel.HIGH,
+                ),
+            ],
+        )
+
+        state: AgentState = {
+            "plan": plan,
+            "approval": ApprovalRecord(
+                status=ApprovalStatus.APPROVED,
+                approver="sre-operator",
+                approved_step_ids=["step-1", "step-2"],
+                approved_tool_names=["step1_op", "step2_op"],
+            ),
+        }
+
+        result = await execute_node(state, test_registry)
+        records = result["execution_records"]
+
+        assert len(records) == 2
+        assert records[0].status == StepStatus.COMPLETED
+        assert records[1].status == StepStatus.COMPLETED

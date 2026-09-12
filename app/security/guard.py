@@ -347,16 +347,36 @@ class SecurityGuard:
         bypass_approval: bool = False,
         execution_id: str | None = None,
         thread_id: str | None = None,
+        step_id: str | None = None,
+        approved_step_ids: Sequence[str] | None = None,
+        approved_tool_names: Sequence[str] | None = None,
     ) -> ToolResult:
         """Interpola validación de seguridad, sanitización, timeout y auditoría antes de invocar la tool.
 
         - Si la decisión es DENY: Devuelve ToolResult con fallo sin invocar la función.
-        - Si la decisión es REQUIRE_HUMAN_APPROVAL: Devuelve ToolResult señalizando pausa HITL (salvo bypass_approval=True).
+        - Si la decisión es REQUIRE_HUMAN_APPROVAL: Devuelve ToolResult señalizando pausa HITL (salvo bypass_approval=True
+          y que el step_id/tool.name coincida con los aprobados en approved_step_ids/approved_tool_names).
         - Si la decisión es ALLOW (o aprobada): Sanitiza entradas, ejecuta bajo asyncio.wait_for(timeout=tool.timeout_sec)
           sin bloquear los workers del agente, y audita el resultado.
         """
+        # Autorización granular de bypass [AGENTE-SEC-05]
+        effective_bypass = bypass_approval
+        if bypass_approval:
+            has_filter = (approved_step_ids is not None) or (approved_tool_names is not None)
+            if has_filter:
+                match_step = bool(
+                    approved_step_ids is not None
+                    and step_id is not None
+                    and step_id in approved_step_ids
+                )
+                match_tool = bool(
+                    approved_tool_names is not None
+                    and getattr(tool, "name", None) in approved_tool_names
+                )
+                effective_bypass = match_step or match_tool
+
         caller_perms = list(caller_permissions or [])
-        if bypass_approval and isinstance(tool, AgentTool):
+        if effective_bypass and isinstance(tool, AgentTool):
             caller_perms.extend(tool.required_permissions)
 
         eval_res = self.evaluate(
@@ -378,7 +398,7 @@ class SecurityGuard:
                 },
             )
 
-        if eval_res.decision == PolicyDecision.REQUIRE_HUMAN_APPROVAL and not bypass_approval:
+        if eval_res.decision == PolicyDecision.REQUIRE_HUMAN_APPROVAL and not effective_bypass:
             return ToolResult(
                 success=False,
                 error=f"SecurityGuard REQUIRE_HUMAN_APPROVAL: {eval_res.reason}",

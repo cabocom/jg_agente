@@ -89,11 +89,12 @@ async def risk_assess_node(
                 tcs = getattr(last_msg, "tool_calls", None) or []
 
         for idx, tc in enumerate(tcs):
+            tc_id = tc.get("id") or f"tool-call-{idx}"
             tc_name = tc.get("name") or tc.get("tool_name", f"tool-{idx}")
             tc_args = tc.get("args") or tc.get("tool_args", {})
             steps_to_evaluate.append(
                 PlanStep(
-                    step_id=f"tool-call-{idx}",
+                    step_id=tc_id,
                     tool_name=tc_name,
                     tool_args=tc_args,
                     risk_level=RiskLevel.LOW,
@@ -106,6 +107,8 @@ async def risk_assess_node(
     has_data_loss = False
     denied_reasons: list[str] = []
     approval_reasons: list[str] = []
+    steps_requiring_approval: list[str] = []
+    tools_requiring_approval: list[str] = []
 
     if not steps_to_evaluate:
         decision = PolicyDecision.ALLOW
@@ -151,6 +154,10 @@ async def risk_assess_node(
                 RiskLevel.CRITICAL,
             ):
                 requires_approval = True
+                steps_requiring_approval.append(step.step_id)
+                tool_name_entry = tool.name if tool else step.tool_name
+                if tool_name_entry and tool_name_entry not in tools_requiring_approval:
+                    tools_requiring_approval.append(tool_name_entry)
                 approval_reasons.append(
                     f"Acción '{step.tool_name}' ({effective_risk.value.upper()}): {eval_res.reason}"
                 )
@@ -233,6 +240,8 @@ async def risk_assess_node(
     # 7. Gestión del estado de aprobación humana (AWAITING_APPROVAL)
     if requires_approval:
         update_state["status"] = AgentExecutionStatus.AWAITING_APPROVAL
+        update_state["approved_step_ids"] = steps_requiring_approval
+        update_state["approved_tool_names"] = tools_requiring_approval
 
         # Preservar registro si ya estuviera aprobado previamente (reanudación HITL)
         current_approval = state.get("approval")
@@ -251,6 +260,8 @@ async def risk_assess_node(
             update_state["approval"] = ApprovalRecord(
                 status=ApprovalStatus.PENDING,
                 notes=reason,
+                approved_step_ids=steps_requiring_approval,
+                approved_tool_names=tools_requiring_approval,
             )
     elif decision == PolicyDecision.DENY:
         update_state["status"] = AgentExecutionStatus.FAILED

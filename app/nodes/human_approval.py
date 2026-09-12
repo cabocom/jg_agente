@@ -83,6 +83,12 @@ async def human_approval_node(
             "human_intervention_required": False,
             "requires_approval": False,
             "approval": approval_rec,
+            "approved_step_ids": approval_rec.approved_step_ids
+            or state.get("approved_step_ids")
+            or [],
+            "approved_tool_names": approval_rec.approved_tool_names
+            or state.get("approved_tool_names")
+            or [],
             "cognitive_steps": [cog_approved],
             "audit_trail": [
                 AuditRecord(
@@ -204,8 +210,26 @@ async def human_approval_node(
     approver = "human_operator"
     notes = "Decisión recibida vía HITL resume"
 
+    existing_steps = (
+        raw_approval.approved_step_ids
+        if isinstance(raw_approval, ApprovalRecord)
+        else (raw_approval.get("approved_step_ids") if isinstance(raw_approval, dict) else [])
+    ) or (state.get("approved_step_ids") or [])
+    existing_tools = (
+        raw_approval.approved_tool_names
+        if isinstance(raw_approval, ApprovalRecord)
+        else (raw_approval.get("approved_tool_names") if isinstance(raw_approval, dict) else [])
+    ) or (state.get("approved_tool_names") or [])
+
+    resumed_step_ids: list[str] = list(existing_steps)
+    resumed_tool_names: list[str] = list(existing_tools)
+
     if isinstance(decision, ApprovalRecord):
         approval_rec = decision
+        if decision.approved_step_ids:
+            resumed_step_ids = list(decision.approved_step_ids)
+        if decision.approved_tool_names:
+            resumed_tool_names = list(decision.approved_tool_names)
         is_approved = approval_rec.status in (
             ApprovalStatus.APPROVED,
             ApprovalStatus.APPROVED.value,
@@ -213,6 +237,10 @@ async def human_approval_node(
             ApprovalStatus.AUTO_APPROVED.value,
         )
     elif isinstance(decision, dict):
+        if decision.get("approved_step_ids"):
+            resumed_step_ids = list(decision["approved_step_ids"])
+        if decision.get("approved_tool_names"):
+            resumed_tool_names = list(decision["approved_tool_names"])
         is_approved = bool(
             decision.get("approved")
             or decision.get("status")
@@ -236,6 +264,8 @@ async def human_approval_node(
             status=ApprovalStatus.APPROVED if is_approved else ApprovalStatus.REJECTED,
             approver=approver,
             notes=notes,
+            approved_step_ids=resumed_step_ids if is_approved else [],
+            approved_tool_names=resumed_tool_names if is_approved else [],
         )
     elif isinstance(decision, bool):
         is_approved = decision
@@ -243,6 +273,8 @@ async def human_approval_node(
             status=ApprovalStatus.APPROVED if is_approved else ApprovalStatus.REJECTED,
             approver="human_operator",
             notes="Decisión booleana directa",
+            approved_step_ids=resumed_step_ids if is_approved else [],
+            approved_tool_names=resumed_tool_names if is_approved else [],
         )
     else:
         # Si la reanudación no aportó payload directo, verificar si el estado fue mutado externamente
@@ -252,6 +284,10 @@ async def human_approval_node(
             ApprovalStatus.APPROVED.value,
         ):
             approval_rec = current_app
+            if current_app.approved_step_ids:
+                resumed_step_ids = list(current_app.approved_step_ids)
+            if current_app.approved_tool_names:
+                resumed_tool_names = list(current_app.approved_tool_names)
             is_approved = True
         else:
             approval_rec = ApprovalRecord(
@@ -260,6 +296,8 @@ async def human_approval_node(
                 notes="Reanudación sin autorización explícita.",
             )
             is_approved = False
+            resumed_step_ids = []
+            resumed_tool_names = []
 
     duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
     final_status = AgentExecutionStatus.EXECUTING if is_approved else AgentExecutionStatus.FAILED
@@ -301,6 +339,8 @@ async def human_approval_node(
         "human_intervention_required": False,
         "requires_approval": False,
         "approval": approval_rec,
+        "approved_step_ids": resumed_step_ids if is_approved else [],
+        "approved_tool_names": resumed_tool_names if is_approved else [],
         "cognitive_steps": [cog_resumed],
         "audit_trail": [audit],
     }

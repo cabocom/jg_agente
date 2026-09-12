@@ -165,6 +165,14 @@ class ApprovalRecord(BaseModel):
     decided_at: datetime | None = Field(default=None, description="Timestamp de decisión")
     notes: str | None = Field(default=None, description="Comentarios u observaciones")
     rejection_reason: str | None = Field(default=None, description="Motivo de rechazo")
+    approved_step_ids: list[str] = Field(
+        default_factory=list,
+        description="Lista de identificadores de pasos explícitamente aprobados",
+    )
+    approved_tool_names: list[str] = Field(
+        default_factory=list,
+        description="Lista de nombres de herramientas explícitamente aprobadas",
+    )
 
 
 class SecurityEvaluationResult(BaseModel):
@@ -335,6 +343,8 @@ class AgentState(TypedDict, total=False):
     # 5. Aprobación Humana (HITL)
     approval: ApprovalRecord | dict[str, Any] | None
     requires_approval: bool
+    approved_step_ids: list[str] | None
+    approved_tool_names: list[str] | None
 
     # 6. Trazas de Ejecución, Rollback y Verificación
     execution_records: Annotated[list[StepExecutionRecord], append_reducer]

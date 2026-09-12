@@ -61,15 +61,50 @@ async def execute_node(
         execution_id = getattr(req, "execution_id", None)
         thread_id = getattr(req, "thread_id", None)
 
-    # 2. Comprobar autorización humana previa (HITL)
+    # 2. Comprobar autorización humana previa (HITL) granular [AGENTE-SEC-05]
     approval_val = state.get("approval")
     approval_status: ApprovalStatus | str | None = None
+    approved_step_ids: set[str] = set()
+    approved_tool_names: set[str] = set()
+
     if isinstance(approval_val, ApprovalRecord):
         approval_status = approval_val.status
+        if approval_val.approved_step_ids:
+            approved_step_ids.update(approval_val.approved_step_ids)
+        if approval_val.approved_tool_names:
+            approved_tool_names.update(approval_val.approved_tool_names)
     elif isinstance(approval_val, dict):
         approval_status = approval_val.get("status")
+        if approval_val.get("approved_step_ids"):
+            approved_step_ids.update(approval_val["approved_step_ids"])
+        if approval_val.get("approved_tool_names"):
+            approved_tool_names.update(approval_val["approved_tool_names"])
 
-    bypass_approval = approval_status in (ApprovalStatus.APPROVED, ApprovalStatus.APPROVED.value)
+    state_steps = state.get("approved_step_ids")
+    if state_steps:
+        approved_step_ids.update(state_steps)
+    state_tools = state.get("approved_tool_names")
+    if state_tools:
+        approved_tool_names.update(state_tools)
+
+    is_plan_approved = approval_status in (
+        ApprovalStatus.APPROVED,
+        ApprovalStatus.APPROVED.value,
+        ApprovalStatus.AUTO_APPROVED,
+        ApprovalStatus.AUTO_APPROVED.value,
+    )
+
+    caller_perms: list[str] = []
+    state_perms = state.get("caller_permissions")
+    if state_perms:
+        caller_perms = list(state_perms)
+    elif req and req.user_context:
+        if req.user_context.role == "admin" or (
+            getattr(req, "metadata", None) and req.metadata.get("user_role") == "admin"
+        ):
+            caller_perms = ["*"]
+        elif req.user_context.permissions:
+            caller_perms = list(req.user_context.permissions)
 
     # 3. Determinar los pasos u operaciones a ejecutar
     raw_plan = state.get("plan")
@@ -173,10 +208,22 @@ async def execute_node(
             tool.reversible,
         )
 
+        # Autorización granular por paso [AGENTE-SEC-05]:
+        # bypass_approval solo es True para los pasos o herramientas explícitamente aprobados
+        step_bypass_approval = False
+        if is_plan_approved:
+            if approved_step_ids or approved_tool_names:
+                step_bypass_approval = (
+                    step.step_id in approved_step_ids or step.tool_name in approved_tool_names
+                )
+            else:
+                # Si se aprobó el plan globalmente sin lista y solo hay un paso, se aprueba dicho paso
+                step_bypass_approval = len(steps_to_run) == 1
+
         # Salto cognitivo: Evaluación de Políticas de Seguridad (SecurityGuard)
         sec_description = (
             f"Operación '{tool.name}' evaluada con riesgo {tool.risk_level.value.upper()}. "
-            f"{'Autorizada previamente vía HITL.' if bypass_approval else 'Política: Ejecución autónoma autorizada (ALLOW).'}"
+            f"{'Autorizada previamente vía HITL.' if step_bypass_approval else 'Política: Ejecución autónoma autorizada (ALLOW).'}"
         )
         cognitive_steps.append(
             CognitiveStepRecord(
@@ -190,7 +237,7 @@ async def execute_node(
                     "tool": tool.name,
                     "risk_level": tool.risk_level.value,
                     "decision": "allow",
-                    "bypass_approval": bypass_approval,
+                    "bypass_approval": step_bypass_approval,
                     "reversible": tool.reversible,
                 },
                 duration_ms=0.0,
@@ -204,9 +251,13 @@ async def execute_node(
                 guard.execute_tool(
                     tool=tool,
                     tool_args=step.tool_args,
-                    bypass_approval=bypass_approval,
+                    caller_permissions=caller_perms,
+                    bypass_approval=step_bypass_approval,
                     execution_id=execution_id,
                     thread_id=thread_id,
+                    step_id=step.step_id,
+                    approved_step_ids=list(approved_step_ids) if approved_step_ids else None,
+                    approved_tool_names=list(approved_tool_names) if approved_tool_names else None,
                 ),
                 timeout=timeout_sec,
             )
