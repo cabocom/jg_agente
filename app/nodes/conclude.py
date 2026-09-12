@@ -6,6 +6,7 @@ con status=completed (o failed) para finalizar el hilo en LangGraph.
 """
 
 import logging
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -18,6 +19,7 @@ from app.models.state import (
     AgentState,
     ApprovalStatus,
     AuditRecord,
+    CognitiveStepRecord,
     IntentModel,
     StepStatus,
     VerificationStatus,
@@ -185,8 +187,34 @@ async def conclude_node(
     if records:
         data_payload["steps_count"] = len(records)
         data_payload["execution_records"] = [
-            r.model_dump() if hasattr(r, "model_dump") else dict(r) for r in records
+            r.model_dump(mode="json") if hasattr(r, "model_dump") else dict(r) for r in records
         ]
+
+    # Consolidación de saltos cognitivos (Cognitive Steps Trace)
+    cog_steps = list(state.get("cognitive_steps") or [])
+    conclude_step = CognitiveStepRecord(
+        step_id=f"cog_conclude_{int(time.time() * 1000)}",
+        node="conclude",
+        title="Síntesis y Cierre Cognitivo",
+        action="Consolidación de Salida",
+        description="El agente consolidó el resultado de todos los saltos previos y formuló la respuesta final.",
+        status="completed" if is_resolved else "failed",
+        details={
+            "is_resolved": is_resolved,
+            "final_status": final_output_status.value,
+            "execution_time_ms": execution_time_ms,
+            "response_preview": response_text[:300] if response_text else None,
+        },
+        duration_ms=0.0,
+        timestamp=datetime.now(UTC),
+    )
+    cog_steps.append(conclude_step)
+
+    data_payload["cognitive_steps"] = [
+        s.model_dump(mode="json") if hasattr(s, "model_dump") else dict(s) for s in cog_steps
+    ]
+    data_payload["steps"] = data_payload["cognitive_steps"]
+
     if state.get("environment_snapshot"):
         data_payload["environment_snapshot"] = state.get("environment_snapshot")
     if state.get("verification_results"):
@@ -197,6 +225,7 @@ async def conclude_node(
     metadata_payload: dict[str, Any] = {
         "is_resolved": is_resolved,
         "tools_executed_count": len(records),
+        "cognitive_steps_count": len(cog_steps),
         "errors_count": len(errors),
     }
 
@@ -227,6 +256,7 @@ async def conclude_node(
         "is_resolved": is_resolved,
         "output": agent_output,
         "messages": messages,
+        "cognitive_steps": [conclude_step],
         "audit_trail": [
             AuditRecord(
                 event_type="execution_concluded",
@@ -237,9 +267,11 @@ async def conclude_node(
                     "is_resolved": is_resolved,
                     "execution_time_ms": execution_time_ms,
                     "steps_count": len(records),
+                    "cognitive_steps_count": len(cog_steps),
                     "errors_count": len(errors),
                 },
                 timestamp=datetime.now(UTC),
             )
         ],
     }
+

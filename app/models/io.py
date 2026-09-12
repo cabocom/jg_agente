@@ -228,6 +228,10 @@ class ExecutionThreadDetail(BaseModel):
         default_factory=list,
         description="Historial cronológico de pasos y herramientas ejecutadas",
     )
+    cognitive_steps: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Traza cronológica de saltos cognitivos por los nodos del grafo LangGraph",
+    )
     approval_status: str | None = Field(
         default=None,
         description="Estado de la resolución humana (pending, approved, rejected)",

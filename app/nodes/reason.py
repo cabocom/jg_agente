@@ -7,6 +7,7 @@ respuesta directa para resolver la solicitud.
 """
 
 import logging
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -26,6 +27,7 @@ from app.models.state import (
     AgentExecutionStatus,
     AgentState,
     AuditRecord,
+    CognitiveStepRecord,
     IntentModel,
 )
 
@@ -223,11 +225,13 @@ async def reason_node(
             logger.warning("No se pudieron vincular las herramientas al LLM: %s", exc)
 
     # 4. Invocación asíncrona del LLM
+    start_llm = time.perf_counter()
     try:
         raw_response = await model_to_invoke.ainvoke(messages_to_send)
     except NotImplementedError:
         # Fallback para modelos que solo implementan invoke síncrono
         raw_response = model_to_invoke.invoke(messages_to_send)
+    duration_llm_ms = max(0.0, round((time.perf_counter() - start_llm) * 1000.0, 2))
 
     ai_message: AIMessage
     if isinstance(raw_response, AIMessage):
@@ -239,9 +243,12 @@ async def reason_node(
     planner_engine = registry.get_planner()
 
     if has_tool_calls:
+        tool_names = [tc.get("name") for tc in ai_message.tool_calls]
+        tools_str = ", ".join(t for t in tool_names if t)
         logger.info(
-            "[reason_node] El modelo generó %d tool call(s)",
+            "[reason_node] El modelo generó %d tool call(s): %s",
             len(ai_message.tool_calls),
+            tools_str,
         )
         intent = IntentModel(
             goal=prompt or "Ejecución de herramientas operativas",
@@ -250,13 +257,18 @@ async def reason_node(
             confidence=1.0,
             reasoning=str(ai_message.content)
             if ai_message.content
-            else "Invocación de herramientas requerida.",
+            else f"Invocación requerida para: {tools_str}",
         )
         audit_details = {
             "action_type": "act",
             "tool_calls_count": len(ai_message.tool_calls),
-            "tools": [tc.get("name") for tc in ai_message.tool_calls],
+            "tools": tool_names,
         }
+        step_title = "Razonamiento e Interpretación Cognitiva"
+        step_action = f"Selección de Herramienta(s): {tools_str}"
+        step_description = (
+            f"El modelo interpretó la consulta y determinó invocar la(s) herramienta(s): {tools_str}."
+        )
     elif planner_engine is not None and not _is_simple_greeting_or_chat(prompt):
         logger.info(
             "[reason_node] Solicitud operativa detectada con planificador disponible ('%s')",
@@ -273,6 +285,12 @@ async def reason_node(
             "action_type": "plan",
             "planner": planner_engine.name,
         }
+        step_title = "Razonamiento y Planificación Cognitiva"
+        step_action = f"Delegación a Planificador: {planner_engine.name}"
+        step_description = (
+            f"Solicitud operativa compleja detectada. El agente delega en el motor '{planner_engine.name}' "
+            f"para formular un plan de pasos secuenciales."
+        )
     else:
         logger.info(
             "[reason_node] El modelo generó respuesta directa sin herramientas ni planificación"
@@ -288,11 +306,36 @@ async def reason_node(
             "action_type": "conclude",
             "response_length": len(str(ai_message.content)),
         }
+        step_title = "Razonamiento y Respuesta Directa"
+        step_action = "Resolución Conversacional"
+        step_description = (
+            "El agente analizó la consulta y determinó que no requiere invocar herramientas operativas, "
+            "procediendo a responder directamente."
+        )
+
+    cognitive_step = CognitiveStepRecord(
+        step_id=f"cog_reason_{int(time.time() * 1000)}",
+        node="reason",
+        title=step_title,
+        action=step_action,
+        description=step_description,
+        status="completed",
+        details={
+            "goal": intent.goal,
+            "action_type": intent.action_type,
+            "reasoning": intent.reasoning,
+            "tool_calls": ai_message.tool_calls if has_tool_calls else [],
+            "response_preview": str(ai_message.content)[:300] if ai_message.content else None,
+        },
+        duration_ms=duration_llm_ms,
+        timestamp=datetime.now(UTC),
+    )
 
     return {
         "status": AgentExecutionStatus.REASONING,
         "intent": intent,
         "messages": [ai_message],
+        "cognitive_steps": [cognitive_step],
         "audit_trail": [
             AuditRecord(
                 event_type="reasoning_completed",
@@ -302,3 +345,4 @@ async def reason_node(
             )
         ],
     }
+

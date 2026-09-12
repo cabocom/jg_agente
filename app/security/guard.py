@@ -14,12 +14,14 @@ import logging
 import re
 import time
 from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.models.state import PolicyDecision, SecurityEvaluationResult
 from app.models.tools import AgentTool, RiskLevel, ToolResult
-from app.security.audit import SecurityAuditLogger, get_security_audit_logger
-from app.security.ssrf import SSRFValidator, get_ssrf_validator
+
+if TYPE_CHECKING:
+    from app.security.audit import SecurityAuditLogger
+    from app.security.ssrf import SSRFValidator
 
 logger = logging.getLogger("jg_agente.security.guard")
 
@@ -48,9 +50,12 @@ class SecurityGuard:
 
     def __init__(
         self,
-        audit_logger: SecurityAuditLogger | None = None,
-        ssrf_validator: SSRFValidator | None = None,
+        audit_logger: Any | None = None,
+        ssrf_validator: Any | None = None,
     ) -> None:
+        from app.security.audit import get_security_audit_logger
+        from app.security.ssrf import get_ssrf_validator
+
         self.audit_logger = audit_logger or get_security_audit_logger()
         self.ssrf_validator = ssrf_validator or get_ssrf_validator()
 

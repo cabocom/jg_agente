@@ -235,6 +235,36 @@ class ExecutionError(BaseModel):
     )
 
 
+class CognitiveStepRecord(BaseModel):
+    """Registro de salto cognitivo o transición de nodo dentro del grafo LangGraph."""
+
+    model_config = ConfigDict(extra="allow")
+
+    step_id: str = Field(..., description="Identificador único del salto cognitivo")
+    node: str = Field(
+        ...,
+        description="Identificador del nodo (reason, security_eval, execute, conclude, etc.)",
+    )
+    title: str = Field(default="", description="Título descriptivo y legible del salto")
+    action: str = Field(default="", description="Acción o propósito específico del salto")
+    description: str = Field(
+        default="", description="Descripción detallada de la decisión o resultado cognitivo"
+    )
+    status: str = Field(
+        default="completed",
+        description="Estado del paso (completed, failed, waiting_approval, skipped)",
+    )
+    details: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Datos y metadatos complementarios (args, riesgo, razonamiento)",
+    )
+    duration_ms: float = Field(default=0.0, ge=0.0, description="Duración del nodo en milisegundos")
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="Timestamp UTC del paso cognitivo",
+    )
+
+
 # ==========================================
 # 4. AgentState (TypedDict para LangGraph)
 # ==========================================
@@ -268,7 +298,9 @@ class AgentState(TypedDict, total=False):
 
     # 6. Trazas de Ejecución, Rollback y Verificación
     execution_records: Annotated[list[StepExecutionRecord], append_reducer]
+    cognitive_steps: Annotated[list[CognitiveStepRecord], append_reducer]
     verification_results: Annotated[list[dict[str, Any]], append_reducer]
+
     rollback_records: Annotated[list[dict[str, Any]], append_reducer]
     diagnostic_report: dict[str, Any] | str | None
 

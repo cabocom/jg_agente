@@ -21,6 +21,7 @@ from app.models.state import (
     ApprovalRecord,
     ApprovalStatus,
     AuditRecord,
+    CognitiveStepRecord,
     ExecutionError,
     ExecutionPlan,
     IntentModel,
@@ -121,6 +122,7 @@ async def execute_node(
 
     # 4. Ejecución secuencial de herramientas
     records: list[StepExecutionRecord] = []
+    cognitive_steps: list[CognitiveStepRecord] = []
     errors: list[ExecutionError] = []
     tool_messages: list[ToolMessage] = []
 
@@ -148,6 +150,19 @@ async def execute_node(
                     timestamp=datetime.now(UTC),
                 )
             )
+            cognitive_steps.append(
+                CognitiveStepRecord(
+                    step_id=f"cog_err_{step.step_id}",
+                    node="execute",
+                    title=f"Error en Herramienta: {step.tool_name}",
+                    action="Fallo de Localización",
+                    description=err_msg,
+                    status="failed",
+                    details={"tool_name": step.tool_name, "error": err_msg},
+                    duration_ms=0.0,
+                    timestamp=datetime.now(UTC),
+                )
+            )
             # Contención secuencial: abortar pasos subsiguientes
             break
 
@@ -158,6 +173,31 @@ async def execute_node(
             tool.name,
             tool.risk_level.value,
             tool.reversible,
+        )
+
+        # Salto cognitivo: Evaluación de Políticas de Seguridad (SecurityGuard)
+        sec_description = (
+            f"Operación '{tool.name}' evaluada con riesgo {tool.risk_level.value.upper()}. "
+            f"{'Autorizada previamente vía HITL.' if bypass_approval else 'Política: Ejecución autónoma autorizada (ALLOW).'}"
+        )
+        cognitive_steps.append(
+            CognitiveStepRecord(
+                step_id=f"cog_sec_{step.step_id}",
+                node="security_eval",
+                title="Evaluación de Seguridad y Gobernanza (SecurityGuard)",
+                action=f"Auditoría de Políticas: {tool.name}",
+                description=sec_description,
+                status="completed",
+                details={
+                    "tool": tool.name,
+                    "risk_level": tool.risk_level.value,
+                    "decision": "allow",
+                    "bypass_approval": bypass_approval,
+                    "reversible": tool.reversible,
+                },
+                duration_ms=0.0,
+                timestamp=datetime.now(UTC),
+            )
         )
 
         timeout_sec = getattr(tool, "timeout_sec", 30.0) or 30.0
@@ -221,6 +261,31 @@ async def execute_node(
         )
         records.append(record)
 
+        # Salto cognitivo: Ejecución técnica de la acción
+        exec_description = (
+            f"Herramienta '{tool.name}' ejecutada {'con éxito' if tool_result.success else 'con fallo'} "
+            f"en {tool_result.duration_ms:.2f}ms."
+        )
+        cognitive_steps.append(
+            CognitiveStepRecord(
+                step_id=f"cog_exec_{step.step_id}",
+                node="execute",
+                title=f"Ejecución de Acción: {tool.name}",
+                action=f"Invocación de {tool.name}",
+                description=exec_description,
+                status="completed" if tool_result.success else "failed",
+                details={
+                    "tool_name": step.tool_name,
+                    "tool_args": step.tool_args,
+                    "output": tool_result.output,
+                    "error": tool_result.error,
+                    "duration_ms": tool_result.duration_ms,
+                },
+                duration_ms=tool_result.duration_ms,
+                timestamp=datetime.now(UTC),
+            )
+        )
+
         # Si procede de un tool_call del LLM, emitir ToolMessage para la memoria
         if is_tool_call_source:
             msg_content = (
@@ -263,6 +328,7 @@ async def execute_node(
     mutations: dict[str, Any] = {
         "status": AgentExecutionStatus.EXECUTING,
         "execution_records": records,
+        "cognitive_steps": cognitive_steps,
         "errors": errors,
         "audit_trail": [
             AuditRecord(

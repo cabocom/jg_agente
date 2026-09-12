@@ -176,6 +176,7 @@ async def execute_graph_pipeline(
         "stop_reason": None,
         "errors": [],
         "execution_records": [],
+        "cognitive_steps": [],
         "audit_trail": [],
         "verification_results": [],
         "rollback_records": [],
@@ -649,16 +650,45 @@ async def get_execution_by_thread_id(
         elif isinstance(plan_obj, dict):
             plan_dict = plan_obj
 
-    # Pasos ejecutados
-    raw_steps = vals.get("execution_records") or []
-    steps_list: list[dict[str, Any]] = []
-    for rec in raw_steps:
+    # Pasos y saltos cognitivos
+    raw_cog_steps = (
+        vals.get("cognitive_steps")
+        or (
+            db_record.data.get("cognitive_steps")
+            if (db_record and isinstance(db_record.data, dict))
+            else None
+        )
+        or []
+    )
+    cog_steps_list: list[dict[str, Any]] = []
+    for rec in raw_cog_steps:
         if hasattr(rec, "model_dump"):
-            steps_list.append(rec.model_dump(mode="json"))
+            cog_steps_list.append(rec.model_dump(mode="json"))
         elif isinstance(rec, dict):
-            steps_list.append(rec)
+            cog_steps_list.append(rec)
         else:
-            steps_list.append({"raw": str(rec)})
+            cog_steps_list.append({"raw": str(rec)})
+
+    raw_exec_records = (
+        vals.get("execution_records")
+        or (
+            db_record.data.get("execution_records")
+            if (db_record and isinstance(db_record.data, dict))
+            else None
+        )
+        or []
+    )
+    exec_steps_list: list[dict[str, Any]] = []
+    for rec in raw_exec_records:
+        if hasattr(rec, "model_dump"):
+            exec_steps_list.append(rec.model_dump(mode="json"))
+        elif isinstance(rec, dict):
+            exec_steps_list.append(rec)
+        else:
+            exec_steps_list.append({"raw": str(rec)})
+
+    # steps_list unificado: prioriza la traza cognitiva completa
+    steps_list = cog_steps_list if cog_steps_list else exec_steps_list
 
     # Gobernanza HITL
     appr_obj = vals.get("approval")
@@ -735,6 +765,7 @@ async def get_execution_by_thread_id(
         next_nodes=next_nodes,
         plan=plan_dict,
         steps=steps_list,
+        cognitive_steps=cog_steps_list,
         approval_status=approval_status_val,
         requires_approval=requires_approval,
         pending_approval_id=pending_approval_id,
