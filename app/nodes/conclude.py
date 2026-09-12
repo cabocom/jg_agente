@@ -115,13 +115,25 @@ async def conclude_node(
     response_text = ""
     messages = list(state.get("messages") or [])
 
-    # A. Buscar en el último AIMessage con contenido
-    for msg in reversed(messages):
-        if isinstance(msg, AIMessage) and msg.content:
-            response_text = str(msg.content).strip()
-            break
+    # A. Si la ejecución fue rechazada/cancelada por HITL, la respuesta prioritaria es la justificación de rechazo
+    if is_cancelled or is_rejected:
+        rejection_notes = (
+            getattr(approval_val, "notes", None)
+            if approval_val
+            else (approval_val.get("notes") if isinstance(approval_val, dict) else None)
+        )
+        response_text = str(
+            rejection_notes or "Ejecución cancelada por rechazo de operador (HITL)."
+        )
 
-    # B. Buscar en los parámetros de la intención (intent)
+    # B. Buscar en el último AIMessage con contenido
+    if not response_text:
+        for msg in reversed(messages):
+            if isinstance(msg, AIMessage) and msg.content:
+                response_text = str(msg.content).strip()
+                break
+
+    # C. Buscar en los parámetros de la intención (intent)
     if not response_text:
         intent_val = state.get("intent")
         if isinstance(intent_val, IntentModel) and intent_val.parameters:

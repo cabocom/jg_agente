@@ -228,6 +228,8 @@ async def human_approval_node(
         approver = str(decision.get("approver") or "human_operator")
         notes = str(
             decision.get("notes")
+            or decision.get("justification")
+            or decision.get("reason")
             or ("Aprobado por operador" if is_approved else "Rechazado por operador")
         )
         approval_rec = ApprovalRecord(

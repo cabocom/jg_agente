@@ -922,18 +922,22 @@ async def _resolve_hitl_execution(
 
     if agent_output.data is None:
         agent_output.data = {}
-    if "cognitive_steps" not in agent_output.data:
-        cog_steps = final_state.get("cognitive_steps") or []
-        formatted_steps = [
-            s.model_dump(mode="json") if hasattr(s, "model_dump") else s for s in cog_steps
-        ]
-        agent_output.data["cognitive_steps"] = formatted_steps
-        agent_output.data["steps"] = formatted_steps
+    cog_steps = final_state.get("cognitive_steps") or []
+    formatted_steps = [
+        s.model_dump(mode="json") if hasattr(s, "model_dump") else s for s in cog_steps
+    ]
+    agent_output.data["cognitive_steps"] = formatted_steps
+    agent_output.data["steps"] = formatted_steps
 
+    rejection_text = (
+        payload.notes
+        or getattr(payload, "justification", None)
+        or getattr(payload, "reason", None)
+    )
     if not approved:
         agent_output.status = ExecutionStatus.CANCELLED
-        if payload.notes:
-            agent_output.response = payload.notes
+        if rejection_text:
+            agent_output.response = rejection_text
         elif not agent_output.response or agent_output.response.startswith("Ejecución finalizada"):
             agent_output.response = "Ejecución cancelada por rechazo de operador (HITL)."
 

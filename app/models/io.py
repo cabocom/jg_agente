@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 
 class ExecutionStatus(StrEnum):
@@ -287,10 +287,24 @@ class HITLResolutionRequest(BaseModel):
         default=None,
         description="Comentarios, justificación o notas de la decisión de aprobación o rechazo",
     )
+    justification: str | None = Field(
+        default=None,
+        description="Alias de justificación enviado por el Control Plane",
+    )
+    reason: str | None = Field(
+        default=None,
+        description="Alias de motivo de rechazo o aprobación",
+    )
     metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Metadatos arbitrarios complementarios para auditoría",
     )
+
+    @model_validator(mode="after")
+    def populate_notes_fallback(self) -> "HITLResolutionRequest":
+        if not self.notes:
+            self.notes = self.justification or self.reason
+        return self
 
 
 class HealthComponentStatus(BaseModel):
