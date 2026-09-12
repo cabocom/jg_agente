@@ -1,6 +1,7 @@
 """Módulo de nodos troncales y cognitivos de ejecución para LangGraph."""
 
 from app.nodes.conclude import conclude_node
+from app.nodes.evaluate import evaluate_node
 from app.nodes.execute import execute_node
 from app.nodes.human_approval import human_approval_node
 from app.nodes.observe import observe_node
@@ -12,6 +13,7 @@ from app.nodes.verify import verify_node
 
 __all__ = [
     "conclude_node",
+    "evaluate_node",
     "execute_node",
     "human_approval_node",
     "observe_node",
