@@ -12,7 +12,7 @@ from app.core.graph import (
     GraphBuilder,
 )
 from app.core.registry import CapabilityRegistry
-from app.models.io import AgentInput
+from app.models.io import AgentInput, UserContext
 from app.models.state import (
     AgentExecutionStatus,
     AgentState,
@@ -317,7 +317,13 @@ class TestGraphBuilderHITL:
                 execution_id="exec-hitl-01",
                 thread_id=thread_id,
                 prompt="Desplegar parche crítico en producción",
+                user_context=UserContext(
+                    user_id="operator-01",
+                    role="operator",
+                    permissions=["deploy:write"],
+                ),
             ),
+            "caller_permissions": ["deploy:write"],
             "messages": [HumanMessage(content="Desplegar parche crítico")],
             "status": AgentExecutionStatus.IDLE,
         }

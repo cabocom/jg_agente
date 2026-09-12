@@ -120,15 +120,16 @@ async def risk_assess_node(
                 max_risk = effective_risk
 
             caller_perms: list[str] = []
-            if req and req.user_context:
+            state_perms = state.get("caller_permissions")
+            if state_perms:
+                caller_perms = list(state_perms)
+            elif req and req.user_context:
                 if req.user_context.role == "admin" or (
                     getattr(req, "metadata", None) and req.metadata.get("user_role") == "admin"
                 ):
                     caller_perms = ["*"]
                 elif req.user_context.permissions:
                     caller_perms = list(req.user_context.permissions)
-            if not caller_perms and tool:
-                caller_perms = list(tool.required_permissions)
 
             # Evaluar con SecurityGuard
             eval_res = guard.evaluate(

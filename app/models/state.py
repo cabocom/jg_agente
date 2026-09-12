@@ -319,6 +319,7 @@ class AgentState(TypedDict, total=False):
     # 1. Petición y Estímulo
     request: AgentInput
     correlation_id: str | None
+    caller_permissions: list[str] | None
 
     # 2. Historial conversacional y mensajería
     messages: Annotated[list[BaseMessage], add_messages]

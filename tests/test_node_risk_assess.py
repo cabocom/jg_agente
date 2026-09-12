@@ -13,7 +13,7 @@ from langchain_core.runnables import RunnableConfig
 
 from app.core.graph import GraphBuilder
 from app.core.registry import CapabilityRegistry
-from app.models.io import AgentInput
+from app.models.io import AgentInput, UserContext
 from app.models.state import (
     AgentExecutionStatus,
     AgentState,
@@ -392,3 +392,143 @@ async def test_risk_assess_graph_integration_routes_to_human_approval() -> None:
     events = [a.event_type for a in snapshot.values["audit_trail"]]
     assert "planning_completed" in events
     assert "risk_assessment_completed" in events
+
+
+@pytest.mark.asyncio
+async def test_risk_assess_denies_unauthorized_caller_without_permissions() -> None:
+    """Verifica que si el invocador no posee permisos, risk_assess NO le auto-asigne
+    los permisos requeridos y deniegue la ejecución [AGENTE-SEC-04]."""
+    registry = CapabilityRegistry()
+    protected_tool = AgentTool(
+        name="protected_admin_op",
+        description="Operación protegida",
+        category="admin",
+        func=dummy_tool_func,
+        risk_level=RiskLevel.LOW,
+        required_permissions=["infra:restart"],
+    )
+    registry.register_tool(protected_tool)
+
+    plan = ExecutionPlan(
+        plan_id="plan-sec-04",
+        goal="Intentar ejecución sin permisos",
+        steps=[
+            PlanStep(
+                step_id="step-1",
+                tool_name="protected_admin_op",
+                risk_level=RiskLevel.LOW,
+            )
+        ],
+        estimated_risk=RiskLevel.LOW,
+    )
+
+    # Invocador anónimo/sin contexto de usuario ni permisos
+    state: AgentState = {
+        "request": AgentInput(
+            execution_id="exec-sec-04",
+            thread_id="thread-sec-04",
+            prompt="Ejecutar admin op",
+        ),
+        "plan": plan,
+    }
+
+    result = await risk_assess_node(state, registry=registry)
+
+    # Debe ser denegado por falta de permisos (CWE-285 mitigado)
+    assert result["status"] == AgentExecutionStatus.FAILED
+    assert result["risk_assessment"]["decision"] == PolicyDecision.DENY.value
+    assert "Permisos insuficientes" in result["risk_assessment"]["reason"]
+    assert "infra:restart" in result["risk_assessment"]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_risk_assess_allows_authorized_caller_with_permission() -> None:
+    """Verifica que un invocador con el permiso requerido sea evaluado favorablemente."""
+    registry = CapabilityRegistry()
+    protected_tool = AgentTool(
+        name="protected_admin_op",
+        description="Operación protegida",
+        category="admin",
+        func=dummy_tool_func,
+        risk_level=RiskLevel.LOW,
+        required_permissions=["infra:restart"],
+    )
+    registry.register_tool(protected_tool)
+
+    plan = ExecutionPlan(
+        plan_id="plan-sec-04-ok",
+        goal="Ejecución con permiso explícito",
+        steps=[
+            PlanStep(
+                step_id="step-1",
+                tool_name="protected_admin_op",
+                risk_level=RiskLevel.LOW,
+            )
+        ],
+        estimated_risk=RiskLevel.LOW,
+    )
+
+    state: AgentState = {
+        "request": AgentInput(
+            execution_id="exec-sec-04-ok",
+            thread_id="thread-sec-04-ok",
+            prompt="Ejecutar con permisos",
+            user_context=UserContext(
+                user_id="op-1",
+                role="operator",
+                permissions=["infra:restart"],
+            ),
+        ),
+        "plan": plan,
+    }
+
+    result = await risk_assess_node(state, registry=registry)
+
+    assert result["risk_assessment"]["decision"] == PolicyDecision.ALLOW.value
+    assert result.get("status") != AgentExecutionStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_risk_assess_allows_admin_caller_with_wildcard() -> None:
+    """Verifica que un usuario con rol admin obtenga wildcard de permisos y sea autorizado."""
+    registry = CapabilityRegistry()
+    protected_tool = AgentTool(
+        name="protected_admin_op",
+        description="Operación protegida",
+        category="admin",
+        func=dummy_tool_func,
+        risk_level=RiskLevel.LOW,
+        required_permissions=["infra:restart"],
+    )
+    registry.register_tool(protected_tool)
+
+    plan = ExecutionPlan(
+        plan_id="plan-sec-04-admin",
+        goal="Ejecución por admin",
+        steps=[
+            PlanStep(
+                step_id="step-1",
+                tool_name="protected_admin_op",
+                risk_level=RiskLevel.LOW,
+            )
+        ],
+        estimated_risk=RiskLevel.LOW,
+    )
+
+    state: AgentState = {
+        "request": AgentInput(
+            execution_id="exec-sec-04-admin",
+            thread_id="thread-sec-04-admin",
+            prompt="Ejecutar como admin",
+            user_context=UserContext(
+                user_id="admin-1",
+                role="admin",
+            ),
+        ),
+        "plan": plan,
+    }
+
+    result = await risk_assess_node(state, registry=registry)
+
+    assert result["risk_assessment"]["decision"] == PolicyDecision.ALLOW.value
+    assert result.get("status") != AgentExecutionStatus.FAILED
