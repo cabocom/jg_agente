@@ -116,7 +116,8 @@ class TestGraphBuilderMinimal:
         assert topology.has_risk_assessment is False
         assert topology.has_human_approval is False
         assert topology.has_rollback is False
-        assert topology.nodes == ["reason", "execute", "conclude"]
+        assert topology.has_evaluator is True
+        assert topology.nodes == ["reason", "execute", "evaluate", "conclude"]
         assert topology.conditional_nodes == []
 
     @pytest.mark.asyncio
@@ -202,6 +203,7 @@ class TestGraphBuilderFullTopology:
         assert topology.has_risk_assessment is True
         assert topology.has_human_approval is True
         assert topology.has_rollback is True
+        assert topology.has_evaluator is True
 
         expected_nodes = [
             "observe",
@@ -212,6 +214,7 @@ class TestGraphBuilderFullTopology:
             "execute",
             "verify",
             "rollback",
+            "evaluate",
             "conclude",
         ]
         assert topology.nodes == expected_nodes

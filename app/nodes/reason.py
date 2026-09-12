@@ -205,6 +205,12 @@ async def reason_node(
 
     messages_to_send.extend(existing_messages)
 
+    # Control determinista de iteración
+    eval_records = list(state.get("evaluation_records") or [])
+    current_iteration = int(state.get("iteration", 1))
+    if eval_records:
+        current_iteration += 1
+
     # Si hay un nuevo prompt en request que no está en el historial, añadirlo
     if prompt:
         has_current_human = (
@@ -214,6 +220,15 @@ async def reason_node(
         )
         if not has_current_human:
             messages_to_send.append(HumanMessage(content=prompt))
+
+    # Si venimos de un ciclo iterativo, inyectar el veredicto del evaluador como contexto guía
+    if eval_records:
+        last_eval = eval_records[-1]
+        guidance_text = (
+            f"[Evaluación Semántica Previa (Iteración {current_iteration - 1})]: {last_eval.explanation}\n"
+            f"Acción requerida: {last_eval.suggested_next_action or 'Continuar con el objetivo original utilizando las herramientas disponibles.'}"
+        )
+        messages_to_send.append(HumanMessage(content=guidance_text))
 
     # 3. Enlace dinámico de herramientas (Tool Binding)
     tools = registry.get_langchain_tools()
@@ -311,6 +326,9 @@ async def reason_node(
             "procediendo a responder directamente."
         )
 
+    if current_iteration > 1:
+        step_title = f"{step_title} (Iteración {current_iteration})"
+
     cognitive_step = CognitiveStepRecord(
         step_id=f"cog_reason_{int(time.time() * 1000)}",
         node="reason",
@@ -324,6 +342,7 @@ async def reason_node(
             "reasoning": intent.reasoning,
             "tool_calls": ai_message.tool_calls if has_tool_calls else [],
             "response_preview": str(ai_message.content)[:300] if ai_message.content else None,
+            "iteration": current_iteration,
         },
         duration_ms=duration_llm_ms,
         timestamp=datetime.now(UTC),
@@ -332,6 +351,7 @@ async def reason_node(
     return {
         "status": AgentExecutionStatus.REASONING,
         "intent": intent,
+        "iteration": current_iteration,
         "messages": [ai_message],
         "cognitive_steps": [cognitive_step],
         "audit_trail": [

@@ -361,12 +361,12 @@ async def test_rollback_node_fault_tolerance() -> None:
 
 def test_route_after_verify() -> None:
     """Valida la bifurcación condicional determinista de route_after_verify."""
-    # Verificación exitosa -> conclude
+    # Verificación exitosa -> evaluate
     state_pass: AgentState = {
         "verification_results": [{"status": "pass"}],
         "execution_records": [],
     }
-    assert route_after_verify(state_pass, has_rollback=True) == "conclude"
+    assert route_after_verify(state_pass, has_rollback=True) == "evaluate"
 
     # Verificación fallida con herramienta reversible y has_rollback=True -> rollback
     state_fail_rev: AgentState = {
@@ -382,7 +382,7 @@ def test_route_after_verify() -> None:
     }
     assert route_after_verify(state_fail_rev, has_rollback=True) == "rollback"
 
-    # Verificación fallida pero herramienta sin rollback_context -> conclude
+    # Verificación fallida pero herramienta sin rollback_context -> evaluate
     state_fail_norev: AgentState = {
         "verification_results": [{"status": "fail"}],
         "execution_records": [
@@ -394,10 +394,10 @@ def test_route_after_verify() -> None:
             )
         ],
     }
-    assert route_after_verify(state_fail_norev, has_rollback=True) == "conclude"
+    assert route_after_verify(state_fail_norev, has_rollback=True) == "evaluate"
 
-    # Verificación fallida pero has_rollback=False -> conclude
-    assert route_after_verify(state_fail_rev, has_rollback=False) == "conclude"
+    # Verificación fallida pero has_rollback=False -> evaluate
+    assert route_after_verify(state_fail_rev, has_rollback=False) == "evaluate"
 
 
 # ==========================================================

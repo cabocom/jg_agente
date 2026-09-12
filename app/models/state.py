@@ -336,6 +336,7 @@ class AgentState(TypedDict, total=False):
     verification_results: Annotated[list[dict[str, Any]], append_reducer]
 
     rollback_records: Annotated[list[dict[str, Any]], append_reducer]
+    requires_rollback: bool
     diagnostic_report: dict[str, Any] | str | None
 
     # 7. Control de Flujo y Ciclos de Razonamiento

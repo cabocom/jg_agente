@@ -126,14 +126,34 @@ async def conclude_node(
             rejection_notes or "Ejecución cancelada por rechazo de operador (HITL)."
         )
 
-    # B. Buscar en el último AIMessage con contenido
+    # B. Sintetizar si hubo compensación automática (rollback)
+    rollback_recs = list(state.get("rollback_records") or [])
+    if not response_text and is_failed and rollback_recs:
+        response_text = (
+            f"La ejecución falló durante la verificación. Se ejecutó la compensación automática (rollback) "
+            f"de {len(rollback_recs)} paso(s) reversible(s)."
+        )
+
+    # C. Prioridad cognitiva: Evaluación semántica (EvaluationRecord)
+    eval_records = list(state.get("evaluation_records") or [])
+    if not response_text and eval_records:
+        last_eval = eval_records[-1]
+        explanation = getattr(last_eval, "explanation", None) or (
+            last_eval.get("explanation") if isinstance(last_eval, dict) else None
+        )
+        if explanation and str(explanation).strip():
+            response_text = str(explanation).strip()
+
+    # D. Buscar en el último AIMessage con contenido conversacional (evitando salidas crudas de tools)
     if not response_text:
         for msg in reversed(messages):
             if isinstance(msg, AIMessage) and msg.content:
-                response_text = str(msg.content).strip()
-                break
+                content_str = str(msg.content).strip()
+                if content_str and not (content_str.startswith("{") and content_str.endswith("}")):
+                    response_text = content_str
+                    break
 
-    # C. Buscar en los parámetros de la intención (intent)
+    # E. Buscar en los parámetros de la intención (intent)
     if not response_text:
         intent_val = state.get("intent")
         if isinstance(intent_val, IntentModel) and intent_val.parameters:
@@ -145,15 +165,7 @@ async def conclude_node(
             if resp:
                 response_text = str(resp).strip()
 
-    # C. Sintetizar si hubo compensación automática (rollback)
-    rollback_recs = list(state.get("rollback_records") or [])
-    if not response_text and is_failed and rollback_recs:
-        response_text = (
-            f"La ejecución falló durante la verificación. Se ejecutó la compensación automática (rollback) "
-            f"de {len(rollback_recs)} paso(s) reversible(s)."
-        )
-
-    # D. Sintetizar a partir de las herramientas ejecutadas
+    # F. Sintetizar a partir de las herramientas ejecutadas (en lenguaje natural limpio, erradicando volcado JSON)
     if not response_text and records:
         if is_failed:
             failed_steps = [r for r in records if getattr(r, "status", None) == StepStatus.FAILED]
@@ -165,12 +177,9 @@ async def conclude_node(
             response_text = f"La ejecución falló durante el paso '{failed_steps[0].step_id}' ({failed_steps[0].tool_name}): {err_msg}"
         else:
             tools_summary = ", ".join(getattr(r, "tool_name", "tool") for r in records)
-            last_output = getattr(records[-1], "output", "")
-            response_text = (
-                f"Herramientas ejecutadas con éxito ({tools_summary}). Resultado: {last_output}"
-            )
+            response_text = f"Herramientas ejecutadas con éxito. Se completaron satisfactoriamente las operaciones solicitadas mediante: {tools_summary}."
 
-    # E. Sintetizar a partir de los errores registrados
+    # G. Sintetizar a partir de los errores registrados
     if not response_text and errors:
         response_text = f"La ejecución finalizó con error: {errors[-1].message}"
 

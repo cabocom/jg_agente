@@ -20,6 +20,7 @@ from app.core.registry import CapabilityRegistry
 from app.models.state import (
     AgentState,
     ApprovalStatus,
+    GoalStatus,
     IntentModel,
     PolicyDecision,
     StepStatus,
@@ -50,6 +51,7 @@ class GraphTopologyInfo(BaseModel):
     )
     has_verifier: bool = Field(default=False, description="Indica si se conectó el nodo verify")
     has_rollback: bool = Field(default=False, description="Indica si se conectó el nodo rollback")
+    has_evaluator: bool = Field(default=True, description="Indica si se conectó el nodo evaluate")
 
 
 # ==========================================================
@@ -138,6 +140,17 @@ async def default_rollback_node(
     from app.nodes.rollback import rollback_node
 
     return await rollback_node(state, registry=registry)
+
+
+async def default_evaluate_node(
+    state: AgentState,
+    registry: CapabilityRegistry,
+    llm: BaseChatModel | None = None,
+) -> dict[str, Any]:
+    """Nodo de evaluación semántica: delega en evaluate_node con capability-awareness."""
+    from app.nodes.evaluate import evaluate_node
+
+    return await evaluate_node(state, registry=registry, llm=llm)
 
 
 async def default_conclude_node(
@@ -240,13 +253,17 @@ def route_after_human_approval(state: AgentState) -> str:
 
 
 def route_after_execute(state: AgentState, has_verifier: bool) -> str:
-    """Enruta tras 'execute' hacia verificación o conclusión."""
+    """Enruta tras 'execute' hacia verificación o evaluación semántica."""
     if has_verifier:
         return "verify"
-    return "conclude"
+    return "evaluate"
 
 
-def route_after_verify(state: AgentState, has_rollback: bool) -> str:
+def route_after_verify(
+    state: AgentState,
+    has_rollback: bool,
+    has_evaluator: bool = True,
+) -> str:
     """Enruta tras 'verify' evaluando si la comprobación fue exitosa o requiere compensación."""
     v_results = state.get("verification_results") or []
     has_failure = any(
@@ -263,6 +280,48 @@ def route_after_verify(state: AgentState, has_rollback: bool) -> str:
         )
         if has_reversible:
             return "rollback"
+
+    return "evaluate"
+
+
+def route_after_evaluation(state: AgentState, has_rollback: bool = False) -> str:
+    """Enruta tras 'evaluate' aplicando guardarraíles deterministas de iteración y estado del objetivo."""
+    # 1. Guardarraíl de compensación si la evaluación o verificación detectó requerimiento explícito
+    if state.get("requires_rollback") and has_rollback:
+        return "rollback"
+
+    # 2. Guardarraíl determinista de límite de iteraciones (previene bucles infinitos)
+    iteration = int(state.get("iteration", 1))
+    max_iterations = int(state.get("max_iterations", 3))
+    if iteration >= max_iterations:
+        return "conclude"
+
+    # 3. Inspección del último EvaluationRecord
+    eval_records = state.get("evaluation_records") or []
+    if not eval_records:
+        return "conclude"
+
+    last_eval = eval_records[-1]
+    goal_status = getattr(last_eval, "goal_status", None)
+    if isinstance(goal_status, GoalStatus):
+        status_val = goal_status.value
+    else:
+        status_val = str(goal_status or "").lower().strip()
+
+    # Si faltan capacidades, o ya está satisfecho o falló irrecuperablemente -> conclude
+    if status_val in (
+        GoalStatus.BLOCKED_MISSING_CAPABILITY.value,
+        GoalStatus.SATISFIED.value,
+        GoalStatus.FAILED.value,
+        "blocked_missing_capability",
+        "satisfied",
+        "failed",
+    ):
+        return "conclude"
+
+    # Si el LLM determinó que requiere más información con capacidades disponibles -> ciclo a reason
+    if status_val in (GoalStatus.NEEDS_MORE_INFO.value, "needs_more_info"):
+        return "reason"
 
     return "conclude"
 
@@ -340,6 +399,7 @@ class GraphBuilder:
             nodes.append("rollback")
             cond_nodes.append("rollback")
 
+        nodes.append("evaluate")
         nodes.append("conclude")
 
         return GraphTopologyInfo(
@@ -351,6 +411,7 @@ class GraphBuilder:
             has_human_approval=has_human_approval,
             has_verifier=has_verifier,
             has_rollback=has_reversible,
+            has_evaluator=True,
         )
 
     def build(
@@ -463,7 +524,18 @@ class GraphBuilder:
 
                 builder.add_node("rollback", cast(Any, _rollback_node))
 
-        # 9. Conclude (Obligatorio)
+        # 9. Evaluate (Obligatorio/Canónico)
+        evaluate_handler = self.node_overrides.get("evaluate")
+        if evaluate_handler:
+            builder.add_node("evaluate", cast(Any, evaluate_handler))
+        else:
+
+            async def _evaluate_node(s: AgentState) -> dict[str, Any]:
+                return await default_evaluate_node(s, self.registry, llm=self.llm)
+
+            builder.add_node("evaluate", cast(Any, _evaluate_node))
+
+        # 10. Conclude (Obligatorio)
         conclude_handler = self.node_overrides.get("conclude")
         if conclude_handler:
             builder.add_node("conclude", cast(Any, conclude_handler))
@@ -536,11 +608,11 @@ class GraphBuilder:
         if topology.has_verifier:
             builder.add_edge("execute", "verify")
         else:
-            builder.add_edge("execute", "conclude")
+            builder.add_edge("execute", "evaluate")
 
         # Conexión desde Verify (si existe)
         if topology.has_verifier:
-            verify_destinations = ["conclude"]
+            verify_destinations = ["evaluate"] if topology.has_evaluator else ["conclude"]
             if topology.has_rollback:
                 verify_destinations.append("rollback")
             builder.add_conditional_edges(
@@ -548,9 +620,23 @@ class GraphBuilder:
                 lambda s: route_after_verify(
                     s,
                     has_rollback=topology.has_rollback,
+                    has_evaluator=topology.has_evaluator,
                 ),
                 path_map=list(set(verify_destinations)),
             )
+
+        # Conexión desde Evaluate (Arista condicional de razonamiento cíclico y guardarraíles)
+        eval_destinations = ["reason", "conclude"]
+        if topology.has_rollback:
+            eval_destinations.append("rollback")
+        builder.add_conditional_edges(
+            "evaluate",
+            lambda s: route_after_evaluation(
+                s,
+                has_rollback=topology.has_rollback,
+            ),
+            path_map=list(set(eval_destinations)),
+        )
 
         # Conexión desde Rollback (si existe)
         if topology.has_rollback:
