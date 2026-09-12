@@ -16,6 +16,7 @@ from app.models.state import (
     AgentExecutionStatus,
     AgentState,
     AuditRecord,
+    CognitiveStepRecord,
     ExecutionError,
     StepStatus,
     VerificationStatus,
@@ -150,9 +151,31 @@ async def verify_node(
         "details": details,
     }
 
+    verifier_name = str(details.get("verified_by", "core"))
+    cognitive_step = CognitiveStepRecord(
+        step_id=f"cog_verify_{int(time.time() * 1000)}",
+        node="verify",
+        title=f"Verificación Post-Ejecución ({verifier_name})",
+        action=f"Comprobación de Estado: {v_status.value.upper()}",
+        description=str(
+            details.get("reason")
+            or details.get("error")
+            or f"Verificación del sistema completada con veredicto '{v_status.value.upper()}'."
+        ),
+        status="completed" if not is_failed else "failed",
+        details={
+            "status": v_status.value,
+            "verified_by": verifier_name,
+            "details": details,
+        },
+        duration_ms=duration_ms,
+        timestamp=datetime.now(UTC),
+    )
+
     result_mutations: dict[str, Any] = {
         "status": AgentExecutionStatus.VERIFYING,
         "verification_results": [verification_entry],
+        "cognitive_steps": [cognitive_step],
         "audit_trail": [audit],
     }
 

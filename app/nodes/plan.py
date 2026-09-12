@@ -16,6 +16,7 @@ from app.models.state import (
     AgentExecutionStatus,
     AgentState,
     AuditRecord,
+    CognitiveStepRecord,
     ExecutionError,
     ExecutionPlan,
     IntentModel,
@@ -203,9 +204,33 @@ async def plan_node(
         },
     )
 
+    cognitive_step = CognitiveStepRecord(
+        step_id=f"cog_plan_{int(time.time() * 1000)}",
+        node="plan",
+        title="Planificación Estratégica (DAG Planner)" if planner else "Generación de Plan Operativo",
+        action=f"Descomposición de Tarea ({len(plan.steps)} pasos)",
+        description=(
+            f"Se elaboró un plan con objetivo '{plan.goal}' y nivel de riesgo estimado '{plan.estimated_risk.value.upper()}'."
+        ),
+        status="completed" if not errors else "failed",
+        details={
+            "plan_id": plan.plan_id,
+            "goal": plan.goal,
+            "steps_count": len(plan.steps),
+            "estimated_risk": plan.estimated_risk.value,
+            "steps": [
+                s.model_dump(mode="json") if hasattr(s, "model_dump") else s
+                for s in plan.steps
+            ],
+        },
+        duration_ms=duration_ms,
+        timestamp=datetime.now(UTC),
+    )
+
     updates: dict[str, Any] = {
         "status": AgentExecutionStatus.PLANNING,
         "plan": plan,
+        "cognitive_steps": [cognitive_step],
         "audit_trail": [audit],
     }
     if errors:

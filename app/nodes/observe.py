@@ -8,6 +8,7 @@ consolidando el resultado en environment_snapshot dentro de AgentState de forma 
 import inspect
 import logging
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 from app.core.registry import CapabilityRegistry
@@ -15,6 +16,7 @@ from app.models.state import (
     AgentExecutionStatus,
     AgentState,
     AuditRecord,
+    CognitiveStepRecord,
     ExecutionError,
 )
 from app.plugins.base import BaseEngine, ObserverEngine
@@ -118,9 +120,29 @@ async def observe_node(
         },
     )
 
+    cognitive_step = CognitiveStepRecord(
+        step_id=f"cog_observe_{int(time.time() * 1000)}",
+        node="observe",
+        title=f"Descubrimiento y Observación: {observer.name}",
+        action="Inspección de Infraestructura y Telemetría",
+        description=(
+            f"El motor de observación '{observer.name}' recopiló telemetría y estado del entorno "
+            f"({len(snapshot)} variables/recursos detectados)."
+        ),
+        status="completed" if not errors else "failed",
+        details={
+            "engine": observer.name,
+            "keys": list(snapshot.keys()),
+            "snapshot_summary": {k: str(v)[:150] for k, v in list(snapshot.items())[:5]},
+        },
+        duration_ms=duration_ms,
+        timestamp=datetime.now(UTC),
+    )
+
     updates: dict[str, Any] = {
         "status": AgentExecutionStatus.OBSERVING,
         "environment_snapshot": snapshot,
+        "cognitive_steps": [cognitive_step],
         "audit_trail": [audit],
     }
     if errors:

@@ -8,6 +8,7 @@ y deriva la ejecución hacia la puerta de aprobación humana (human_approval).
 
 import logging
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 from app.core.registry import CapabilityRegistry
@@ -17,6 +18,7 @@ from app.models.state import (
     ApprovalRecord,
     ApprovalStatus,
     AuditRecord,
+    CognitiveStepRecord,
     ExecutionPlan,
     IntentModel,
     PlanStep,
@@ -117,11 +119,16 @@ async def risk_assess_node(
             if _RISK_ORDER.get(effective_risk, 1) > _RISK_ORDER.get(max_risk, 1):
                 max_risk = effective_risk
 
-            caller_perms = (
-                list(req.user_context.permissions)
-                if req and req.user_context and req.user_context.permissions
-                else (list(tool.required_permissions) if tool else [])
-            )
+            caller_perms: list[str] = []
+            if req and req.user_context:
+                if req.user_context.role == "admin" or (
+                    getattr(req, "metadata", None) and req.metadata.get("user_role") == "admin"
+                ):
+                    caller_perms = ["*"]
+                elif req.user_context.permissions:
+                    caller_perms = list(req.user_context.permissions)
+            if not caller_perms and tool:
+                caller_perms = list(tool.required_permissions)
 
             # Evaluar con SecurityGuard
             eval_res = guard.evaluate(
@@ -172,12 +179,42 @@ async def risk_assess_node(
 
     duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
-    # 5. Generar mutaciones de estado para LangGraph
+    # 5. Generar salto cognitivo para LangGraph
+    step_status = "completed"
+    if decision == PolicyDecision.DENY:
+        step_status = "failed"
+    elif decision == PolicyDecision.REQUIRE_HUMAN_APPROVAL:
+        step_status = "waiting_approval"
+
+    cognitive_step = CognitiveStepRecord(
+        step_id=f"cog_risk_assess_{int(time.time() * 1000)}",
+        node="risk_assess",
+        title="Evaluación de Riesgo y Gobernanza (SecurityGuard)",
+        action=f"Análisis de Política ({decision.value.upper()})",
+        description=(
+            f"Evaluación completada con veredicto '{decision.value.upper()}' (Riesgo: {max_risk.value.upper()}). "
+            f"{reason}"
+        ),
+        status=step_status,
+        details={
+            "decision": decision.value,
+            "max_risk": max_risk.value,
+            "requires_approval": requires_approval,
+            "steps_evaluated": len(steps_to_evaluate),
+            "denied_reasons": denied_reasons,
+            "approval_reasons": approval_reasons,
+        },
+        duration_ms=duration_ms,
+        timestamp=datetime.now(UTC),
+    )
+
+    # 6. Generar mutaciones de estado para LangGraph
     update_state: dict[str, Any] = {
         "risk_assessment": eval_result.model_dump(),
         "requires_approval": requires_approval,
         "human_intervention_required": requires_approval,
         "circuit_breaker_active": decision == PolicyDecision.DENY,
+        "cognitive_steps": [cognitive_step],
         "audit_trail": [
             AuditRecord(
                 event_type="risk_assessment_completed",
@@ -192,7 +229,7 @@ async def risk_assess_node(
         ],
     }
 
-    # 6. Gestión del estado de aprobación humana (AWAITING_APPROVAL)
+    # 7. Gestión del estado de aprobación humana (AWAITING_APPROVAL)
     if requires_approval:
         update_state["status"] = AgentExecutionStatus.AWAITING_APPROVAL
 

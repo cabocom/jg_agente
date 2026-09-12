@@ -205,14 +205,50 @@ async def execute_graph_pipeline(
                 if isinstance(interrupt_value, dict)
                 else "Operación de alto riesgo requiere aprobación humana."
             )
+
+            # Recuperar saltos cognitivos previos acumulados en el checkpoint
+            snapshot_steps: list[dict[str, Any]] = []
+            try:
+                state_snapshot = await graph.aget_state(config)
+                if state_snapshot and state_snapshot.values:
+                    existing_cog_steps = state_snapshot.values.get("cognitive_steps") or []
+                    for step_item in existing_cog_steps:
+                        if hasattr(step_item, "model_dump"):
+                            snapshot_steps.append(step_item.model_dump(mode="json"))
+                        elif isinstance(step_item, dict):
+                            snapshot_steps.append(step_item)
+            except Exception as snap_err:
+                logger.warning("No se pudo obtener snapshot de estado en interrupción HITL: %s", snap_err)
+
+            # Salto cognitivo para el paso de human_approval en espera
+            approval_step = {
+                "step_id": f"cog_approval_{int(time.time() * 1000)}",
+                "node": "human_approval",
+                "title": "Control de Aprobación Humana (HITL)",
+                "action": "Pausa de Seguridad Operacional",
+                "description": (
+                    "Operación de alto riesgo detenida. Requiere autorización humana explícita "
+                    "desde el panel de control para continuar."
+                ),
+                "status": "waiting_approval",
+                "details": interrupt_value if isinstance(interrupt_value, dict) else {},
+                "duration_ms": 0.0,
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+            snapshot_steps.append(approval_step)
+
+            data_payload = (
+                dict(interrupt_value) if isinstance(interrupt_value, dict) else {"details": str(interrupt_value)}
+            )
+            data_payload["cognitive_steps"] = snapshot_steps
+            data_payload["steps"] = snapshot_steps
+
             agent_output = AgentOutput(
                 execution_id=input_data.execution_id,
                 thread_id=thread_id,
                 status=ExecutionStatus.WAITING_APPROVAL,
                 response=str(message),
-                data=interrupt_value
-                if isinstance(interrupt_value, dict)
-                else {"details": str(interrupt_value)},
+                data=data_payload,
                 execution_time_ms=elapsed_ms,
                 requires_approval=True,
                 pending_approval_id=str(pending_id),
@@ -883,6 +919,16 @@ async def _resolve_hitl_execution(
 
     agent_output.requires_approval = False
     agent_output.pending_approval_id = None
+
+    if agent_output.data is None:
+        agent_output.data = {}
+    if "cognitive_steps" not in agent_output.data:
+        cog_steps = final_state.get("cognitive_steps") or []
+        formatted_steps = [
+            s.model_dump(mode="json") if hasattr(s, "model_dump") else s for s in cog_steps
+        ]
+        agent_output.data["cognitive_steps"] = formatted_steps
+        agent_output.data["steps"] = formatted_steps
 
     if not approved:
         agent_output.status = ExecutionStatus.CANCELLED

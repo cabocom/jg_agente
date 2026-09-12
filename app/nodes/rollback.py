@@ -15,6 +15,7 @@ from app.models.state import (
     AgentExecutionStatus,
     AgentState,
     AuditRecord,
+    CognitiveStepRecord,
     ExecutionError,
     StepStatus,
 )
@@ -117,9 +118,30 @@ async def rollback_node(
         fatal=True,
     )
 
+    cog_rollback = CognitiveStepRecord(
+        step_id=f"cog_rollback_{int(time.time() * 1000)}",
+        node="rollback",
+        title="Compensación Automática (Rollback)",
+        action=f"Reversión de {len(rollback_traces)} operaciones",
+        description=(
+            f"Se ejecutó compensación automática de {len(rollback_traces)} pasos reversibles "
+            f"({succeeded_count} revertidos exitosamente, {failed_count} fallidos)."
+        ),
+        status="completed" if failed_count == 0 else "failed",
+        details={
+            "steps_reverted": len(rollback_traces),
+            "succeeded": succeeded_count,
+            "failed": failed_count,
+            "traces": rollback_traces,
+        },
+        duration_ms=duration_ms,
+        timestamp=datetime.now(UTC),
+    )
+
     return {
         "status": AgentExecutionStatus.FAILED,
         "rollback_records": rollback_traces,
+        "cognitive_steps": [cog_rollback],
         "errors": [rollback_error],
         "audit_trail": [audit],
     }

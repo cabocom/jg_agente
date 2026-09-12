@@ -7,6 +7,7 @@ el comando externo de autorización o rechazo (Command(resume=...)) sin bloquear
 
 import logging
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 from langgraph.types import interrupt
@@ -18,6 +19,7 @@ from app.models.state import (
     ApprovalRecord,
     ApprovalStatus,
     AuditRecord,
+    CognitiveStepRecord,
     ExecutionPlan,
 )
 
@@ -57,11 +59,31 @@ async def human_approval_node(
         ApprovalStatus.AUTO_APPROVED.value,
     ):
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        cog_approved = CognitiveStepRecord(
+            step_id=f"cog_approval_{int(time.time() * 1000)}",
+            node="human_approval",
+            title="Control de Aprobación Humana (HITL)",
+            action="Autorización Concedida",
+            description=(
+                f"Operación autorizada por '{approval_rec.approver or 'human_operator'}'. "
+                f"Notas: {approval_rec.notes}"
+            ),
+            status="completed",
+            details={
+                "status": approval_rec.status.value,
+                "approver": approval_rec.approver,
+                "notes": approval_rec.notes,
+                "pre_approved": True,
+            },
+            duration_ms=duration_ms,
+            timestamp=datetime.now(UTC),
+        )
         return {
             "status": AgentExecutionStatus.EXECUTING,
             "human_intervention_required": False,
             "requires_approval": False,
             "approval": approval_rec,
+            "cognitive_steps": [cog_approved],
             "audit_trail": [
                 AuditRecord(
                     event_type="human_approval_completed",
@@ -83,11 +105,31 @@ async def human_approval_node(
         ApprovalStatus.REJECTED.value,
     ):
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        cog_rejected = CognitiveStepRecord(
+            step_id=f"cog_approval_{int(time.time() * 1000)}",
+            node="human_approval",
+            title="Control de Aprobación Humana (HITL)",
+            action="Operación Denegada",
+            description=(
+                f"Operación rechazada por '{approval_rec.approver or 'human_operator'}'. "
+                f"Motivo: {approval_rec.notes}"
+            ),
+            status="failed",
+            details={
+                "status": approval_rec.status.value,
+                "approver": approval_rec.approver,
+                "notes": approval_rec.notes,
+                "pre_rejected": True,
+            },
+            duration_ms=duration_ms,
+            timestamp=datetime.now(UTC),
+        )
         return {
             "status": AgentExecutionStatus.FAILED,
             "human_intervention_required": False,
             "requires_approval": False,
             "approval": approval_rec,
+            "cognitive_steps": [cog_rejected],
             "audit_trail": [
                 AuditRecord(
                     event_type="human_approval_rejected",
@@ -220,6 +262,26 @@ async def human_approval_node(
     duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
     final_status = AgentExecutionStatus.EXECUTING if is_approved else AgentExecutionStatus.FAILED
 
+    cog_resumed = CognitiveStepRecord(
+        step_id=f"cog_approval_{int(time.time() * 1000)}",
+        node="human_approval",
+        title="Control de Aprobación Humana (HITL)",
+        action="Autorización Concedida" if is_approved else "Operación Denegada",
+        description=(
+            f"Operación {'autorizada' if is_approved else 'rechazada'} por "
+            f"'{approval_rec.approver or approver}'. Motivo/Notas: {approval_rec.notes}"
+        ),
+        status="completed" if is_approved else "failed",
+        details={
+            "status": approval_rec.status.value,
+            "approver": approval_rec.approver or approver,
+            "notes": approval_rec.notes,
+            "is_approved": is_approved,
+        },
+        duration_ms=duration_ms,
+        timestamp=datetime.now(UTC),
+    )
+
     audit = AuditRecord(
         event_type="human_approval_completed" if is_approved else "human_approval_rejected",
         actor=approval_rec.approver or approver,
@@ -237,5 +299,6 @@ async def human_approval_node(
         "human_intervention_required": False,
         "requires_approval": False,
         "approval": approval_rec,
+        "cognitive_steps": [cog_resumed],
         "audit_trail": [audit],
     }

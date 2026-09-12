@@ -124,25 +124,26 @@ class SecurityGuard:
         # 1. Comprobación de Permisos del Invocador
         if effective_perms:
             caller_perms_set = set(caller_permissions or [])
-            missing_perms = [p for p in effective_perms if p not in caller_perms_set]
-            if missing_perms:
-                reason = (
-                    f"Permisos insuficientes para ejecutar '{tool_name}'. "
-                    f"Faltan permisos requeridos: {missing_perms}"
-                )
-                logger.warning("SecurityGuard DENY en '%s': %s", tool_name, reason)
-                eval_res = SecurityEvaluationResult(
-                    decision=PolicyDecision.DENY,
-                    operation=tool_name,
-                    target_resource=target_resource,
-                    risk_level=effective_risk,
-                    reason=reason,
-                    required_permissions=effective_perms,
-                    is_reversible=effective_reversible,
-                    can_cause_data_loss=False,
-                )
-                self.audit_logger.record(eval_res, execution_id=execution_id)
-                return eval_res
+            if "*" not in caller_perms_set and "admin" not in caller_perms_set:
+                missing_perms = [p for p in effective_perms if p not in caller_perms_set]
+                if missing_perms:
+                    reason = (
+                        f"Permisos insuficientes para ejecutar '{tool_name}'. "
+                        f"Faltan permisos requeridos: {missing_perms}"
+                    )
+                    logger.warning("SecurityGuard DENY en '%s': %s", tool_name, reason)
+                    eval_res = SecurityEvaluationResult(
+                        decision=PolicyDecision.DENY,
+                        operation=tool_name,
+                        target_resource=target_resource,
+                        risk_level=effective_risk,
+                        reason=reason,
+                        required_permissions=effective_perms,
+                        is_reversible=effective_reversible,
+                        can_cause_data_loss=False,
+                    )
+                    self.audit_logger.record(eval_res, execution_id=execution_id)
+                    return eval_res
 
         # 2. Comprobación de Inyección de Comandos Shell y Directory Traversal
         for arg_key, arg_val in tool_args.items():
