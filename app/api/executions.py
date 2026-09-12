@@ -218,7 +218,9 @@ async def execute_graph_pipeline(
                         elif isinstance(step_item, dict):
                             snapshot_steps.append(step_item)
             except Exception as snap_err:
-                logger.warning("No se pudo obtener snapshot de estado en interrupción HITL: %s", snap_err)
+                logger.warning(
+                    "No se pudo obtener snapshot de estado en interrupción HITL: %s", snap_err
+                )
 
             # Salto cognitivo para el paso de human_approval en espera
             approval_step = {
@@ -238,7 +240,9 @@ async def execute_graph_pipeline(
             snapshot_steps.append(approval_step)
 
             data_payload = (
-                dict(interrupt_value) if isinstance(interrupt_value, dict) else {"details": str(interrupt_value)}
+                dict(interrupt_value)
+                if isinstance(interrupt_value, dict)
+                else {"details": str(interrupt_value)}
             )
             data_payload["cognitive_steps"] = snapshot_steps
             data_payload["steps"] = snapshot_steps
@@ -930,9 +934,7 @@ async def _resolve_hitl_execution(
     agent_output.data["steps"] = formatted_steps
 
     rejection_text = (
-        payload.notes
-        or getattr(payload, "justification", None)
-        or getattr(payload, "reason", None)
+        payload.notes or getattr(payload, "justification", None) or getattr(payload, "reason", None)
     )
     if not approved:
         agent_output.status = ExecutionStatus.CANCELLED

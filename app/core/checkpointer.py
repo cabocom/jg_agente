@@ -61,6 +61,10 @@ STATE_ALLOWED_CLASSES = [
     ("app.models.state", "SecurityEvaluationResult"),
     ("app.models", "ExecutionError"),
     ("app.models.state", "ExecutionError"),
+    ("app.models", "GoalStatus"),
+    ("app.models.state", "GoalStatus"),
+    ("app.models", "EvaluationRecord"),
+    ("app.models.state", "EvaluationRecord"),
 ]
 
 

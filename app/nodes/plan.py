@@ -207,7 +207,9 @@ async def plan_node(
     cognitive_step = CognitiveStepRecord(
         step_id=f"cog_plan_{int(time.time() * 1000)}",
         node="plan",
-        title="Planificación Estratégica (DAG Planner)" if planner else "Generación de Plan Operativo",
+        title="Planificación Estratégica (DAG Planner)"
+        if planner
+        else "Generación de Plan Operativo",
         action=f"Descomposición de Tarea ({len(plan.steps)} pasos)",
         description=(
             f"Se elaboró un plan con objetivo '{plan.goal}' y nivel de riesgo estimado '{plan.estimated_risk.value.upper()}'."
@@ -219,8 +221,7 @@ async def plan_node(
             "steps_count": len(plan.steps),
             "estimated_risk": plan.estimated_risk.value,
             "steps": [
-                s.model_dump(mode="json") if hasattr(s, "model_dump") else s
-                for s in plan.steps
+                s.model_dump(mode="json") if hasattr(s, "model_dump") else s for s in plan.steps
             ],
         },
         duration_ms=duration_ms,

@@ -86,10 +86,15 @@ class AgentState(TypedDict, total=False):
     status: AgentExecutionStatus
     environment_snapshot: Optional[dict[str, Any]]
     approval: Optional[ApprovalRecord]
-    current_step_index: int
-    executed_steps: Annotated[list[StepExecutionRecord], append_reducer]
+    current_step: int
+    execution_records: Annotated[list[StepExecutionRecord], append_reducer]
+    cognitive_steps: Annotated[list[CognitiveStepRecord], append_reducer]
+    verification_results: Annotated[list[dict[str, Any]], append_reducer]
     audit_trail: Annotated[list[AuditRecord], append_reducer]
     errors: Annotated[list[ExecutionError], append_reducer]
+    iteration: int
+    max_iterations: int
+    evaluation_records: Annotated[list[EvaluationRecord], append_reducer]
     is_resolved: bool
 ```
 
@@ -113,4 +118,24 @@ class SecurityEvaluationResult(BaseModel):
     is_reversible: bool
     can_cause_data_loss: bool
     evaluated_at: datetime
+```
+
+### 3.2 Evaluación Semántica de Objetivos (`GoalStatus` y `EvaluationRecord`)
+Utilizados en el ciclo de razonamiento iterativo para evaluar el cumplimiento de metas y detectar capacidades ausentes:
+
+```python
+class GoalStatus(StrEnum):
+    SATISFIED = "satisfied"
+    NEEDS_MORE_INFO = "needs_more_info"
+    BLOCKED_MISSING_CAPABILITY = "blocked_missing_capability"
+    FAILED = "failed"
+
+
+class EvaluationRecord(BaseModel):
+    iteration: int = 1
+    goal_status: GoalStatus
+    explanation: str
+    missing_capabilities: list[str] = []
+    suggested_next_action: Optional[str] = None
+    timestamp: datetime
 ```

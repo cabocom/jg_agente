@@ -75,7 +75,6 @@ async def execute_node(
     raw_plan = state.get("plan")
     plan: ExecutionPlan | None = None
     steps_to_run: list[PlanStep] = []
-    is_tool_call_source = False
 
     if isinstance(raw_plan, ExecutionPlan):
         plan = raw_plan
@@ -94,7 +93,6 @@ async def execute_node(
             tool_calls = intent_val.get("parameters", {}).get("tool_calls", [])
 
         if tool_calls:
-            is_tool_call_source = True
             for idx, tc in enumerate(tool_calls, start=1):
                 call_id = tc.get("id") or f"call_{idx}"
                 name = tc.get("name", "")
@@ -286,20 +284,19 @@ async def execute_node(
             )
         )
 
-        # Si procede de un tool_call del LLM, emitir ToolMessage para la memoria
-        if is_tool_call_source:
-            msg_content = (
-                str(tool_result.output)
-                if tool_result.success
-                else f"Error ejecutando {tool.name}: {tool_result.error}"
+        # Emitir ToolMessage para la memoria conversacional y re-evaluación del LLM
+        msg_content = (
+            str(tool_result.output)
+            if tool_result.success
+            else f"Error ejecutando {tool.name}: {tool_result.error}"
+        )
+        tool_messages.append(
+            ToolMessage(
+                content=msg_content,
+                tool_call_id=step.step_id,
+                name=step.tool_name,
             )
-            tool_messages.append(
-                ToolMessage(
-                    content=msg_content,
-                    tool_call_id=step.step_id,
-                    name=step.tool_name,
-                )
-            )
+        )
 
         # Manejo de fallos operacionales
         if not tool_result.success:

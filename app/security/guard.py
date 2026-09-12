@@ -14,14 +14,10 @@ import logging
 import re
 import time
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from app.models.state import PolicyDecision, SecurityEvaluationResult
 from app.models.tools import AgentTool, RiskLevel, ToolResult
-
-if TYPE_CHECKING:
-    from app.security.audit import SecurityAuditLogger
-    from app.security.ssrf import SSRFValidator
 
 logger = logging.getLogger("jg_agente.security.guard")
 

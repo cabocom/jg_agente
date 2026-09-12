@@ -286,4 +286,3 @@ async def conclude_node(
             )
         ],
     }
-

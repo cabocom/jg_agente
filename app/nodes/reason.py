@@ -266,9 +266,7 @@ async def reason_node(
         }
         step_title = "Razonamiento e Interpretación Cognitiva"
         step_action = f"Selección de Herramienta(s): {tools_str}"
-        step_description = (
-            f"El modelo interpretó la consulta y determinó invocar la(s) herramienta(s): {tools_str}."
-        )
+        step_description = f"El modelo interpretó la consulta y determinó invocar la(s) herramienta(s): {tools_str}."
     elif planner_engine is not None and not _is_simple_greeting_or_chat(prompt):
         logger.info(
             "[reason_node] Solicitud operativa detectada con planificador disponible ('%s')",
@@ -345,4 +343,3 @@ async def reason_node(
             )
         ],
     }
-

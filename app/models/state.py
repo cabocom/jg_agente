@@ -88,6 +88,15 @@ class PolicyDecision(StrEnum):
     REQUIRE_HUMAN_APPROVAL = "require_human_approval"
 
 
+class GoalStatus(StrEnum):
+    """Estados semánticos de resolución del objetivo tras un ciclo de ejecución."""
+
+    SATISFIED = "satisfied"
+    NEEDS_MORE_INFO = "needs_more_info"
+    BLOCKED_MISSING_CAPABILITY = "blocked_missing_capability"
+    FAILED = "failed"
+
+
 # ==========================================
 # 3. Modelos Estructurados Agnosticos
 # ==========================================
@@ -265,6 +274,31 @@ class CognitiveStepRecord(BaseModel):
     )
 
 
+class EvaluationRecord(BaseModel):
+    """Registro estructurado de la evaluación semántica post-ejecución."""
+
+    model_config = ConfigDict(extra="allow")
+
+    iteration: int = Field(default=1, ge=1, description="Número de iteración del ciclo cognitivo")
+    goal_status: GoalStatus = Field(
+        ..., description="Estado de satisfacción del objetivo del usuario"
+    )
+    explanation: str = Field(
+        ..., description="Síntesis semántica y justificación de la decisión por el LLM"
+    )
+    missing_capabilities: list[str] = Field(
+        default_factory=list,
+        description="Capacidades o herramientas necesarias detectadas como ausentes",
+    )
+    suggested_next_action: str | None = Field(
+        default=None, description="Acción o herramienta recomendada para la siguiente iteración"
+    )
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="Marca temporal UTC de la evaluación",
+    )
+
+
 # ==========================================
 # 4. AgentState (TypedDict para LangGraph)
 # ==========================================
@@ -304,7 +338,11 @@ class AgentState(TypedDict, total=False):
     rollback_records: Annotated[list[dict[str, Any]], append_reducer]
     diagnostic_report: dict[str, Any] | str | None
 
-    # 7. Control de Flujo y Estado Operacional
+    # 7. Control de Flujo y Ciclos de Razonamiento
+    iteration: int
+    max_iterations: int
+    evaluation_records: Annotated[list[EvaluationRecord], append_reducer]
+
     status: AgentExecutionStatus | str
     current_step: int
     retry_count: int
