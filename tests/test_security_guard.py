@@ -118,6 +118,91 @@ class TestSecurityGuardInjectionAndTraversal:
         assert eval_res.decision == PolicyDecision.DENY
         assert "protegida" in eval_res.reason.lower()
 
+    def test_blocks_directory_traversal_with_normalization(self) -> None:
+        """Verifica que payloads de directory traversal con puntos relativos, prefijos engañosos,
+        barras redundantes o codificación URL sean normalizados y bloqueados [AGENTE-SEC-03]."""
+        audit = SecurityAuditLogger(auto_persist=False)
+        guard = SecurityGuard(audit_logger=audit)
+
+        tool = AgentTool(
+            name="file_reader",
+            description="Read file",
+            category="filesystem",
+            args_schema=DummyArgs,
+            func=mock_tool_func,
+            risk_level=RiskLevel.LOW,
+        )
+
+        malicious_paths = [
+            "/tmp/../../../../etc/shadow",
+            "../../../../etc/shadow",
+            "foo/../../../../etc/passwd",
+            "/var/run/../../etc/shadow",
+            "///etc///shadow",
+            "/./etc/./passwd",
+            "/tmp/%2e%2e/%2e%2e/etc/shadow",
+            "~root/.ssh/id_rsa",
+            "/proc/self/environ",
+            "/sys/kernel",
+            "/run/docker.sock",
+            "/dev/null",
+        ]
+
+        for path_payload in malicious_paths:
+            eval_res = guard.evaluate(tool=tool, tool_args={"path": path_payload})
+            assert eval_res.decision == PolicyDecision.DENY, (
+                f"Fallo [AGENTE-SEC-03]: El path '{path_payload}' no fue bloqueado por SecurityGuard."
+            )
+            assert "protegida" in eval_res.reason.lower()
+
+    def test_blocks_symlink_pointing_to_protected_path(self, tmp_path: Any) -> None:
+        """Verifica que enlaces simbólicos apuntando a rutas de sistema protegidas sean resueltos y bloqueados."""
+        audit = SecurityAuditLogger(auto_persist=False)
+        guard = SecurityGuard(audit_logger=audit)
+
+        tool = AgentTool(
+            name="file_reader",
+            description="Read file",
+            category="filesystem",
+            args_schema=DummyArgs,
+            func=mock_tool_func,
+            risk_level=RiskLevel.LOW,
+        )
+
+        symlink_file = tmp_path / "innocent.txt"
+        symlink_file.symlink_to("/etc/passwd")
+
+        eval_res = guard.evaluate(tool=tool, tool_args={"path": str(symlink_file)})
+        assert eval_res.decision == PolicyDecision.DENY
+        assert "protegida" in eval_res.reason.lower()
+
+    def test_allows_safe_files_and_relative_paths(self) -> None:
+        """Verifica que rutas legítimas de aplicación no sean bloqueadas erróneamente."""
+        audit = SecurityAuditLogger(auto_persist=False)
+        guard = SecurityGuard(audit_logger=audit)
+
+        tool = AgentTool(
+            name="file_reader",
+            description="Read file",
+            category="filesystem",
+            args_schema=DummyArgs,
+            func=mock_tool_func,
+            risk_level=RiskLevel.LOW,
+        )
+
+        safe_paths = [
+            "safe_file.txt",
+            "data/results.csv",
+            "/tmp/app_export.txt",
+            "/home/appuser/report.md",
+        ]
+
+        for safe_path in safe_paths:
+            eval_res = guard.evaluate(tool=tool, tool_args={"path": safe_path})
+            assert eval_res.decision == PolicyDecision.ALLOW, (
+                f"Falso positivo en ruta segura '{safe_path}': fue denegada por SecurityGuard."
+            )
+
     def test_blocks_shell_injection_on_unrestricted_argument_names(self) -> None:
         """Verifica que argumentos con nombres arbitrarios (target, input, script, cmd, etc.)
         ya no esquivan la validación de inyección shell [AGENTE-SEC-02]."""

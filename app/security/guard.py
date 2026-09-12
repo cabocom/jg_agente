@@ -11,8 +11,10 @@ Interpone una capa de seguridad determinista previa a la invocación de herramie
 import asyncio
 import inspect
 import logging
+import os
 import re
 import time
+import urllib.parse
 from collections.abc import Sequence
 from typing import Any
 
@@ -26,11 +28,12 @@ SHELL_INJECTION_PATTERN = re.compile(r"[;&$`\n\r><|\\'\"]")
 # Variante para URLs HTTP/HTTPS donde '&' y comillas son válidos en query strings
 URL_SHELL_INJECTION_PATTERN = re.compile(r"[;`$\n\r><|\\]")
 
-# Directorios del sistema de archivos protegidos
-PROTECTED_SYSTEM_PATHS = (
+# Directorios del sistema de archivos protegidos (base POSIX + rutas canónicas)
+_BASE_PROTECTED_SYSTEM_PATHS = (
     "/etc",
     "/boot",
     "/root",
+    "/var/root",
     "/sys",
     "/proc",
     "/dev",
@@ -40,7 +43,81 @@ PROTECTED_SYSTEM_PATHS = (
     "/lib",
     "/lib64",
     "/var/run",
+    "/run",
+    "/private/etc",
+    "/private/var/run",
+    "/private/var/root",
 )
+
+
+def _build_protected_paths() -> tuple[str, ...]:
+    paths: set[str] = set(_BASE_PROTECTED_SYSTEM_PATHS)
+    for p in _BASE_PROTECTED_SYSTEM_PATHS:
+        try:
+            resolved = os.path.realpath(p)
+            paths.add(resolved)
+        except Exception:
+            pass
+    return tuple(sorted(paths))
+
+
+PROTECTED_SYSTEM_PATHS = _build_protected_paths()
+
+
+def _check_directory_traversal_or_protected_path(arg_val: str) -> tuple[bool, str]:
+    """Evalúa si una cadena intenta directory traversal o acceso a rutas de sistema protegidas.
+
+    Aplica normalización canónica (os.path.normpath, os.path.abspath, os.path.realpath)
+    para impedir evasiones mediante secuencias '..', barras redundantes, enlaces simbólicos
+    o codificación URL.
+    """
+    if not isinstance(arg_val, str) or not arg_val.strip():
+        return False, ""
+
+    val = arg_val.strip()
+    # Las URLs HTTP/HTTPS son evaluadas por SSRFValidator, no por el validador de rutas locales
+    if val.startswith(("http://", "https://")):
+        return False, ""
+
+    # Descodificación de URL para neutralizar bypasses como %2e%2e%2f
+    decoded_val = urllib.parse.unquote(val)
+    clean_val = decoded_val.replace("\\", "/")
+
+    candidates: list[str] = []
+
+    if clean_val.startswith("/"):
+        norm = os.path.normpath(clean_val)
+        candidates.append(norm)
+        try:
+            candidates.append(os.path.realpath(clean_val))
+            candidates.append(os.path.realpath(norm))
+        except Exception:
+            pass
+    elif ".." in clean_val:
+        # Traversal relativo: verificar escape desde la raíz y desde cwd
+        norm_from_root = os.path.normpath(os.path.join("/", clean_val.lstrip("/")))
+        candidates.append(norm_from_root)
+        try:
+            abs_p = os.path.abspath(clean_val)
+            candidates.append(abs_p)
+            candidates.append(os.path.realpath(abs_p))
+            candidates.append(os.path.realpath(norm_from_root))
+        except Exception:
+            pass
+    elif clean_val.startswith("~"):
+        try:
+            expanded = os.path.expanduser(clean_val)
+            candidates.append(expanded)
+            candidates.append(os.path.realpath(expanded))
+        except Exception:
+            pass
+
+    for cand in candidates:
+        for sys_path in PROTECTED_SYSTEM_PATHS:
+            if cand == sys_path or cand.startswith(sys_path + "/"):
+                return True, cand
+
+    return False, ""
 
 
 def _extract_string_arguments(args: Any, parent_key: str = "") -> list[tuple[str, str]]:
@@ -161,27 +238,26 @@ class SecurityGuard:
 
         # 2. Comprobación Universal de Inyección de Comandos Shell y Directory Traversal
         for arg_key, arg_val in _extract_string_arguments(tool_args):
-            # Comprobación de Directory Traversal en rutas del sistema de archivos
-            if ".." in arg_val or arg_val.startswith("/proc") or arg_val.startswith("/etc"):
-                for sys_path in PROTECTED_SYSTEM_PATHS:
-                    if arg_val == sys_path or arg_val.startswith(sys_path + "/"):
-                        reason = (
-                            f"Violación de seguridad: Acceso denegado a ruta de sistema "
-                            f"protegida '{arg_val}' en argumento '{arg_key}'"
-                        )
-                        logger.error("SecurityGuard DENY en '%s': %s", tool_name, reason)
-                        eval_res = SecurityEvaluationResult(
-                            decision=PolicyDecision.DENY,
-                            operation=tool_name,
-                            target_resource=target_resource,
-                            risk_level=RiskLevel.HIGH,
-                            reason=reason,
-                            required_permissions=effective_perms,
-                            is_reversible=False,
-                            can_cause_data_loss=True,
-                        )
-                        self.audit_logger.record(eval_res, execution_id=execution_id)
-                        return eval_res
+            # Comprobación de Directory Traversal y Acceso a Rutas de Sistema Protegidas
+            is_blocked_path, matched_path = _check_directory_traversal_or_protected_path(arg_val)
+            if is_blocked_path:
+                reason = (
+                    f"Violación de seguridad: Acceso denegado a ruta de sistema "
+                    f"protegida '{arg_val}' (resuelta a '{matched_path}') en argumento '{arg_key}'"
+                )
+                logger.error("SecurityGuard DENY en '%s': %s", tool_name, reason)
+                eval_res = SecurityEvaluationResult(
+                    decision=PolicyDecision.DENY,
+                    operation=tool_name,
+                    target_resource=target_resource,
+                    risk_level=RiskLevel.HIGH,
+                    reason=reason,
+                    required_permissions=effective_perms,
+                    is_reversible=False,
+                    can_cause_data_loss=True,
+                )
+                self.audit_logger.record(eval_res, execution_id=execution_id)
+                return eval_res
 
             # Comprobación Universal de Inyección de Comandos Shell (independiente del nombre de la clave)
             is_url = arg_val.startswith(("http://", "https://"))
