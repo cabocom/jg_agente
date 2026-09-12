@@ -1,0 +1,207 @@
+"Title","Description","Labels","Milestone","Weight"
+"[GLOBAL-01] Desincronización y Fallbacks Hardcodeados de Secretos","- **Severidad:** 🔴 CRÍTICO
+- **Componentes Afectados:** `docker-compose.yml`, `jg_agente` (variables de entorno), `jg_dashboard` (`AgentHttpClient.php`, `DatabaseSeeder.php`, `.env.example`)
+- **Ubicación:** 
+  - [docker-compose.yml:110, 155](docker-compose.yml#L110)
+  - [jg_dashboard/app/Services/Agents/AgentHttpClient.php:83-86, 119](jg_dashboard/app/Services/Agents/AgentHttpClient.php#L83-L86)
+  - [jg_dashboard/database/seeders/DatabaseSeeder.php:45, 67](jg_dashboard/database/seeders/DatabaseSeeder.php#L45)
+- **Descripción:** Se utilizan cadenas estáticas como secretos fallback en el código (`'sec_devops_agent_preprovisioned_key_12345'`) y en `docker-compose.yml`. Si el usuario actualiza `JG_AGENTE_SECRET` en el archivo `.env`, el Dashboard firma con el nuevo secreto, pero los contenedores de los agentes conservan el valor quemado en el Compose. Adicionalmente, el seeder inserta el hash estático en la base de datos ignorando el `.env`.
+- **Impacto:** Fuga de secretos por estar expuestos en el repositorio git (CWE-798) y rotura inmediata de la autenticación inter-servicio al rotar claves.
+- **Solución Propuesta:**
+  1. Eliminar todos los valores de fallback hardcodeados; fallar explícitamente al arrancar si falta la variable.
+  2. Modificar `docker-compose.yml` para usar interpolación estricta de variables de entorno: `${JG_CONVERSATIONAL_SECRET:?err}` y `${JG_DEVOPS_SECRET:?err}`.
+  3. Modificar `DatabaseSeeder.php` para derivar los hashes de `config('services.agent.secret')`.","audit2, scope::global, component::agente, severity::critical","Auditoría 2","5"
+"[GLOBAL-02] Ruptura Criptográfica del Registro Dinámico de Agentes (HMAC Asimétrico)","- **Severidad:** 🔴 CRÍTICO
+- **Componentes Afectados:** `jg_agente` (`app/lifecycle/boot.py`), `jg_dashboard` (`AgentRegistrationService.php`, `AgentHttpClient.php`)
+- **Ubicación:**
+  - [jg_dashboard/app/Services/AgentRegistrationService.php:240](jg_dashboard/app/Services/AgentRegistrationService.php#L240)
+  - [jg_dashboard/app/Services/Agents/AgentHttpClient.php:78-95](jg_dashboard/app/Services/Agents/AgentHttpClient.php#L78-L95)
+  - [jg_agente/app/lifecycle/boot.py](jg_agente/app/lifecycle/boot.py)
+- **Descripción:** Cuando un agente se registra consumiendo un bootstrap token, el Dashboard almacena `hash('sha256', $permanentSecret)` y descarta `$permanentSecret`. Al no guardarlo de forma reversible (cifrado con `Crypt::encryptString`), cuando `AgentHttpClient` debe firmar peticiones hacia ese agente (`X-Signature = HMAC-SHA256(...)`), no dispone del secreto y usa el fallback del `.env`. El agente compara la firma con su clave local y la rechaza con `401 Unauthorized`.
+- **Impacto:** Es imposible aprovisionar dinámicamente nuevos agentes o auto-escalar pods/contenedores de agentes.
+- **Solución Propuesta:**
+  1. Crear migración en Laravel para añadir `permanent_secret_encrypted` a la tabla `dashboard_agents`.
+  2. En `AgentRegistrationService.php`, guardar el secreto cifrado simétricamente con la `APP_KEY`.
+  3. En `AgentHttpClient.php`, desencriptar el secreto para calcular la cabecera `X-Signature`.
+  4. (Alternativa P3): Migrar a criptografía asimétrica Ed25519.","audit2, scope::global, component::agente, severity::critical","Auditoría 2","5"
+"[GLOBAL-03] Incompatibilidad de Timeouts HTTP (15s) frente al Ciclo Cognitivo","- **Severidad:** 🔴 CRÍTICO
+- **Componentes Afectados:** `jg_dashboard` (`AgentHttpClient.php`), `jg_agente` (`app/nodes/*`)
+- **Ubicación:** [jg_dashboard/app/Services/Agents/AgentHttpClient.php:53](jg_dashboard/app/Services/Agents/AgentHttpClient.php#L53)
+- **Descripción:** El cliente HTTP del Dashboard tiene configurado un timeout de 15 segundos por defecto. El agente implementa un ciclo de 9-10 nodos cognitivos donde cada invocación a LLMs (Gemini, Claude, Ollama) tarda entre 3 y 15 segundos. Cualquier flujo complejo tarda más de 15s, haciendo que el Dashboard corte la conexión con `504 Gateway Timeout`.
+- **Impacto:** Ejecuciones fantasmas huérfanas en el agente, tareas marcadas falsamente como `FAILED` en el Dashboard e inconsistencias de estado.
+- **Solución Propuesta:**
+  1. Elevar el timeout por defecto de peticiones síncronas a 120 segundos en `config/agent.php`.
+  2. Forzar que tareas multi-paso complejas se ejecuten siempre con `sync=false` (asíncrono) gestionadas por pooling o webhooks.","audit2, scope::global, component::agente, severity::critical","Auditoría 2","5"
+"[GLOBAL-04] Ausencia Total de Pruebas de Integración End-to-End Reales","- **Severidad:** 🟠 ALTO
+- **Componentes Afectados:** Suites de test de ambos repositorios
+- **Ubicación:** `jg_dashboard/tests/`, `jg_agente/tests/`
+- **Descripción:** A pesar de tener 611 tests unitarios combinados, todos los tests que prueban autenticación o comunicación inter-servicio utilizan mocks exhaustivos de Guzzle, HttpClient o TestClient. Ningún test valida el flujo completo: *Dashboard genera Token -> Agente se registra -> Dashboard persiste secreto -> Dashboard envía orden firmada -> Agente valida firma y ejecuta*.
+- **Impacto:** Fallos bloqueantes graves (como GLOBAL-01 y GLOBAL-02) pasaron 100% desapercibidos en las pruebas continuas.
+- **Solución Propuesta:** Implementar una suite de integración end-to-end (usando Docker Compose en CI/CD) que levante ambos servicios y valide el intercambio real de firmas y datos.","audit2, scope::global, component::agente, severity::high","Auditoría 2","3"
+"[GLOBAL-05] Falta de Propagación de Correlation-ID y Trazabilidad Distribuida","- **Severidad:** 🟡 MEDIO
+- **Componentes Afectados:** `jg_dashboard` (generación de header), `jg_agente` (middlewares y logger)
+- **Ubicación:** [jg_agente/app/main.py](jg_agente/app/main.py), [jg_agente/app/security/audit.py](jg_agente/app/security/audit.py)
+- **Descripción:** El Dashboard inyecta la cabecera `X-Correlation-ID` en sus peticiones HTTP, pero el Agente no la extrae ni la propaga al contexto de ejecución, a las trazas de `SecurityAuditLogger`, ni a los registros del checkpointer de LangGraph.
+- **Impacto:** Imposibilidad de realizar auditorías cruzadas entre una acción iniciada por un usuario en la interfaz web y los logs de bajo nivel en el agente.
+- **Solución Propuesta:** Implementar un middleware en FastAPI que capture `X-Correlation-ID` y lo inyecte en el contexto (`contextvars`) para incluirlo automáticamente en cada log y evento de auditoría.
+
+---
+
+## ISSUES DE SEGURIDAD (AGENTE)","audit2, scope::global, component::agente, severity::medium","Auditoría 2","2"
+"[AGENTE-SEC-01] Escapada de Contenedor y Compromiso Root del Host vía Docker Socket","- **Severidad:** 🔴 CRÍTICO
+- **CWE:** CWE-250 (Execution with Unnecessary Privileges)
+- **Ubicación:** [docker-compose.yml:138-158](docker-compose.yml#L138), [jg_agente/plugins/jg_plugin_devops/tools/docker_tools.py:120-145](jg_agente/plugins/jg_plugin_devops/tools/docker_tools.py#L120)
+- **Descripción:** El contenedor `jg_agente_devops` se ejecuta como usuario `root` (`user: ""0:0""`), expone el puerto `8002` en todas las interfaces de red (`0.0.0.0:8002`) y tiene montado el socket Unix de Docker del host (`/var/run/docker.sock`). Un atacante o una inyección de prompts en el LLM puede instruir al agente a ejecutar comandos de Docker que monten el sistema de archivos raíz del host (`docker run -v /:/host ...`), comprometiendo totalmente el servidor anfitrión.
+- **Impacto:** Pérdida total de confidencialidad, integridad y disponibilidad del servidor de despliegue.
+- **Solución Propuesta:**
+  1. Eliminar el montaje directo de `/var/run/docker.sock` en producción.
+  2. Implementar un proxy de socket con autorización granular (`tecnativa/docker-socket-proxy`) configurado estrictamente en modo lectura o restringiendo métodos destructivos y montajes de volúmenes.
+  3. Vincular el puerto `8002` exclusivamente a `127.0.0.1` o aislarlo en la red interna de Docker.","audit2, component::agente, type::security, severity::critical","Auditoría 2","5"
+"[AGENTE-SEC-02] Evasión de Filtro de Inyección Shell por Restricción de Nombre de Argumentos","- **Severidad:** 🟠 ALTO
+- **CWE:** CWE-78 (Improper Neutralization of Special Elements used in an OS Command)
+- **Ubicación:** [jg_agente/app/security/guard.py:170-175](jg_agente/app/security/guard.py#L170-L175)
+- **Evidencia:**
+  ```python
+  if (
+      ""command"" in arg_key
+      or ""name"" in arg_key
+      or ""service"" in arg_key
+      or ""host"" in arg_key
+  ) and SHELL_INJECTION_PATTERN.search(arg_val):
+  ```
+- **Descripción:** La validación de inyección shell solo se ejecuta si la clave del argumento contiene las cadenas `""command""`, `""name""`, `""service""` o `""host""`. Cualquier plugin o herramienta cuyos argumentos se llamen `""target""`, `""input""`, `""script""`, `""query""`, `""cmd""`, `""args""` o `""path""` esquiva el filtro completamente.
+- **Impacto:** Posibilidad de ejecutar comandos del sistema no autorizados mediante inyección de argumentos no protegidos.
+- **Solución Propuesta:** Aplicar `SHELL_INJECTION_PATTERN.search(arg_val)` sobre **todos los argumentos de tipo string**, independientemente del nombre del parámetro.","audit2, component::agente, type::security, severity::high","Auditoría 2","3"
+"[AGENTE-SEC-03] Evasión de Filtro de Directory Traversal por Falta de Normalización","- **Severidad:** 🟠 ALTO
+- **CWE:** CWE-22 (Improper Limitation of a Pathname to a Restricted Directory)
+- **Ubicación:** [jg_agente/app/security/guard.py:148-160](jg_agente/app/security/guard.py#L148-L160)
+- **Evidencia:**
+  ```python
+  if "".."" in arg_val or arg_val.startswith(""/proc"") or arg_val.startswith(""/etc""):
+  ```
+- **Descripción:** El filtro no resuelve los enlaces simbólicos ni los puntos relativos (`..`) con `os.path.realpath()` o `Path.resolve()`. Un payload como `""/tmp/../../../../etc/shadow""` comienza con `""/tmp""` y elude las comprobaciones basadas en prefijo `startswith`.
+- **Impacto:** Lectura o modificación no autorizada de archivos protegidos del sistema.
+- **Solución Propuesta:** Normalizar cualquier ruta canónicamente antes de comparar:
+  ```python
+  resolved_path = os.path.realpath(os.path.abspath(arg_val))
+  if any(resolved_path.startswith(p) for p in PROTECTED_PATHS):
+      raise SecurityViolation(...)
+  ```","audit2, component::agente, type::security, severity::high","Auditoría 2","3"
+"[AGENTE-SEC-04] Auto-Asignación de Permisos a Invocadores no Autorizados en `risk_assess_node`","- **Severidad:** 🟠 ALTO
+- **CWE:** CWE-285 (Improper Authorization)
+- **Ubicación:** [jg_agente/core/nodes/risk_assess.py:128-132](jg_agente/core/nodes/risk_assess.py#L128-L132)
+- **Evidencia:**
+  ```python
+  caller_perms = state.get(""caller_permissions"") or []
+  if not caller_perms and tool:
+      caller_perms = list(tool.required_permissions)
+  ```
+- **Descripción:** Si el llamador no remite permisos en la petición (`caller_permissions` vacío), el nodo le otorga automáticamente todos los permisos requeridos por la herramienta. Como consecuencia, la evaluación posterior en `guard.evaluate(..., caller_permissions=caller_perms)` siempre aprueba la operación.
+- **Impacto:** Anulación total del control de acceso RBAC a nivel de herramientas en el Execution Plane.
+- **Solución Propuesta:** Eliminar la auto-concesión. Si `caller_perms` está vacío, debe permanecer vacío, forzando la denegación si la herramienta exige permisos.","audit2, component::agente, type::security, severity::high","Auditoría 2","3"
+"[AGENTE-SEC-05] Bypass Masivo de Aprobación HITL Extiende Permisos a Todo el Plan","- **Severidad:** 🟠 ALTO
+- **CWE:** CWE-269 (Improper Privilege Management)
+- **Ubicación:** 
+  - [jg_agente/app/nodes/execute.py:72](jg_agente/app/nodes/execute.py#L72)
+  - [jg_agente/app/security/guard.py:269-270](jg_agente/app/security/guard.py#L269-L270)
+- **Descripción:** Cuando se reanuda una ejecución tras una aprobación humana (`bypass_approval = True`), esta bandera se aplica indiscriminadamente a **todos los pasos del plan**, y no solo a la herramienta específica aprobada por el operador humano.
+- **Impacto:** Escalación de privilegios post-aprobación; si el plan contiene herramientas destructivas secundarias, se ejecutan sin autorización explícita.
+- **Solución Propuesta:** Almacenar en el estado una lista de `approved_tool_ids` o `approved_step_ids` y verificar que solo coincidan los pasos específicos que el operador validó.","audit2, component::agente, type::security, severity::high","Auditoría 2","3"
+"[AGENTE-SEC-06] Asignación de Permisos Wildcard a Administradores Invalida SecurityGuard","- **Severidad:** 🟡 MEDIO
+- **Ubicación:** [jg_agente/app/nodes/risk_assess.py:124-128](jg_agente/app/nodes/risk_assess.py#L124-L128)
+- **Descripción:** Los usuarios con rol `admin` reciben permisos `[""*""]`, provocando que en `guard.py:123` se bypassen todas las comprobaciones de seguridad operativas.
+- **Impacto:** Pérdida de defensa en profundidad; incluso un admin debería estar sujeto a validaciones de seguridad de parámetros y rutas críticas.
+- **Solución Propuesta:** Desacoplar la autorización de usuario de las restricciones de seguridad invariantes de la plataforma (como paths de sistema o inyecciones de comandos).","audit2, component::agente, type::security, severity::medium","Auditoría 2","2"
+"[AGENTE-SEC-07] Vulnerabilidad XXE en Parser de Feeds RSS de `news_tool`","- **Severidad:** 🟡 MEDIO
+- **CWE:** CWE-611 (Improper Restriction of XML External Entity Reference)
+- **Ubicación:** [jg_agente/plugins/jg_plugin_conversational/tools/news.py:176](jg_agente/plugins/jg_plugin_conversational/tools/news.py#L176)
+- **Descripción:** Se utiliza `xml.etree.ElementTree.fromstring(response.text)` para procesar feeds RSS de fuentes externas sin deshabilitar entidades externas ni DTD.
+- **Impacto:** Riesgo de Denegación de Servicio (Billion Laughs) o divulgación de archivos locales si una URL de feed apunta a un contenido malicioso.
+- **Solución Propuesta:** Reemplazar por `defusedxml.ElementTree.fromstring()` y añadir `defusedxml` a las dependencias.","audit2, component::agente, type::security, severity::medium","Auditoría 2","2"
+"[AGENTE-SEC-08] Fuga de Información Sensible e Interna en Respuestas de Error HTTP","- **Severidad:** 🟡 MEDIO
+- **CWE:** CWE-209 (Generation of Error Message Containing Sensitive Information)
+- **Ubicación:** [jg_agente/app/api/executions.py:431](jg_agente/app/api/executions.py#L431)
+- **Descripción:** Los bloques `except Exception as exc:` devuelven `f""Error durante la ejecución del agente: {exc}""` en el cuerpo HTTP JSON, exponiendo rutas internas del servidor, nombres de módulos y trazas de la base de datos.
+- **Impacto:** Fuga de información que facilita el reconocimiento de vulnerabilidades por terceros.
+- **Solución Propuesta:** Registrar el stacktrace completo internamente en logs y devolver un mensaje genérico al cliente con el ID del incidente.","audit2, component::agente, type::security, severity::medium","Auditoría 2","2"
+"[AGENTE-SEC-09] Condición de Carrera TOCTOU / DNS Rebinding en Validador SSRF","- **Severidad:** 🟡 MEDIO
+- **CWE:** CWE-367 (Time-of-check Time-of-use Race Condition)
+- **Ubicación:** [jg_agente/app/security/ssrf.py:239-264](jg_agente/app/security/ssrf.py#L239-L264)
+- **Descripción:** El validador resuelve el host por DNS y verifica que no sea una IP privada. Sin embargo, cuando la herramienta HTTP realiza la conexión posterior, se realiza una nueva resolución DNS que puede apuntar a una IP local (DNS Rebinding). Además, la llamada `socket.getaddrinfo()` es sincrónica y bloquea el event loop.
+- **Impacto:** Evasión de la protección SSRF en entornos con DNS dinámico o controlado por el atacante.
+- **Solución Propuesta:** Fijar la IP resuelta durante la petición HTTP conectando directamente a la IP validada y enviando el nombre de host original en la cabecera `Host`.
+
+---
+
+## ISSUES DE LÓGICA COGNITIVA Y EJECUCIÓN (AGENTE)","audit2, component::agente, type::security, severity::medium","Auditoría 2","2"
+"[AGENTE-LOGIC-01] Heurística Sintáctica en Español Clasifica Comandos como Saludos","- **Severidad:** 🟠 ALTO
+- **Ubicación:** [jg_agente/core/nodes/reason.py:151-170, 310-326](jg_agente/core/nodes/reason.py#L151-L170)
+- **Descripción:** `_is_simple_greeting_or_chat` clasifica como conversación simple cualquier entrada que empiece por `""dime""`, `""cuál""`, `""cuenta""`, `""explica""`, etc., si no incluye verbos imperativos como `""reinicia""` o `""mata""`. Preguntas de DevOps como `""Dime el estado de los contenedores""` son catalogadas como saludos, saltándose la fase de planificación y herramientas.
+- **Impacto:** El agente no responde a consultas operativas de lectura en lenguaje natural en español, respondiendo con alucinaciones o textos genéricos.
+- **Solución Propuesta:** Eliminar la heurística sintáctica prefijada y permitir que el LLM decida si emite `tool_calls`, o restringir la heurística exclusivamente a saludos unívocos (`""hola""`, `""buenos días""`).","audit2, component::agente, type::logic, severity::high","Auditoría 2","3"
+"[AGENTE-LOGIC-02] Fallback Ciego en `plan_node` Ejecuta Herramienta Arbitraria con Argumentos Vacíos","- **Severidad:** 🟠 ALTO
+- **Ubicación:** [jg_agente/core/nodes/plan.py:163-178](jg_agente/core/nodes/plan.py#L163-L178)
+- **Descripción:** Si el modelo falla en generar un plan estructurado, el código selecciona ciegamente la primera herramienta del registro (`available_tools[0]`) y le programa una ejecución con `{}`.
+- **Impacto:** Ejecución errática e impredecible de herramientas no solicitadas en el sistema.
+- **Solución Propuesta:** Si no se genera un plan válido, transicionar a `conclude` con estado de error de planificación, sin ejecutar ninguna herramienta por defecto.","audit2, component::agente, type::logic, severity::high","Auditoría 2","3"
+"[AGENTE-LOGIC-03] Omisión de `caller_permissions` en `execute_node` Causa Denegaciones Falsas","- **Severidad:** 🟠 ALTO
+- **Ubicación:** [jg_agente/core/nodes/execute.py:202-215](jg_agente/core/nodes/execute.py#L202-L215)
+- **Descripción:** En la fase de ejecución, si no se cuenta con bypass de aprobación, la invocación a `guard.execute_tool` no propaga de forma inmutable los `caller_permissions` del estado original, provocando que herramientas legítimas fallen por `INSUFFICIENT_PERMISSIONS`.
+- **Impacto:** Denegación injustificada de tareas operativas aprobadas.
+- **Solución Propuesta:** Asegurar que `caller_permissions` viaje de forma inmutable en el esquema tipado `AgentState` a lo largo de todo el grafo.","audit2, component::agente, type::logic, severity::high","Auditoría 2","3"
+"[AGENTE-LOGIC-04] Contención Secuencial Rígida Aborta Todo el Plan Ante el Primer Fallo","- **Severidad:** 🟡 MEDIO
+- **Ubicación:** [jg_agente/app/nodes/execute.py:318-319](jg_agente/app/nodes/execute.py#L318-L319)
+- **Descripción:** Ante cualquier fallo en un paso de herramienta (`if not tool_result.success: break`), el nodo `execute` aborta el resto del plan sin distinguir si el paso era crítico o de mera verificación no fatal.
+- **Impacto:** Impide que el bucle reflexivo (`evaluate -> reason`) explore rutas alternativas de remediación.
+- **Solución Propuesta:** Permitir que los pasos del plan declaren `allow_failure: bool` o continuar hacia la fase de evaluación para que el agente intente recuperarse.
+
+---
+
+## ISSUES DE PERSISTENCIA, ESTADO Y RESILIENCIA (AGENTE)","audit2, component::agente, type::logic, severity::medium","Auditoría 2","2"
+"[AGENTE-STATE-01] Persistencia Best-Effort Oculta Pérdida de Ejecuciones en Base de Datos","- **Severidad:** 🟠 ALTO
+- **Ubicación:** [jg_agente/app/api/executions.py:316-345](jg_agente/app/api/executions.py#L316-L345)
+- **Descripción:** Si la base de datos PostgreSQL experimenta un fallo temporal al guardar la ejecución, la excepción es capturada y el endpoint responde con HTTP 200 OK y metadatos `persistence.status = ""degraded""`.
+- **Impacto:** Los registros de ejecución se pierden silenciosamente de la tabla `core_executions` sin que el cliente o el Dashboard se enteren del fallo.
+- **Solución Propuesta:** Implementar un mecanismo de cola local (Write-Ahead Log o reintentos con backoff) o retornar un error HTTP 500 para forzar el reintento del cliente.","audit2, component::agente, type::persistence, severity::high","Auditoría 2","3"
+"[AGENTE-STATE-02] Degradación Silenciosa de `DualPostgresSaver` a Memoria y Fuga de Conexiones","- **Severidad:** 🟡 MEDIO
+- **Ubicación:** 
+  - [jg_agente/core/checkpointer.py:175-186](jg_agente/core/checkpointer.py#L175-L186)
+  - [jg_agente/main.py:40-75](jg_agente/main.py#L40-L75)
+- **Descripción:** 
+  1. Si `DualPostgresSaver` no puede conectar a PostgreSQL al arrancar, degrada silenciosamente a `MemorySaver()` sin emitir alarma crítica ni detener el servicio.
+  2. En el shutdown del lifespan de FastAPI, nunca se cierra explícitamente el pool de conexiones del checkpointer.
+- **Impacto:** Pérdida de persistencia de estados e interrupciones HITL ante reinicios; fuga de descriptores de conexión en PostgreSQL.
+- **Solución Propuesta:** Reintentar con backoff exponencial al inicio; fallar el healthcheck si no se conecta a PostgreSQL; invocar `.close()` en el shutdown del lifespan.","audit2, component::agente, type::persistence, severity::medium","Auditoría 2","2"
+"[AGENTE-STATE-03] Doble Sesión de Base de Datos Concurrente por Request Saturation Pool","- **Severidad:** 🟡 MEDIO
+- **Ubicación:** [jg_agente/app/api/executions.py:504-568](jg_agente/app/api/executions.py#L504-L568)
+- **Descripción:** El endpoint `trigger_execution` inyecta una sesión `db: AsyncSession` vía FastAPI, pero luego `execute_graph_pipeline` abre sesiones adicionales independientes con `async_session_factory()`. La sesión inyectada se mantiene abierta durante toda la ejecución del grafo.
+- **Impacto:** Con un tamaño de pool de 5 conexiones, solo 5 peticiones concurrentes saturan completamente el pool de conexiones de PostgreSQL.
+- **Solución Propuesta:** Reutilizar la sesión inyectada pasándola al pipeline o cerrar inmediatamente la sesión inyectada si el pipeline gestiona su propio ciclo de vida.","audit2, component::agente, type::persistence, severity::medium","Auditoría 2","2"
+"[AGENTE-STATE-04] Fuga de Memoria por Crecimiento Ilimitado en `SecurityAuditLogger`","- **Severidad:** 🟡 MEDIO
+- **Ubicación:** [jg_agente/app/security/audit.py:42](jg_agente/app/security/audit.py#L42)
+- **Descripción:** `self._history: list[AuditRecord] = []` acumula indefinidamente en memoria todos los eventos de auditoría generados por el agente sin límite máximo ni política de rotación/expiración.
+- **Impacto:** Fuga de memoria gradual (OOM) en procesos de agente de larga duración.
+- **Solución Propuesta:** Sustituir la lista por un buffer circular con tamaño máximo (`collections.deque(maxlen=1000)`).
+
+---
+
+## ISSUES DE CONCURRENCIA E INFRAESTRUCTURA (AGENTE)","audit2, component::agente, type::persistence, severity::medium","Auditoría 2","2"
+"[AGENTE-CONC-01] Singletons de Seguridad sin Locks para Inicialización en Corrutinas","- **Severidad:** 🟡 MEDIO
+- **Ubicación:** 
+  - [jg_agente/app/security/guard.py:391-396](jg_agente/app/security/guard.py#L391-L396)
+  - [jg_agente/app/security/ssrf.py:332-337](jg_agente/app/security/ssrf.py#L332-L337)
+  - [jg_agente/app/security/audit.py:380-385](jg_agente/app/security/audit.py#L380-L385)
+- **Descripción:** Las funciones `get_security_guard()`, `get_ssrf_validator()` y `get_audit_logger()` utilizan el patrón `if instance is None: instance = Cls()` sin ningún cerrojo (`asyncio.Lock`). Múltiples corrutinas en el startup pueden inicializar instancias duplicadas.
+- **Impacto:** Inconsistencia de estado en componentes que deben ser estrictamente únicos.
+- **Solución Propuesta:** Pre-instanciar los singletons durante el startup en el lifespan de la aplicación o utilizar un cerrojo asíncrono.","audit2, component::agente, type::concurrency, severity::medium","Auditoría 2","2"
+"[AGENTE-CONC-02] Pérdida de Trazabilidad y Notificaciones en Tareas Asíncronas en Background","- **Severidad:** 🟡 MEDIO
+- **Ubicación:** [jg_agente/app/api/executions.py:471-483](jg_agente/app/api/executions.py#L471-L483)
+- **Descripción:** Cuando se lanza una ejecución con `sync=False`, se delega a `BackgroundTasks` de FastAPI. Si la tarea falla o concluye, no existe ningún mecanismo de webhook, callback HTTP o evento en cola para notificar al Dashboard.
+- **Impacto:** El Dashboard debe hacer polling ciego o no llega a enterarse del resultado de tareas asíncronas.
+- **Solución Propuesta:** Implementar una llamada de webhook hacia el Dashboard (`POST /api/v1/internal/executions/{id}/complete`) al finalizar la tarea en segundo plano.","audit2, component::agente, type::concurrency, severity::medium","Auditoría 2","2"
+"[AGENTE-INFRA-01] Ausencia de Workers en Uvicorn y Versión Menor no Fijada en Dockerfile","- **Severidad:** 🟢 BAJO
+- **Ubicación:** [jg_agente/Dockerfile:1, 56](jg_agente/Dockerfile#L1)
+- **Descripción:** 
+  1. `FROM python:3.12-slim` no fija la versión menor ni el hash digest de la imagen base.
+  2. El CMD ejecuta `uvicorn app.main:app` con un único worker por defecto, lo que limita severamente el rendimiento en tareas concurrentes con I/O intensivo.
+- **Solución Propuesta:** Fijar la versión a `python:3.12.6-slim` y parametrizar los workers en el CMD mediante variable de entorno `UVICORN_WORKERS`.","audit2, component::agente, type::infrastructure, severity::low","Auditoría 2","1"

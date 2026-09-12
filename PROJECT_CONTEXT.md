@@ -1,19 +1,16 @@
 # CONTEXTO DE PROYECTO: jg_agente
 
-**Versión del documento:** 2.32.0  
-**Fecha de consolidación:** 11 de septiembre de 2026  
+**Versión del documento:** 2.33.0  
+**Fecha de consolidación:** 12 de septiembre de 2026  
 **Componente:** Execution Plane (Motor Autónomo de Ejecución)  
-**Estado:** Fases 01 a 11 completadas (100%). Post-Auditoría Codex en curso.  
+**Estado:** Fases 01 a 11 completadas (100%). Post-Auditoría 2 en curso.  
 - Fase 08 completada: Cliente de registro Zero-Trust, bootstrap tokens, CredentialStore (permisos POSIX 0600) y heartbeat periódico.  
 - Fase 11 completada: Extracción e integración de plugins especializados (`jg_plugin_conversational` y `jg_plugin_devops`).  
 - Despliegue Multi-Agente Unificado: Soporte de múltiples perfiles desde la misma imagen Docker mediante `ENABLED_PLUGINS` (`jg_agente_conversacional` en :8001 y `jg_agente_devops` en :8002).  
 - Persistencia Core y Aislamiento Multi-Agente (GLOBAL-002 / ISSUE-AGENT-003): Cada runtime dispone de su propia base de datos dedicada (`jg_agente_conversacional` y `jg_agente_devops`) en el PostgreSQL compartido `jg_agente_postgres` (puerto 5433), garantizando aislamiento absoluto de checkpoints, transacciones e hilos de ejecución sin alterar el agnosticismo del Core.  
 - Post-Auditoría Codex (GLOBAL-001 / ISSUE-AGENT-001): Autenticación estricta y anti-replay en router `/executions` con firma canónica HMAC-SHA256 (`METHOD\nPATH\nTIMESTAMP\nSHA256(BODY)`), ventana de 300s y validación de `X-Agent-ID`.  
-- Post-Auditoría Codex (ISSUE-AGENT-004): Imposición estricta de `timeout_sec` en `SecurityGuard.execute_tool()`, `execute_node()` y `AgentTool.run()`, con despacho no bloqueante (`asyncio.to_thread`), captura de `TimeoutError`, emisión de `TOOL_TIMEOUT` y contención del plan (`StepStatus.FAILED`).  
-- Post-Auditoría Codex (ISSUE-AGENT-005): Desacoplamiento de DNS en entornos offline para `NewsTool` (`plugins/jg_plugin_conversational`), conmutando a fallback determinista en caso de indisponibilidad DNS y preservando íntegra la protección SSRF para accesos a redes privadas.  
-- Post-Auditoría Codex (ISSUE-AGENT-006): Semántica y propagación de errores en persistencia de ejecuciones; eliminación del silenciamiento ciego en `_persist_or_update_execution`, elevación de `PersistenceError`, logging en nivel `ERROR` y exposición tipada de degradación en `AgentOutput.metadata["persistence"]` (`PersistenceMetadata`).  
-- Post-Auditoría Codex (ISSUE-AGENT-007): Persistencia atómica y permisos POSIX en `CredentialStore.save()`; creación en archivo temporal `.tmp` con permisos `0600` desde el descriptor (`os.open` y `os.fchmod`), sincronización forzada a hardware con `os.fsync()` y sustitución atómica con `os.replace()`.  
-- Suite de Pruebas: Suite completa pasando al 100% (340 tests).
+- Post-Auditoría 2 (GLOBAL-01 / GitLab jg_agente#52): Erradicación total de secretos pre-aprovisionados hardcodeados en orquestación (`docker-compose.yml`); adopción de interpolación obligatoria `${JG_CONVERSATIONAL_SECRET:?err}` y `${JG_DEVOPS_SECRET:?err}` garantizando sincronización simétrica de firmas HMAC con el Dashboard.  
+- Suite de Pruebas: Suite completa pasando al 100% (360 tests).
 
 ---
 
