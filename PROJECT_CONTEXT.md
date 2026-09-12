@@ -1,6 +1,6 @@
 # CONTEXTO DE PROYECTO: jg_agente
 
-**Versión del documento:** 2.33.0  
+**Versión del documento:** 2.34.0  
 **Fecha de consolidación:** 12 de septiembre de 2026  
 **Componente:** Execution Plane (Motor Autónomo de Ejecución)  
 **Estado:** Fases 01 a 11 completadas (100%). Post-Auditoría 2 en curso.  
@@ -11,6 +11,7 @@
 - Post-Auditoría Codex (GLOBAL-001 / ISSUE-AGENT-001): Autenticación estricta y anti-replay en router `/executions` con firma canónica HMAC-SHA256 (`METHOD\nPATH\nTIMESTAMP\nSHA256(BODY)`), ventana de 300s y validación de `X-Agent-ID`.  
 - Post-Auditoría 2 (GLOBAL-01 / GitLab jg_agente#52): Erradicación total de secretos pre-aprovisionados hardcodeados en orquestación (`docker-compose.yml`); adopción de interpolación obligatoria `${JG_CONVERSATIONAL_SECRET:?err}` y `${JG_DEVOPS_SECRET:?err}` garantizando sincronización simétrica de firmas HMAC con el Dashboard.  
 - Post-Auditoría 2 (GLOBAL-02 / GitLab jg_agente#53): Consolidación del flujo criptográfico simétrico para registro dinámico de agentes; jg_agente persiste localmente el `permanent_secret` suministrado por el Dashboard en `.agent_credentials.json` (permisos 0600) y valida las peticiones entrantes contra su secreto único mientras el Dashboard lo preserva cifrado en reposo para computar las cabeceras `X-Signature`.  
+- Post-Auditoría 2 (GLOBAL-03 / GitLab jg_agente#54): Compatibilización de tiempos de respuesta del ciclo cognitivo de 9-10 nodos (`observe` a `conclude`); elevación del timeout de conexión síncrona en el Dashboard a 120s (`AGENT_HTTP_TIMEOUT=120`) y consolidación del flujo asíncrono (`sync=false` / `parameters.async=True`) con respuesta inmediata HTTP 202 Accepted encolada en BackgroundTasks y consulta periódica vía `GET /executions/{thread_id}`.  
 - Suite de Pruebas: Suite completa pasando al 100% (361 tests).
 
 ---
