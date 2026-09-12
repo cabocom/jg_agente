@@ -12,7 +12,9 @@ from app.models.io import AgentInput, AgentOutput, ExecutionStatus
 from app.models.state import (
     AgentExecutionStatus,
     AgentState,
+    EvaluationRecord,
     ExecutionError,
+    GoalStatus,
     IntentModel,
     StepExecutionRecord,
     StepStatus,
@@ -256,3 +258,43 @@ class TestConcludeNode:
             snapshot_output.get("status") if isinstance(snapshot_output, dict) else None
         )
         assert output_status in (ExecutionStatus.COMPLETED, ExecutionStatus.COMPLETED.value)
+
+    @pytest.mark.asyncio
+    async def test_conclude_node_filters_meta_evaluation_and_uses_clean_tool_output(self) -> None:
+        """Verifica que conclude_node descarte meta-comentarios de auditoría y use la salida textual limpia de la herramienta."""
+        state: AgentState = {
+            "request": AgentInput(
+                execution_id="exec-meta-01",
+                thread_id="thread-meta-01",
+                prompt="¿Qué tiempo hace en Alcobendas?",
+            ),
+            "execution_records": [
+                StepExecutionRecord(
+                    step_id="step-weather",
+                    tool_name="get_weather",
+                    status=StepStatus.COMPLETED,
+                    output="El clima actual en Alcobendas es de 20.0°C con cielo despejado.",
+                    duration_ms=45.0,
+                )
+            ],
+            "evaluation_records": [
+                EvaluationRecord(
+                    goal_status=GoalStatus.SATISFIED,
+                    explanation="La respuesta del tool get_weather indica el clima actual en Alcobendas, cumpliendo la solicitud del usuario.",
+                    iteration=1,
+                    timestamp=datetime.now(UTC),
+                )
+            ],
+            "status": AgentExecutionStatus.EXECUTING,
+        }
+
+        result = await conclude_node(state)
+
+        assert result["status"] == AgentExecutionStatus.RESOLVED
+        assert result["is_resolved"] is True
+        output = result["output"]
+        assert isinstance(output, AgentOutput)
+        assert output.status == ExecutionStatus.COMPLETED
+        # Debe haber descartado el meta-comentario y seleccionado la salida sustantiva del clima
+        assert output.response == "El clima actual en Alcobendas es de 20.0°C con cielo despejado."
+        assert "La respuesta del tool" not in output.response

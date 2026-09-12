@@ -112,41 +112,52 @@ async def evaluate_node(
         style_instructions = (
             "DIRECTIVAS ESTRICTAS DE ESTILO Y CONCISIÓN (OBLIGATORIO):\n"
             "- Sé DIRECTO, EJECUTIVO y CONCISO (máximo 1 o 2 frases breves).\n"
+            "- PROHIBIDO TERMINANTEMENTE hablar en tercera persona sobre las herramientas o su ejecución "
+            "(ej. NUNCA digas 'La respuesta del tool X indica...', 'El tool X devolvió...', 'Se cumplió la solicitud del usuario').\n"
             "- PROHIBIDO hacer meta-comentarios sobre la formulación de la pregunta del usuario "
             "(ej. NO digas 'lo que responde a la primera parte del objetivo del usuario', 'según la solicitud', etc.).\n"
             "- PROHIBIDO hablar de procesos internos o catálogos abstractos con rodeos "
             "(ej. en lugar de 'En el catálogo de herramientas disponible no existe ninguna herramienta para...', "
             "sé directo: 'Todos los contenedores están en ejecución. No está disponible la herramienta para inspeccionar logs.').\n"
-            "- Comunica el estado real y las conclusiones operativas de manera tajante y sin relleno.\n"
+            "- Comunica el estado real, los datos sustantivos y las conclusiones operativas de manera tajante, "
+            "directamente dirigida al usuario (ej. 'El clima actual en Alcobendas es de 20°C con cielo despejado').\n"
         )
     elif verbosity == "detailed":
         style_instructions = (
             "DIRECTIVAS DE ESTILO:\n"
             "- Proporciona un desglose detallado y paso a paso de los hallazgos técnicos para el operador.\n"
+            "- PROHIBIDO hablar en tercera persona sobre las herramientas (NUNCA 'La respuesta del tool...'). "
+            "Responde directamente con los datos y hechos averiguados.\n"
         )
     else:  # balanced
         style_instructions = (
             "DIRECTIVAS DE ESTILO:\n"
             "- Explica con claridad el estado del objetivo sin redundancias innecesarias.\n"
+            "- PROHIBIDO hablar en tercera persona sobre las herramientas. Responde directamente con los datos averiguados.\n"
         )
 
     system_prompt = (
-        "Eres el Evaluador Cognitivo y Auditor de Objetivos de un sistema de agentes autónomos.\n"
-        "Tu misión es evaluar si la evidencia recopilada responde a la solicitud del usuario, "
-        "o si se requiere dar otro paso o si existe un bloqueo por falta de herramientas.\n\n"
+        "Eres el Evaluador Cognitivo y Síntesis de Objetivos de un sistema de agentes autónomos.\n"
+        "Tu misión es evaluar si la evidencia técnica recopilada responde a la solicitud del usuario "
+        "y generar en el campo 'explanation' la respuesta final en lenguaje natural que leerá el usuario humano.\n\n"
         f"{style_instructions}\n"
-        "INSTRUCCIONES DE DECISIÓN:\n"
-        "1. 'satisfied': Si la información obtenida responde plenamente a la solicitud del usuario.\n"
+        "INSTRUCCIONES PARA 'explanation' SEGÚN 'goal_status':\n"
+        "1. 'satisfied': Si la información obtenida responde plenamente a la solicitud del usuario. "
+        "En 'explanation', DEBES responder DIRECTAMENTE al usuario comunicando los datos concretos obtenidos "
+        "(ej. si preguntó por el clima, indica el clima exacto y temperatura; si preguntó por servicios, su estado real). "
+        "PROHIBIDO TERMINANTEMENTE actuar como un auditor externo o hablar de las herramientas en tercera persona "
+        "(NUNCA digas: 'La respuesta del tool indica...', 'El tool devolvió...', 'Cumpliendo la solicitud del usuario', etc.). "
+        "Habla de tú a tú al usuario con la información final solicitada.\n"
         "2. 'needs_more_info': Si para cumplir el objetivo del usuario se requiere ejecutar una herramienta ADICIONAL "
-        "que SÍ está disponible en el catálogo de herramientas registradas.\n"
+        "que SÍ está disponible en el catálogo de herramientas registradas. Explica qué dato falta y qué se ejecutará.\n"
         "3. 'blocked_missing_capability': Si detectas un problema o si el usuario solicitó investigar algo "
-        "(ej. revisar logs de contenedores) pero la herramienta requerida (ej. docker:logs) "
-        "NO EXISTE en el catálogo de herramientas registradas. En este caso, indica brevemente qué hallazgo hay y qué falta.\n"
-        "4. 'failed': Si ocurrió un error irrecuperable que imposibilita continuar.\n\n"
+        "pero la herramienta requerida NO EXISTE en el catálogo de herramientas registradas. "
+        "Indica brevemente qué hallazgo real hay y qué herramienta o capacidad específica falta.\n"
+        "4. 'failed': Si ocurrió un error irrecuperable que imposibilita continuar. Explica el motivo de forma clara.\n\n"
         "DEBES RESPONDER EXCLUSIVAMENTE CON UN OBJETO JSON con la siguiente estructura:\n"
         "{\n"
         '  "goal_status": "satisfied" | "needs_more_info" | "blocked_missing_capability" | "failed",\n'
-        '  "explanation": "Respuesta ejecutiva en lenguaje natural para el operador humano sin meta-comentarios",\n'
+        '  "explanation": "Respuesta directa y sustantiva en lenguaje natural para el usuario con los datos reales obtenidos, sin meta-comentarios sobre herramientas",\n'
         '  "missing_capabilities": ["nombre_herramienta_faltante"],\n'
         '  "suggested_next_action": "nombre_herramienta_sugerida_si_aplica_o_null"\n'
         "}"

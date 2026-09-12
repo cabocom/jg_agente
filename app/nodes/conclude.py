@@ -6,6 +6,7 @@ con status=completed (o failed) para finalizar el hilo en LangGraph.
 """
 
 import logging
+import re
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -142,7 +143,41 @@ async def conclude_node(
             last_eval.get("explanation") if isinstance(last_eval, dict) else None
         )
         if explanation and str(explanation).strip():
-            response_text = str(explanation).strip()
+            candidate_text = str(explanation).strip()
+            # Detección defensiva de meta-comentarios de auditoría (ej. "La respuesta del tool get_weather indica...")
+            is_meta_comment = bool(
+                re.search(
+                    r"^(?:la\s+respuesta|el\s+resultado)\s+del?\s+(?:tool|herramienta)\b",
+                    candidate_text,
+                    re.IGNORECASE,
+                )
+                or re.search(
+                    r"^(?:el\s+tool|la\s+herramienta)\s+[\w:_-]+\s+(?:indica|muestra|devolvió|devuelve|ha\s+devuelto)\b",
+                    candidate_text,
+                    re.IGNORECASE,
+                )
+                or re.search(
+                    r"\bcumpliendo\s+(?:con\s+)?la\s+solicitud\b",
+                    candidate_text,
+                    re.IGNORECASE,
+                )
+            )
+            # Si es un meta-comentario y tenemos una salida limpia en texto de la herramienta, preferir la salida directa
+            if is_meta_comment and records:
+                clean_tool_output = None
+                for rec in reversed(records):
+                    out = getattr(rec, "output", None)
+                    if isinstance(out, str) and out.strip():
+                        out_str = out.strip()
+                        if not (
+                            (out_str.startswith("{") and out_str.endswith("}"))
+                            or (out_str.startswith("[") and out_str.endswith("]"))
+                        ):
+                            clean_tool_output = out_str
+                            break
+                response_text = clean_tool_output or candidate_text
+            else:
+                response_text = candidate_text
 
     # D. Buscar en el último AIMessage con contenido conversacional (evitando salidas crudas de tools)
     if not response_text:
@@ -176,8 +211,21 @@ async def conclude_node(
             )
             response_text = f"La ejecución falló durante el paso '{failed_steps[0].step_id}' ({failed_steps[0].tool_name}): {err_msg}"
         else:
-            tools_summary = ", ".join(getattr(r, "tool_name", "tool") for r in records)
-            response_text = f"Herramientas ejecutadas con éxito. Se completaron satisfactoriamente las operaciones solicitadas mediante: {tools_summary}."
+            clean_str_outputs = [
+                str(r.output).strip()
+                for r in records
+                if isinstance(getattr(r, "output", None), str)
+                and getattr(r, "output", "").strip()
+                and not (
+                    getattr(r, "output", "").strip().startswith(("{", "["))
+                    and getattr(r, "output", "").strip().endswith(("}", "]"))
+                )
+            ]
+            if len(records) == 1 and clean_str_outputs:
+                response_text = clean_str_outputs[0]
+            else:
+                tools_summary = ", ".join(getattr(r, "tool_name", "tool") for r in records)
+                response_text = f"Herramientas ejecutadas con éxito. Se completaron satisfactoriamente las operaciones solicitadas mediante: {tools_summary}."
 
     # G. Sintetizar a partir de los errores registrados
     if not response_text and errors:

@@ -193,7 +193,8 @@ El grafo **NO se ensambla dinámicamente en cada ejecución**, sino una única v
 1. **Nodos Base Obligatorios:**
    - `reason`: Análisis del estímulo y toma de decisiones mediante LLM.
    - `execute`: Invocación controlada de herramientas con paso previo por `SecurityGuard`.
-   - `conclude`: Síntesis de la respuesta final y emisión de `AgentOutput`.
+   - `evaluate`: Evaluación semántica del objetivo (`satisfied`, `needs_more_info`, `blocked_missing_capability`, `failed`) con síntesis directa al usuario en `explanation` (sin meta-comentarios de auditoría en tercera persona).
+   - `conclude`: Síntesis de la respuesta final y emisión de `AgentOutput` (con filtrado defensivo anti-metacomentarios priorizando datos limpios de las herramientas).
 
 2. **Nodos Opcionales Condicionados por Capacidades:**
    - Si `CapabilityRegistry` tiene un `ObserverEngine` registrado → se intercala el nodo `observe` antes de `reason`.
