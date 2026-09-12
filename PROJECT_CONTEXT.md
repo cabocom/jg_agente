@@ -10,7 +10,8 @@
 - Persistencia Core y Aislamiento Multi-Agente (GLOBAL-002 / ISSUE-AGENT-003): Cada runtime dispone de su propia base de datos dedicada (`jg_agente_conversacional` y `jg_agente_devops`) en el PostgreSQL compartido `jg_agente_postgres` (puerto 5433), garantizando aislamiento absoluto de checkpoints, transacciones e hilos de ejecución sin alterar el agnosticismo del Core.  
 - Post-Auditoría Codex (GLOBAL-001 / ISSUE-AGENT-001): Autenticación estricta y anti-replay en router `/executions` con firma canónica HMAC-SHA256 (`METHOD\nPATH\nTIMESTAMP\nSHA256(BODY)`), ventana de 300s y validación de `X-Agent-ID`.  
 - Post-Auditoría 2 (GLOBAL-01 / GitLab jg_agente#52): Erradicación total de secretos pre-aprovisionados hardcodeados en orquestación (`docker-compose.yml`); adopción de interpolación obligatoria `${JG_CONVERSATIONAL_SECRET:?err}` y `${JG_DEVOPS_SECRET:?err}` garantizando sincronización simétrica de firmas HMAC con el Dashboard.  
-- Suite de Pruebas: Suite completa pasando al 100% (360 tests).
+- Post-Auditoría 2 (GLOBAL-02 / GitLab jg_agente#53): Consolidación del flujo criptográfico simétrico para registro dinámico de agentes; jg_agente persiste localmente el `permanent_secret` suministrado por el Dashboard en `.agent_credentials.json` (permisos 0600) y valida las peticiones entrantes contra su secreto único mientras el Dashboard lo preserva cifrado en reposo para computar las cabeceras `X-Signature`.  
+- Suite de Pruebas: Suite completa pasando al 100% (361 tests).
 
 ---
 
