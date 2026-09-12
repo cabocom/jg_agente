@@ -22,6 +22,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
+from app.core.config import settings
 from app.core.llm import get_chat_model
 from app.core.registry import CapabilityRegistry
 from app.models.state import (
@@ -105,24 +106,47 @@ async def evaluate_node(
     errors = state.get("errors") or []
     error_summaries = [f"[{e.code}]: {e.message}" for e in errors]
 
-    # 2. Construir System Prompt evaluador con Capability-Awareness
+    # 2. Construir System Prompt evaluador con Capability-Awareness y control de verbosidad
+    verbosity = getattr(settings, "AGENT_VERBOSITY", "concise").lower().strip()
+    if verbosity == "concise":
+        style_instructions = (
+            "DIRECTIVAS ESTRICTAS DE ESTILO Y CONCISIÓN (OBLIGATORIO):\n"
+            "- Sé DIRECTO, EJECUTIVO y CONCISO (máximo 1 o 2 frases breves).\n"
+            "- PROHIBIDO hacer meta-comentarios sobre la formulación de la pregunta del usuario "
+            "(ej. NO digas 'lo que responde a la primera parte del objetivo del usuario', 'según la solicitud', etc.).\n"
+            "- PROHIBIDO hablar de procesos internos o catálogos abstractos con rodeos "
+            "(ej. en lugar de 'En el catálogo de herramientas disponible no existe ninguna herramienta para...', "
+            "sé directo: 'Todos los contenedores están en ejecución. No está disponible la herramienta para inspeccionar logs.').\n"
+            "- Comunica el estado real y las conclusiones operativas de manera tajante y sin relleno.\n"
+        )
+    elif verbosity == "detailed":
+        style_instructions = (
+            "DIRECTIVAS DE ESTILO:\n"
+            "- Proporciona un desglose detallado y paso a paso de los hallazgos técnicos para el operador.\n"
+        )
+    else:  # balanced
+        style_instructions = (
+            "DIRECTIVAS DE ESTILO:\n"
+            "- Explica con claridad el estado del objetivo sin redundancias innecesarias.\n"
+        )
+
     system_prompt = (
         "Eres el Evaluador Cognitivo y Auditor de Objetivos de un sistema de agentes autónomos.\n"
-        "Tu misión es evaluar si la evidencia recopilada responde de forma completa y satisfactoria "
-        "a la solicitud del usuario, o si se requiere dar otro paso o si existe un bloqueo por falta de herramientas.\n\n"
+        "Tu misión es evaluar si la evidencia recopilada responde a la solicitud del usuario, "
+        "o si se requiere dar otro paso o si existe un bloqueo por falta de herramientas.\n\n"
+        f"{style_instructions}\n"
         "INSTRUCCIONES DE DECISIÓN:\n"
         "1. 'satisfied': Si la información obtenida responde plenamente a la solicitud del usuario.\n"
         "2. 'needs_more_info': Si para cumplir el objetivo del usuario se requiere ejecutar una herramienta ADICIONAL "
         "que SÍ está disponible en el catálogo de herramientas registradas.\n"
-        "3. 'blocked_missing_capability': Si detectas un problema, fallo o anomalía (ej. contenedor reiniciándose, "
-        "servicio degradado) y para investigarlo a fondo se requeriría una herramienta técnica (ej. docker:logs) "
-        "que NO EXISTE en el catálogo de herramientas registradas. En este caso, formula una respuesta honesta y proactiva "
-        "para el operador humano explicando el hallazgo y qué herramienta técnica falta.\n"
+        "3. 'blocked_missing_capability': Si detectas un problema o si el usuario solicitó investigar algo "
+        "(ej. revisar logs de contenedores) pero la herramienta requerida (ej. docker:logs) "
+        "NO EXISTE en el catálogo de herramientas registradas. En este caso, indica brevemente qué hallazgo hay y qué falta.\n"
         "4. 'failed': Si ocurrió un error irrecuperable que imposibilita continuar.\n\n"
         "DEBES RESPONDER EXCLUSIVAMENTE CON UN OBJETO JSON con la siguiente estructura:\n"
         "{\n"
         '  "goal_status": "satisfied" | "needs_more_info" | "blocked_missing_capability" | "failed",\n'
-        '  "explanation": "Explicación detallada y clara en lenguaje natural para el operador humano",\n'
+        '  "explanation": "Respuesta ejecutiva en lenguaje natural para el operador humano sin meta-comentarios",\n'
         '  "missing_capabilities": ["nombre_herramienta_faltante"],\n'
         '  "suggested_next_action": "nombre_herramienta_sugerida_si_aplica_o_null"\n'
         "}"

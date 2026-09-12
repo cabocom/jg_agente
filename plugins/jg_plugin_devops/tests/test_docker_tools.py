@@ -348,3 +348,80 @@ async def test_rollback_node_langgraph_integration() -> None:
     # Comprobar que se emitió registro de auditoría inmutable
     assert "audit_trail" in mutations
     assert any(a.event_type == "rollback_completed" for a in mutations["audit_trail"])
+
+
+def test_docker_logs_args_validation() -> None:
+    """Valida el esquema de argumentos DockerLogsArgs."""
+    from jg_plugin_devops.docker_tools import DockerLogsArgs
+
+    args = DockerLogsArgs(container="web_api", tail=50, timestamps=True)
+    assert args.container == "web_api"
+    assert args.tail == 50
+    assert args.timestamps is True
+
+    # Barra inicial normalizada
+    args_slash = DockerLogsArgs(container="/jg_agente_postgres")
+    assert args_slash.container == "jg_agente_postgres"
+
+    # Valores inválidos
+    with pytest.raises(ValidationError):
+        DockerLogsArgs(container="")
+    with pytest.raises(ValidationError):
+        DockerLogsArgs(container="web; rm -rf /")
+    with pytest.raises(ValidationError):
+        DockerLogsArgs(container="web", tail=0)
+    with pytest.raises(ValidationError):
+        DockerLogsArgs(container="web", tail=2001)
+
+
+def test_docker_logs_tool_contracts() -> None:
+    """Valida los contratos de AgentTool para DockerLogsTool."""
+    from jg_plugin_devops.docker_tools import (
+        DockerLogsArgs,
+        DockerLogsTool,
+        create_docker_logs_tool,
+    )
+
+    tool = create_docker_logs_tool()
+    assert isinstance(tool, AgentTool)
+    assert tool.name == "docker_logs"
+    assert tool.risk_level == RiskLevel.LOW
+    assert tool.reversible is False
+    assert tool.read_only is True
+    assert tool.idempotent is True
+    assert tool.tool_type == ToolType.READ
+    assert tool.args_schema is DockerLogsArgs
+
+    tool_class = DockerLogsTool()
+    assert tool_class.name == "docker_logs"
+    assert tool_class.risk_level == RiskLevel.LOW
+
+
+def test_docker_logs_fn_simulation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Valida la ejecución simulada de docker_logs cuando DOCKER_SIMULATION_MODE está activo."""
+    from jg_plugin_devops.docker_tools import logs_container_fn
+
+    monkeypatch.setenv("DOCKER_SIMULATION_MODE", "true")
+
+    result = logs_container_fn(container="test_app", tail=30, timestamps=False)
+    assert result.success is True
+    assert "test_app" in result.output
+    assert "status healthy" in result.output
+
+
+def test_docker_logs_fn_with_mock_client() -> None:
+    """Valida logs_container_fn con mock de DockerClient."""
+    from jg_plugin_devops.docker_tools import logs_container_fn, set_docker_client
+
+    mock_container = MagicMock()
+    mock_container.name = "jg_dashboard"
+    mock_container.logs.return_value = b"[2026-09-12 10:00:00] INFO Application running smoothly\n[2026-09-12 10:01:00] INFO Healthcheck ok"
+
+    mock_client = MagicMock()
+    mock_client.containers.get.return_value = mock_container
+    set_docker_client(mock_client)
+
+    result = logs_container_fn(container="jg_dashboard", tail=50, timestamps=True)
+    assert result.success is True
+    assert "Application running smoothly" in result.output
+    mock_container.logs.assert_called_once_with(stdout=True, stderr=True, tail=50, timestamps=True)

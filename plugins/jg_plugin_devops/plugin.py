@@ -48,6 +48,7 @@ class DevOpsPlugin(BasePlugin):
         from jg_plugin_devops.docker_tools import (
             create_docker_inspect_container_tool,
             create_docker_list_containers_tool,
+            create_docker_logs_tool,
             create_docker_restart_tool,
         )
 
@@ -55,6 +56,7 @@ class DevOpsPlugin(BasePlugin):
             create_docker_restart_tool(),
             create_docker_list_containers_tool(),
             create_docker_inspect_container_tool(),
+            create_docker_logs_tool(),
         ]
 
     def register_engines(self) -> dict[str, BaseEngine]:

@@ -704,3 +704,186 @@ class DockerInspectContainerTool(AgentTool):
 def create_docker_inspect_container_tool(**overrides: Any) -> AgentTool:
     """Factoría canónica para instanciar DockerInspectContainerTool."""
     return DockerInspectContainerTool(**overrides)
+
+
+class DockerLogsArgs(BaseModel):
+    """Esquema de argumentos para recuperar logs de un contenedor Docker."""
+
+    container: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        description="Nombre o identificador (ID/short_id) del contenedor Docker. Ej: 'jg_agente', 'jg_dashboard'.",
+    )
+    tail: int = Field(
+        default=100,
+        ge=1,
+        le=2000,
+        description="Número de últimas líneas de log a recuperar (por defecto 100, máximo 2000).",
+    )
+    timestamps: bool = Field(
+        default=False,
+        description="Indica si se deben incluir las marcas de tiempo ISO en cada línea de log.",
+    )
+
+    @field_validator("container")
+    @classmethod
+    def validate_safe_container(cls, value: str) -> str:
+        cleaned = value.strip().lstrip("/")
+        if not cleaned:
+            raise ValueError("El identificador del contenedor no puede estar vacío.")
+        if not CONTAINER_NAME_REGEX.match(cleaned):
+            raise ValueError(f"Nombre o ID de contenedor no permitido: '{cleaned}'.")
+        return cleaned
+
+
+def logs_container_fn(
+    args: DockerLogsArgs | None = None,
+    container: str | None = None,
+    tail: int = 100,
+    timestamps: bool = False,
+    **kwargs: Any,
+) -> ToolResult:
+    """Obtiene los logs y trazas de salida de un contenedor Docker específico."""
+    start_time = time.perf_counter()
+    target = ""
+    req_tail = tail
+    req_timestamps = timestamps
+
+    if args is not None:
+        target = args.container
+        req_tail = args.tail
+        req_timestamps = args.timestamps
+    else:
+        target = str(
+            container
+            or kwargs.get("container_name")
+            or kwargs.get("name")
+            or kwargs.get("title")
+            or ""
+        )
+        if "tail" in kwargs:
+            try:
+                req_tail = max(1, min(2000, int(kwargs["tail"])))
+            except (ValueError, TypeError):
+                req_tail = 100
+        if "timestamps" in kwargs:
+            req_timestamps = bool(kwargs["timestamps"])
+
+    target = target.strip().lstrip("/")
+    if not target:
+        duration = round((time.perf_counter() - start_time) * 1000.0, 2)
+        return ToolResult(
+            success=False,
+            output="",
+            error="El nombre o ID del contenedor es obligatorio para docker_logs.",
+            duration_ms=duration,
+        )
+
+    # Modo simulación
+    is_simulated = os.getenv("DOCKER_SIMULATION_MODE", "").lower() in ("true", "1", "yes")
+    if is_simulated:
+        duration = round((time.perf_counter() - start_time) * 1000.0, 2)
+        sim_ts = f"{datetime.now(UTC).isoformat()} " if req_timestamps else ""
+        sim_output = (
+            f"{sim_ts}[INFO] Container '{target}' started successfully.\n"
+            f"{sim_ts}[INFO] Healthcheck: status healthy (interval=30s).\n"
+            f"{sim_ts}[INFO] Listening on standard ports. Ready to receive connections.\n"
+            f"{sim_ts}[INFO] Active workers: 4, memory usage: 142MB / 512MB.\n"
+            f"{sim_ts}[INFO] No uncaught exceptions or error signals detected in last {req_tail} lines."
+        )
+        return ToolResult(
+            success=True,
+            output=sim_output,
+            duration_ms=duration,
+        )
+
+    client = get_docker_client()
+    if client is None:
+        duration = round((time.perf_counter() - start_time) * 1000.0, 2)
+        return ToolResult(
+            success=False,
+            output="",
+            error="No fue posible conectar con el daemon de Docker. Verifique que el socket /var/run/docker.sock esté montado.",
+            duration_ms=duration,
+        )
+
+    try:
+        c = client.containers.get(target)
+        raw_output = c.logs(
+            stdout=True,
+            stderr=True,
+            tail=req_tail,
+            timestamps=req_timestamps,
+        )
+        if isinstance(raw_output, bytes):
+            log_str = raw_output.decode("utf-8", errors="replace")
+        else:
+            log_str = str(raw_output or "")
+
+        # Truncado de seguridad para evitar saturar el contexto del LLM si el log es gigantesco
+        max_log_chars = 30000
+        if len(log_str) > max_log_chars:
+            log_str = (
+                f"[Logs truncados a los últimos {max_log_chars} caracteres...]\n"
+                + log_str[-max_log_chars:]
+            )
+
+        duration = round((time.perf_counter() - start_time) * 1000.0, 2)
+        return ToolResult(
+            success=True,
+            output=log_str
+            if log_str.strip()
+            else "(El contenedor no ha generado líneas de log recientes)",
+            duration_ms=duration,
+        )
+    except NotFound:
+        duration = round((time.perf_counter() - start_time) * 1000.0, 2)
+        return ToolResult(
+            success=False,
+            output="",
+            error=f"No se encontró el contenedor Docker '{target}'.",
+            duration_ms=duration,
+        )
+    except Exception as exc:
+        duration = round((time.perf_counter() - start_time) * 1000.0, 2)
+        return ToolResult(
+            success=False,
+            output="",
+            error=f"Fallo al obtener logs del contenedor '{target}': {exc}",
+            duration_ms=duration,
+        )
+
+
+class DockerLogsTool(AgentTool):
+    """Herramienta para obtener los logs y registros de salida de un contenedor Docker."""
+
+    def __init__(self, **data: Any) -> None:
+        defaults: dict[str, Any] = {
+            "name": "docker_logs",
+            "description": (
+                "Obtiene las últimas líneas de logs/stdout/stderr de un contenedor Docker específico. "
+                "Permite diagnosticar fallos, excepciones, errores de arranque y estado de servicios. "
+                "Parámetros: container (nombre o ID del contenedor), tail (número de líneas, defecto 100), "
+                "timestamps (booleano opcional)."
+            ),
+            "category": "devops",
+            "version": "0.1.0",
+            "args_schema": DockerLogsArgs,
+            "func": logs_container_fn,
+            "risk_level": RiskLevel.LOW,
+            "required_permissions": [],
+            "tool_type": ToolType.READ,
+            "read_only": True,
+            "reversible": False,
+            "idempotent": True,
+            "makes_http_requests": False,
+            "timeout_sec": 20.0,
+        }
+        defaults.update(data)
+        super().__init__(**defaults)
+
+
+def create_docker_logs_tool(**overrides: Any) -> AgentTool:
+    """Factoría canónica para instanciar DockerLogsTool."""
+    return DockerLogsTool(**overrides)

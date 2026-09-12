@@ -201,6 +201,19 @@ async def reason_node(
 
     if not has_system:
         sys_content = system_prompt or settings.DEFAULT_SYSTEM_PROMPT
+        verbosity = getattr(settings, "AGENT_VERBOSITY", "concise").lower().strip()
+        if verbosity == "concise":
+            sys_content += (
+                "\n\nDIRECTIVAS DE RESPUESTA (CONCISO):\n"
+                "- Sé directo, ejecutivo y conciso. Evita introducciones o florituras innecesarias.\n"
+                "- Si respondes directamente sin herramientas, proporciona la información esencial en 1 a 3 frases claras.\n"
+                "- No hagas meta-comentarios sobre tu propio catálogo interno ni sobre las partes de la pregunta del usuario."
+            )
+        elif verbosity == "detailed":
+            sys_content += (
+                "\n\nDIRECTIVAS DE RESPUESTA (DETALLADO):\n"
+                "- Proporciona explicaciones minuciosas y detalladas con análisis exhaustivo."
+            )
         messages_to_send.append(SystemMessage(content=sys_content))
 
     messages_to_send.extend(existing_messages)

@@ -166,6 +166,10 @@ class Settings(BaseSettings):
         ),
         description="Prompt del sistema base para el razonamiento cognitivo",
     )
+    AGENT_VERBOSITY: str = Field(
+        default="concise",
+        description="Nivel de verbosidad de las respuestas: 'concise', 'balanced', 'detailed'.",
+    )
 
     @model_validator(mode="after")
     def _resolve_llm_defaults(self) -> "Settings":
