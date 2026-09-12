@@ -54,7 +54,7 @@
    Un Plugin es la unidad mínima de extensión distribuible. Los plugins declaran herramientas (`AgentTool`), modelos y engines especializados. El Core orquesta; el plugin provee capacidades.
 
 5. **Seguridad por Diseño (Security First):**
-   Toda invocación a herramientas pasa por el `SecurityGuard` del Core, que verifica permisos, niveles de riesgo (`RiskLevel`), idempotencia, directivas SSRF y políticas HITL antes de la ejecución.
+   Toda invocación a herramientas pasa por el `SecurityGuard` del Core, que verifica permisos, niveles de riesgo (`RiskLevel`), sanitización universal recursiva contra inyección de comandos shell y directory traversal (independiente de la clave o profundidad de anidación), directivas SSRF y políticas HITL antes de la ejecución.
 
 ---
 

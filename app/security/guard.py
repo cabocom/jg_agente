@@ -23,6 +23,8 @@ logger = logging.getLogger("jg_agente.security.guard")
 
 # Metacaracteres y secuencias sospechosas de inyección de comandos shell
 SHELL_INJECTION_PATTERN = re.compile(r"[;&$`\n\r><|\\'\"]")
+# Variante para URLs HTTP/HTTPS donde '&' y comillas son válidos en query strings
+URL_SHELL_INJECTION_PATTERN = re.compile(r"[;`$\n\r><|\\]")
 
 # Directorios del sistema de archivos protegidos
 PROTECTED_SYSTEM_PATHS = (
@@ -39,6 +41,22 @@ PROTECTED_SYSTEM_PATHS = (
     "/lib64",
     "/var/run",
 )
+
+
+def _extract_string_arguments(args: Any, parent_key: str = "") -> list[tuple[str, str]]:
+    """Extrae recursivamente todas las tuplas (clave_completa, valor_str) de los argumentos."""
+    result: list[tuple[str, str]] = []
+    if isinstance(args, dict):
+        for k, v in args.items():
+            full_key = f"{parent_key}.{k}" if parent_key else str(k)
+            result.extend(_extract_string_arguments(v, full_key))
+    elif isinstance(args, list | tuple | set):
+        for idx, item in enumerate(args):
+            full_key = f"{parent_key}[{idx}]"
+            result.extend(_extract_string_arguments(item, full_key))
+    elif isinstance(args, str):
+        result.append((parent_key, args))
+    return result
 
 
 class SecurityGuard:
@@ -141,55 +159,51 @@ class SecurityGuard:
                     self.audit_logger.record(eval_res, execution_id=execution_id)
                     return eval_res
 
-        # 2. Comprobación de Inyección de Comandos Shell y Directory Traversal
-        for arg_key, arg_val in tool_args.items():
-            if isinstance(arg_val, str):
-                # Comprobación de Directory Traversal en argumentos de ruta o archivos
-                if ".." in arg_val or arg_val.startswith("/proc") or arg_val.startswith("/etc"):
-                    for sys_path in PROTECTED_SYSTEM_PATHS:
-                        if arg_val == sys_path or arg_val.startswith(sys_path + "/"):
-                            reason = (
-                                f"Violación de seguridad: Acceso denegado a ruta de sistema "
-                                f"protegida '{arg_val}' en argumento '{arg_key}'"
-                            )
-                            logger.error("SecurityGuard DENY en '%s': %s", tool_name, reason)
-                            eval_res = SecurityEvaluationResult(
-                                decision=PolicyDecision.DENY,
-                                operation=tool_name,
-                                target_resource=target_resource,
-                                risk_level=RiskLevel.HIGH,
-                                reason=reason,
-                                required_permissions=effective_perms,
-                                is_reversible=False,
-                                can_cause_data_loss=True,
-                            )
-                            self.audit_logger.record(eval_res, execution_id=execution_id)
-                            return eval_res
+        # 2. Comprobación Universal de Inyección de Comandos Shell y Directory Traversal
+        for arg_key, arg_val in _extract_string_arguments(tool_args):
+            # Comprobación de Directory Traversal en rutas del sistema de archivos
+            if ".." in arg_val or arg_val.startswith("/proc") or arg_val.startswith("/etc"):
+                for sys_path in PROTECTED_SYSTEM_PATHS:
+                    if arg_val == sys_path or arg_val.startswith(sys_path + "/"):
+                        reason = (
+                            f"Violación de seguridad: Acceso denegado a ruta de sistema "
+                            f"protegida '{arg_val}' en argumento '{arg_key}'"
+                        )
+                        logger.error("SecurityGuard DENY en '%s': %s", tool_name, reason)
+                        eval_res = SecurityEvaluationResult(
+                            decision=PolicyDecision.DENY,
+                            operation=tool_name,
+                            target_resource=target_resource,
+                            risk_level=RiskLevel.HIGH,
+                            reason=reason,
+                            required_permissions=effective_perms,
+                            is_reversible=False,
+                            can_cause_data_loss=True,
+                        )
+                        self.audit_logger.record(eval_res, execution_id=execution_id)
+                        return eval_res
 
-                # Comprobación de Inyección de Comandos en identificadores o comandos
-                if (
-                    "command" in arg_key
-                    or "name" in arg_key
-                    or "service" in arg_key
-                    or "host" in arg_key
-                ) and SHELL_INJECTION_PATTERN.search(arg_val):
-                    reason = (
-                        f"Violación de seguridad: Caracteres sospechosos de inyección "
-                        f"shell detectados en argumento '{arg_key}': '{arg_val}'"
-                    )
-                    logger.error("SecurityGuard DENY en '%s': %s", tool_name, reason)
-                    eval_res = SecurityEvaluationResult(
-                        decision=PolicyDecision.DENY,
-                        operation=tool_name,
-                        target_resource=target_resource,
-                        risk_level=RiskLevel.HIGH,
-                        reason=reason,
-                        required_permissions=effective_perms,
-                        is_reversible=False,
-                        can_cause_data_loss=True,
-                    )
-                    self.audit_logger.record(eval_res, execution_id=execution_id)
-                    return eval_res
+            # Comprobación Universal de Inyección de Comandos Shell (independiente del nombre de la clave)
+            is_url = arg_val.startswith(("http://", "https://"))
+            pattern_to_use = URL_SHELL_INJECTION_PATTERN if is_url else SHELL_INJECTION_PATTERN
+            if pattern_to_use.search(arg_val):
+                reason = (
+                    f"Violación de seguridad: Caracteres sospechosos de inyección "
+                    f"shell detectados en argumento '{arg_key}': '{arg_val}'"
+                )
+                logger.error("SecurityGuard DENY en '%s': %s", tool_name, reason)
+                eval_res = SecurityEvaluationResult(
+                    decision=PolicyDecision.DENY,
+                    operation=tool_name,
+                    target_resource=target_resource,
+                    risk_level=RiskLevel.HIGH,
+                    reason=reason,
+                    required_permissions=effective_perms,
+                    is_reversible=False,
+                    can_cause_data_loss=True,
+                )
+                self.audit_logger.record(eval_res, execution_id=execution_id)
+                return eval_res
 
         # 3. Comprobación de Seguridad SSRF para Tools de Red
         if effective_http:

