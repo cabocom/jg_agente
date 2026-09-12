@@ -28,7 +28,6 @@ services:
       dockerfile: Dockerfile
     container_name: jg_agente
     restart: unless-stopped
-    user: "0:0"
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -46,6 +45,7 @@ services:
       POSTGRES_DB: ${JG_AGENTE_POSTGRES_DB:-jg_agente}
       DATABASE_URL: postgresql+asyncpg://${JG_AGENTE_POSTGRES_USER:-postgres}:${JG_AGENTE_POSTGRES_PASSWORD:-postgres}@jg_agente_postgres:5432/${JG_AGENTE_POSTGRES_DB:-jg_agente}
       DASHBOARD_URL: ${DASHBOARD_URL:-http://jg_dashboard:8080}
+      DOCKER_HOST: ${DOCKER_HOST:-tcp://jg_docker_socket_proxy:2375}
       CREDENTIALS_FILE: /app/data/.agent_credentials.json
       AGENT_BOOTSTRAP_TOKEN: ${AGENT_BOOTSTRAP_TOKEN:-}
       ENABLE_HEARTBEAT: ${ENABLE_HEARTBEAT:-true}
@@ -60,9 +60,8 @@ services:
       - jg_agente_data:/app/data
       - ./app:/app/app:ro
       - ./plugins:/app/plugins:ro
-      - /var/run/docker.sock:/var/run/docker.sock
     ports:
-      - "${AGENT_PORT:-8001}:8000"
+      - "127.0.0.1:${AGENT_PORT:-8001}:8000"
     networks:
       - jg_agente_net
       - jg_network

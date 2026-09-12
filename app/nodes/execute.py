@@ -290,6 +290,12 @@ async def execute_node(
             if tool_result.success
             else f"Error ejecutando {tool.name}: {tool_result.error}"
         )
+        max_tool_msg_chars = 8000
+        if len(msg_content) > max_tool_msg_chars:
+            msg_content = (
+                msg_content[:max_tool_msg_chars]
+                + f"\n... [Salida truncada a {max_tool_msg_chars} caracteres para prevenir saturación de contexto]"
+            )
         tool_messages.append(
             ToolMessage(
                 content=msg_content,

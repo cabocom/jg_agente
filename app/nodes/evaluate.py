@@ -100,7 +100,13 @@ async def evaluate_node(
     tool_messages: list[str] = []
     for msg in state.get("messages") or []:
         if isinstance(msg, ToolMessage):
-            tool_messages.append(f"[{msg.name or 'Tool'}]: {msg.content}")
+            raw_c = str(msg.content or "")
+            capped_c = (
+                raw_c[:2500] + "\n... [observación truncada a 2500 chars para evaluación]"
+                if len(raw_c) > 2500
+                else raw_c
+            )
+            tool_messages.append(f"[{msg.name or 'Tool'}]: {capped_c}")
 
     # Fallos o errores reportados en el estado
     errors = state.get("errors") or []

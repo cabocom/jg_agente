@@ -425,3 +425,43 @@ def test_docker_logs_fn_with_mock_client() -> None:
     assert result.success is True
     assert "Application running smoothly" in result.output
     mock_container.logs.assert_called_once_with(stdout=True, stderr=True, tail=50, timestamps=True)
+
+
+def test_get_docker_client_with_docker_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Valida que get_docker_client utilice DOCKER_HOST cuando está configurado en el entorno."""
+    import docker
+
+    from jg_plugin_devops.docker_tools import get_docker_client, set_docker_client
+
+    set_docker_client(None)
+    monkeypatch.setenv("DOCKER_HOST", "tcp://jg_docker_socket_proxy:2375")
+
+    mock_docker_client = MagicMock()
+    mock_constructor = MagicMock(return_value=mock_docker_client)
+    monkeypatch.setattr(docker, "DockerClient", mock_constructor)
+
+    client = get_docker_client()
+    assert client is mock_docker_client
+    mock_constructor.assert_called_once_with(
+        base_url="tcp://jg_docker_socket_proxy:2375", timeout=5
+    )
+
+
+def test_restart_protected_infrastructure_container_rejected() -> None:
+    """Valida que los contenedores de infraestructura de seguridad no puedan ser manipulados ni validados."""
+    from jg_plugin_devops.docker_tools import (
+        PROTECTED_INFRASTRUCTURE_CONTAINERS,
+        DockerRestartArgs,
+        restart_container_fn,
+    )
+
+    for protected in PROTECTED_INFRASTRUCTURE_CONTAINERS:
+        # Rechazo a nivel de validación de esquema Pydantic
+        with pytest.raises(ValidationError, match="componente de seguridad protegido"):
+            DockerRestartArgs(container=protected)
+
+        # Rechazo a nivel de función de ejecución
+        result = restart_container_fn(container=protected)
+        assert result.success is False
+        assert result.error is not None
+        assert "componente de seguridad protegido" in result.error

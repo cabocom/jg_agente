@@ -23,6 +23,14 @@ logger = logging.getLogger("jg_plugin_devops.docker_tools")
 # o IDs hexadecimales (12 a 64 caracteres). Bloquea inyecciones de comandos y metacaracteres.
 CONTAINER_NAME_REGEX = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$")
 
+# Contenedores de infraestructura de seguridad protegidos contra manipulación por el agente
+PROTECTED_INFRASTRUCTURE_CONTAINERS: frozenset[str] = frozenset(
+    {
+        "jg_docker_socket_proxy",
+        "docker_socket_proxy",
+    }
+)
+
 docker: Any
 try:
     import docker
@@ -43,15 +51,22 @@ def set_docker_client(client: Any) -> None:
 
 
 def get_docker_client() -> Any:
-    """Obtiene el cliente de Docker activo o None si no está disponible."""
+    """Obtiene el cliente de Docker activo o None si no está disponible.
+
+    Prioriza la variable DOCKER_HOST cuando está configurada en el entorno
+    (por ejemplo, proxy seguro tecnativa/docker-socket-proxy) y recurre a from_env().
+    """
     global _custom_docker_client
     if _custom_docker_client is not None:
         return _custom_docker_client
     if docker is not None:
         try:
+            docker_host = os.getenv("DOCKER_HOST")
+            if docker_host:
+                return docker.DockerClient(base_url=docker_host, timeout=5)
             return docker.from_env(timeout=5)
         except Exception as exc:
-            logger.debug("Daemon de Docker no disponible vía socket local: %s", exc)
+            logger.debug("Daemon de Docker no disponible vía socket o proxy: %s", exc)
             return None
     return None
 
@@ -89,6 +104,12 @@ class DockerRestartArgs(BaseModel):
                 "Solo se permiten caracteres alfanuméricos, guiones, puntos y guiones bajos."
             )
 
+        # Protección de componentes de seguridad de infraestructura
+        if cleaned.lower() in PROTECTED_INFRASTRUCTURE_CONTAINERS:
+            raise ValueError(
+                f"El contenedor '{cleaned}' es un componente de seguridad protegido de la infraestructura y no puede ser manipulado."
+            )
+
         return cleaned
 
 
@@ -123,6 +144,19 @@ def restart_container_fn(
 
     target_name = args.container
     target_timeout = args.timeout
+
+    # Protección de componentes de seguridad de infraestructura
+    if target_name.lower() in PROTECTED_INFRASTRUCTURE_CONTAINERS:
+        duration = round((time.perf_counter() - start_time) * 1000.0, 2)
+        return ToolResult(
+            success=False,
+            output="",
+            error=(
+                f"El contenedor '{target_name}' es un componente de seguridad protegido "
+                "de la infraestructura y no puede ser manipulado."
+            ),
+            duration_ms=duration,
+        )
 
     # 1. Modo simulación si está configurado explícitamente en el entorno
     is_simulated_env = os.getenv("DOCKER_SIMULATION_MODE", "").lower() in ("true", "1", "yes")
@@ -420,6 +454,26 @@ class DockerListContainersArgs(BaseModel):
     )
 
 
+def _extract_image_identifier(c: Any) -> str:
+    """Extrae de forma segura el tag o identificador de imagen sin romper ante proxies restringidos."""
+    attrs = getattr(c, "attrs", {})
+    img_from_attrs = ""
+    if isinstance(attrs, dict):
+        img_from_attrs = attrs.get("Config", {}).get("Image") or attrs.get("Image") or ""
+    try:
+        if hasattr(c, "image") and c.image is not None:
+            tags = getattr(c.image, "tags", None)
+            if tags and len(tags) > 0:
+                return str(tags[0])
+            short_id = getattr(c.image, "short_id", getattr(c.image, "id", None))
+            if short_id:
+                return str(short_id)
+    except Exception:
+        pass
+
+    return str(img_from_attrs or "unknown")
+
+
 def list_containers_fn(
     args: DockerListContainersArgs | None = None,
     all: bool = True,
@@ -478,11 +532,7 @@ def list_containers_fn(
         containers = client.containers.list(all=show_all)
         res_list = []
         for c in containers:
-            img_tag = ""
-            if hasattr(c, "image") and getattr(c.image, "tags", None):
-                img_tag = c.image.tags[0]
-            elif hasattr(c, "image"):
-                img_tag = str(getattr(c.image, "short_id", getattr(c.image, "id", "")))
+            img_tag = _extract_image_identifier(c)
             res_list.append(
                 {
                     "id": str(getattr(c, "short_id", getattr(c, "id", ""))[:12]),
@@ -626,13 +676,8 @@ def inspect_container_fn(
         c = client.containers.get(target)
         attrs = getattr(c, "attrs", {})
         state_info = attrs.get("State", {})
-        config_info = attrs.get("Config", {})
         net_info = attrs.get("NetworkSettings", {}).get("Networks", {})
-        img_name = ""
-        if hasattr(c, "image") and getattr(c.image, "tags", None):
-            img_name = c.image.tags[0]
-        else:
-            img_name = str(config_info.get("Image", ""))
+        img_name = _extract_image_identifier(c)
 
         details = {
             "id": str(getattr(c, "short_id", getattr(c, "id", ""))[:12]),
@@ -716,10 +761,10 @@ class DockerLogsArgs(BaseModel):
         description="Nombre o identificador (ID/short_id) del contenedor Docker. Ej: 'jg_agente', 'jg_dashboard'.",
     )
     tail: int = Field(
-        default=100,
+        default=50,
         ge=1,
-        le=2000,
-        description="Número de últimas líneas de log a recuperar (por defecto 100, máximo 2000).",
+        le=100,
+        description="Número de últimas líneas de log a recuperar (por defecto 50, máximo 100).",
     )
     timestamps: bool = Field(
         default=False,
@@ -740,7 +785,7 @@ class DockerLogsArgs(BaseModel):
 def logs_container_fn(
     args: DockerLogsArgs | None = None,
     container: str | None = None,
-    tail: int = 100,
+    tail: int = 50,
     timestamps: bool = False,
     **kwargs: Any,
 ) -> ToolResult:
@@ -752,7 +797,7 @@ def logs_container_fn(
 
     if args is not None:
         target = args.container
-        req_tail = args.tail
+        req_tail = min(100, max(1, args.tail))
         req_timestamps = args.timestamps
     else:
         target = str(
@@ -764,9 +809,9 @@ def logs_container_fn(
         )
         if "tail" in kwargs:
             try:
-                req_tail = max(1, min(2000, int(kwargs["tail"])))
+                req_tail = max(1, min(100, int(kwargs["tail"])))
             except (ValueError, TypeError):
-                req_tail = 100
+                req_tail = 50
         if "timestamps" in kwargs:
             req_timestamps = bool(kwargs["timestamps"])
 
@@ -821,11 +866,11 @@ def logs_container_fn(
         else:
             log_str = str(raw_output or "")
 
-        # Truncado de seguridad para evitar saturar el contexto del LLM si el log es gigantesco
-        max_log_chars = 30000
+        # Truncado de seguridad para evitar saturar el contexto del LLM (ej. error 413 Payload Too Large en Groq)
+        max_log_chars = 6000
         if len(log_str) > max_log_chars:
             log_str = (
-                f"[Logs truncados a los últimos {max_log_chars} caracteres...]\n"
+                f"[Logs truncados a los últimos {max_log_chars} caracteres para no saturar el LLM...]\n"
                 + log_str[-max_log_chars:]
             )
 
