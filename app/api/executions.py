@@ -36,6 +36,11 @@ from app.security.guard import SecurityGuard
 
 logger = logging.getLogger("jg_agente.api.executions")
 
+GENERIC_EXECUTION_ERROR_MSG = (
+    "Error interno durante la ejecución del agente (ID de incidencia: {execution_id}). "
+    "Por favor, consulte los registros del sistema."
+)
+
 router = APIRouter(
     prefix="/executions",
     tags=["Executions"],
@@ -449,9 +454,9 @@ async def execute_graph_pipeline(
             execution_id=input_data.execution_id,
             thread_id=thread_id,
             status=ExecutionStatus.FAILED,
-            response=f"Error durante la ejecución del agente: {exc}",
+            response=GENERIC_EXECUTION_ERROR_MSG.format(execution_id=input_data.execution_id),
             execution_time_ms=elapsed_ms,
-            error=str(exc),
+            error=f"InternalExecutionError: Incidencia registrada con ID {input_data.execution_id}",
             requires_approval=False,
             metadata=input_data.metadata,
             completed_at=datetime.now(UTC),

@@ -58,6 +58,13 @@ def create_auth_headers(
 @pytest.fixture(autouse=True)
 def setup_agent_auth_context() -> Generator[None, None, None]:
     """Configura credenciales de prueba conocidas en settings y app.state."""
+    from app.api.executions import get_agent_graph
+    from app.core.checkpointer import get_memory_checkpointer
+    from app.core.graph import GraphBuilder
+    from app.core.llm import MockChatModel
+    from app.core.registry import CapabilityRegistry
+    from app.security.guard import SecurityGuard
+
     orig_agent_id = settings.AGENT_ID
     orig_secret = settings.PERMANENT_AGENT_SECRET
 
@@ -71,8 +78,17 @@ def setup_agent_auth_context() -> Generator[None, None, None]:
         verified=True,
     )
 
+    mock_graph = GraphBuilder(
+        registry=CapabilityRegistry(),
+        llm=MockChatModel(response_content="Auth test response"),
+        security_guard=SecurityGuard(),
+    ).build(checkpointer=get_memory_checkpointer())
+
+    app.dependency_overrides[get_agent_graph] = lambda: mock_graph
+
     yield
 
+    app.dependency_overrides.pop(get_agent_graph, None)
     settings.AGENT_ID = orig_agent_id
     settings.PERMANENT_AGENT_SECRET = orig_secret
 

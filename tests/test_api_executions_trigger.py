@@ -196,3 +196,47 @@ def test_trigger_execution_invalid_payload(client: TestClient) -> None:
 
     response = client.post("/executions/trigger", json=payload)
     assert response.status_code == 422
+
+
+def test_trigger_execution_uncaught_error_sanitized_response(
+    client: TestClient,
+) -> None:
+    """Valida que excepciones no controladas durante la ejecución no filtren rutas ni datos sensibles [AGENTE-SEC-08]."""
+    from unittest.mock import AsyncMock
+
+    mock_graph = AsyncMock()
+    mock_graph.ainvoke.side_effect = RuntimeError(
+        "Database connection failed to postgresql://admin:secretPass@10.0.1.5:5432/core_db "
+        "at /opt/app/core/secret_vault.py line 42"
+    )
+
+    app.dependency_overrides[get_agent_graph] = lambda: mock_graph
+
+    payload = {
+        "execution_id": "exec-uncaught-01",
+        "thread_id": "thread-uncaught-01",
+        "prompt": "Test uncaught error",
+    }
+
+    try:
+        response = client.post("/executions/trigger", json=payload)
+        assert response.status_code == 200
+
+        data = response.json()
+        assert data["execution_id"] == "exec-uncaught-01"
+        assert data["status"] == ExecutionStatus.FAILED.value
+
+        # Verificar que NO se filtre información interna confidencial (CWE-209)
+        assert "secretPass" not in data["response"]
+        assert "10.0.1.5" not in data["response"]
+        assert "/opt/app/core/secret_vault.py" not in data["response"]
+        assert "secretPass" not in str(data.get("error", ""))
+        assert "10.0.1.5" not in str(data.get("error", ""))
+
+        # Verificar mensaje genérico seguro con ID de incidencia
+        assert "ID de incidencia: exec-uncaught-01" in data["response"]
+        assert (
+            "InternalExecutionError: Incidencia registrada con ID exec-uncaught-01" in data["error"]
+        )
+    finally:
+        app.dependency_overrides.pop(get_agent_graph, None)
