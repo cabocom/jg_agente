@@ -834,3 +834,233 @@ class TestExecuteNode:
 
         # 5. Vacío por defecto
         assert resolve_caller_permissions({}) == []
+
+    @pytest.mark.asyncio
+    async def test_execute_node_continues_when_step_allows_failure(
+        self, test_registry: CapabilityRegistry
+    ) -> None:
+        """Verifica que si un paso declara allow_failure=True, un fallo no aborta los pasos subsiguientes (AGENTE-LOGIC-04)."""
+        test_registry.register_tool(
+            AgentTool(
+                name="diag_fail_tool",
+                description="Herramienta de diagnóstico que falla",
+                category="test",
+                func=lambda **kwargs: ToolResult(
+                    success=False, error="Diagnóstico opcional fallido"
+                ),
+                risk_level=RiskLevel.LOW,
+            )
+        )
+        test_registry.register_tool(
+            AgentTool(
+                name="primary_tool",
+                description="Herramienta principal",
+                category="test",
+                func=lambda **kwargs: ToolResult(success=True, output="primary_ok"),
+                risk_level=RiskLevel.LOW,
+            )
+        )
+        test_registry.register_tool(
+            AgentTool(
+                name="notify_tool",
+                description="Herramienta de notificación",
+                category="test",
+                func=lambda **kwargs: ToolResult(success=True, output="notify_ok"),
+                risk_level=RiskLevel.LOW,
+            )
+        )
+
+        plan = ExecutionPlan(
+            plan_id="plan-allow-fail-01",
+            goal="Ejecución resiliente con comprobación no crítica",
+            steps=[
+                PlanStep(
+                    step_id="step-1-diag",
+                    tool_name="diag_fail_tool",
+                    allow_failure=True,
+                ),
+                PlanStep(
+                    step_id="step-2-primary",
+                    tool_name="primary_tool",
+                    allow_failure=False,
+                ),
+                PlanStep(
+                    step_id="step-3-notify",
+                    tool_name="notify_tool",
+                    allow_failure=False,
+                ),
+            ],
+        )
+
+        state: AgentState = {"plan": plan}
+        result = await execute_node(state, test_registry)
+        records = result["execution_records"]
+
+        # Los tres pasos deben haberse ejecutado sin abortar la cadena
+        assert len(records) == 3
+        assert records[0].step_id == "step-1-diag"
+        assert records[0].status == StepStatus.FAILED
+        assert "Diagnóstico opcional fallido" in (records[0].error or "")
+
+        assert records[1].step_id == "step-2-primary"
+        assert records[1].status == StepStatus.COMPLETED
+        assert records[1].output == "primary_ok"
+
+        assert records[2].step_id == "step-3-notify"
+        assert records[2].status == StepStatus.COMPLETED
+        assert records[2].output == "notify_ok"
+
+        errors = result["errors"]
+        assert len(errors) == 1
+        assert errors[0].fatal is False
+
+        audit = result["audit_trail"][0]
+        assert audit.details["success_count"] == 2
+        assert audit.details["failed_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_execute_node_aborts_when_step_disallows_failure(
+        self, test_registry: CapabilityRegistry
+    ) -> None:
+        """Verifica que si allow_failure=False (comportamiento por defecto), el fallo aborta los pasos subsiguientes."""
+        test_registry.register_tool(
+            AgentTool(
+                name="critical_fail_tool",
+                description="Herramienta crítica",
+                category="test",
+                func=lambda **kwargs: ToolResult(
+                    success=False, error="Fallo crítico de base de datos"
+                ),
+                risk_level=RiskLevel.LOW,
+            )
+        )
+        test_registry.register_tool(
+            AgentTool(
+                name="should_not_run_tool",
+                description="Herramienta que no debe correr",
+                category="test",
+                func=lambda **kwargs: ToolResult(success=True, output="never"),
+                risk_level=RiskLevel.LOW,
+            )
+        )
+
+        plan = ExecutionPlan(
+            plan_id="plan-strict-fail-01",
+            goal="Fallo crítico detiene la cadena",
+            steps=[
+                PlanStep(
+                    step_id="step-crit",
+                    tool_name="critical_fail_tool",
+                    allow_failure=False,
+                ),
+                PlanStep(
+                    step_id="step-after",
+                    tool_name="should_not_run_tool",
+                    allow_failure=False,
+                ),
+            ],
+        )
+
+        state: AgentState = {"plan": plan}
+        result = await execute_node(state, test_registry)
+        records = result["execution_records"]
+
+        assert len(records) == 1
+        assert records[0].step_id == "step-crit"
+        assert records[0].status == StepStatus.FAILED
+
+        errors = result["errors"]
+        assert len(errors) == 1
+        assert errors[0].fatal is True
+
+    @pytest.mark.asyncio
+    async def test_execute_node_tool_level_allow_failure(
+        self, test_registry: CapabilityRegistry
+    ) -> None:
+        """Verifica que si la herramienta tiene configurado allow_failure=True, se respeta aunque el PlanStep no lo explicite."""
+        test_registry.register_tool(
+            AgentTool(
+                name="tolerant_tool",
+                description="Herramienta tolerante a fallos",
+                category="test",
+                func=lambda **kwargs: ToolResult(success=False, error="Error no crítico tolerado"),
+                risk_level=RiskLevel.LOW,
+                allow_failure=True,
+            )
+        )
+        test_registry.register_tool(
+            AgentTool(
+                name="next_tool",
+                description="Siguiente paso",
+                category="test",
+                func=lambda **kwargs: ToolResult(success=True, output="next_ok"),
+                risk_level=RiskLevel.LOW,
+            )
+        )
+
+        plan = ExecutionPlan(
+            plan_id="plan-tool-tolerant-01",
+            goal="Herramienta con tolerancia a fallos",
+            steps=[
+                PlanStep(
+                    step_id="step-tol",
+                    tool_name="tolerant_tool",
+                    # allow_failure no se especifica explícitamente (default False)
+                ),
+                PlanStep(
+                    step_id="step-next",
+                    tool_name="next_tool",
+                ),
+            ],
+        )
+
+        state: AgentState = {"plan": plan}
+        result = await execute_node(state, test_registry)
+        records = result["execution_records"]
+
+        assert len(records) == 2
+        assert records[0].status == StepStatus.FAILED
+        assert records[1].status == StepStatus.COMPLETED
+        assert records[1].output == "next_ok"
+
+    @pytest.mark.asyncio
+    async def test_execute_node_tool_not_found_with_allow_failure(
+        self, test_registry: CapabilityRegistry
+    ) -> None:
+        """Verifica que una herramienta no encontrada con allow_failure=True no aborta el plan."""
+        test_registry.register_tool(
+            AgentTool(
+                name="surviving_tool",
+                description="Herramienta sobreviviente",
+                category="test",
+                func=lambda **kwargs: ToolResult(success=True, output="survived"),
+                risk_level=RiskLevel.LOW,
+            )
+        )
+
+        plan = ExecutionPlan(
+            plan_id="plan-missing-tolerant-01",
+            goal="Herramienta fantasma con allow_failure",
+            steps=[
+                PlanStep(
+                    step_id="step-ghost",
+                    tool_name="unregistered_tool",
+                    allow_failure=True,
+                ),
+                PlanStep(
+                    step_id="step-survivor",
+                    tool_name="surviving_tool",
+                    allow_failure=False,
+                ),
+            ],
+        )
+
+        state: AgentState = {"plan": plan}
+        result = await execute_node(state, test_registry)
+        records = result["execution_records"]
+
+        assert len(records) == 2
+        assert records[0].status == StepStatus.FAILED
+        assert "no existe" in (records[0].error or "")
+        assert records[1].status == StepStatus.COMPLETED
+        assert records[1].output == "survived"

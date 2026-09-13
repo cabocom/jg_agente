@@ -155,11 +155,12 @@ async def execute_node(
         if not tool:
             err_msg = f"La herramienta '{step.tool_name}' no existe en el CapabilityRegistry."
             logger.error("[execute_node] Error: %s", err_msg)
+            allow_fail = bool(getattr(step, "allow_failure", False))
             err = ExecutionError(
                 code="TOOL_NOT_FOUND",
                 message=err_msg,
                 component="execute",
-                fatal=True,
+                fatal=not allow_fail,
             )
             errors.append(err)
             step.status = StepStatus.FAILED
@@ -187,8 +188,10 @@ async def execute_node(
                     timestamp=datetime.now(UTC),
                 )
             )
-            # Contención secuencial: abortar pasos subsiguientes
-            break
+            if not allow_fail:
+                # Contención secuencial: abortar pasos subsiguientes
+                break
+            continue
 
         step.status = StepStatus.RUNNING
         logger.info(
@@ -355,16 +358,30 @@ async def execute_node(
                 err_desc,
             )
             is_timeout = bool(tool_result.metadata.get("timed_out"))
+            allow_fail = bool(
+                getattr(step, "allow_failure", False)
+                or (tool and getattr(tool, "allow_failure", False))
+            )
             errors.append(
                 ExecutionError(
                     code="TOOL_TIMEOUT" if is_timeout else "TOOL_EXECUTION_FAILED",
                     message=err_desc,
                     component="execute",
-                    fatal=False,
+                    fatal=not allow_fail,
                 )
             )
-            # Contención secuencial: abortar pasos posteriores tras el primer fallo
-            break
+            # Contención secuencial: abortar pasos posteriores tras el primer fallo no permitido
+            if not allow_fail:
+                logger.info(
+                    "[execute_node] Paso '%s' es crítico (allow_failure=False). Abortando pasos restantes del plan para evaluación reflexiva.",
+                    step.step_id,
+                )
+                break
+            else:
+                logger.info(
+                    "[execute_node] Paso '%s' falló pero declara allow_failure=True. Continuando con los pasos posteriores.",
+                    step.step_id,
+                )
 
     # 5. Consolidación de mutaciones de estado
     success_count = sum(1 for r in records if r.status == StepStatus.COMPLETED)

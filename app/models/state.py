@@ -127,6 +127,10 @@ class PlanStep(BaseModel):
     description: str = Field(default="", description="Descripción legible del paso")
     risk_level: RiskLevel = Field(default=RiskLevel.LOW, description="Nivel de riesgo del paso")
     reversible: bool = Field(default=False, description="Indica si el paso es compensable")
+    allow_failure: bool = Field(
+        default=False,
+        description="Indica si un fallo en este paso es no fatal y permite continuar con la ejecución del resto del plan",
+    )
     dependencies: list[str] = Field(
         default_factory=list,
         description="Lista de step_ids previos requeridos antes de este paso",

@@ -149,6 +149,11 @@ async def plan_node(
                 tool_def = registry.get_tool(tc_name) if registry else None
                 t_risk = tool_def.risk_level if tool_def else RiskLevel.LOW
                 t_rev = tool_def.reversible if tool_def else False
+                t_allow_failure = (
+                    getattr(tool_def, "allow_failure", False)
+                    if tool_def
+                    else bool(tc.get("allow_failure", False))
+                )
                 steps.append(
                     PlanStep(
                         step_id=f"step-{idx}",
@@ -157,6 +162,7 @@ async def plan_node(
                         description=f"Ejecutar {tc_name}",
                         risk_level=t_risk,
                         reversible=t_rev,
+                        allow_failure=t_allow_failure,
                         dependencies=[f"step-{idx - 1}"] if idx > 1 else [],
                     )
                 )

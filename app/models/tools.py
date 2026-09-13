@@ -112,6 +112,10 @@ class AgentTool(BaseModel):
         default=False,
         description="Indica si realiza peticiones de red salientes (sujeto a SSRF protection)",
     )
+    allow_failure: bool = Field(
+        default=False,
+        description="Indica si fallos operacionales de la herramienta se consideran no fatales por defecto",
+    )
 
     timeout_sec: float = Field(
         default=30.0,
