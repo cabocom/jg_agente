@@ -261,12 +261,12 @@ async def test_plan_node_converts_list_of_steps() -> None:
 
 
 @pytest.mark.asyncio
-async def test_plan_node_without_planner_fallback() -> None:
-    """Verifica fallback seguro generando un plan predeterminado a partir de las herramientas registradas."""
+async def test_plan_node_without_planner_fails_safe_without_arbitrary_tools() -> None:
+    """Verifica contención segura: ante ausencia de plan estructurado, NO se ejecuta una herramienta arbitraria (AGENTE-LOGIC-02)."""
     registry = CapabilityRegistry()
     tool = AgentTool(
         name="fallback_tool",
-        description="Herramienta de reserva",
+        description="Herramienta de reserva no solicitada",
         category="core",
         func=dummy_tool_func,
         risk_level=RiskLevel.MEDIUM,
@@ -277,21 +277,23 @@ async def test_plan_node_without_planner_fallback() -> None:
         "request": AgentInput(
             execution_id="exec-plan-05",
             thread_id="thread-plan-05",
-            prompt="Ejecución de reserva",
+            prompt="Ejecución sin plan",
         ),
-        "intent": IntentModel(goal="Objetivo por defecto", action_type="act"),
+        "intent": IntentModel(goal="Objetivo sin plan", action_type="plan"),
         "messages": [],
     }
 
     result = await plan_node(state, registry=registry)
 
-    assert result["status"] == AgentExecutionStatus.PLANNING
+    # Debe fallar de forma segura sin pasos arbitrarios
+    assert result["status"] == AgentExecutionStatus.FAILED
     plan = result["plan"]
     assert isinstance(plan, ExecutionPlan)
-    assert plan.goal == "Objetivo por defecto"
-    assert len(plan.steps) == 1
-    assert plan.steps[0].tool_name == "fallback_tool"
-    assert plan.estimated_risk == RiskLevel.MEDIUM
+    assert plan.goal == "Objetivo sin plan"
+    assert len(plan.steps) == 0
+    assert "errors" in result
+    assert any(e.code == "PLANNING_FAILED" and e.fatal is True for e in result["errors"])
+    assert result["cognitive_steps"][0].status == "failed"
 
 
 @pytest.mark.asyncio
@@ -332,7 +334,7 @@ async def test_plan_node_computes_estimated_risk() -> None:
 
 @pytest.mark.asyncio
 async def test_plan_node_captures_engine_exception() -> None:
-    """Verifica que excepciones del motor se contengan en ExecutionError sin abortar la ejecución."""
+    """Verifica que excepciones del motor se contengan en ExecutionError y marquen fallo sin herramientas aleatorias."""
     engine = FailingPlanner()
 
     state: AgentState = {
@@ -347,18 +349,16 @@ async def test_plan_node_captures_engine_exception() -> None:
 
     result = await plan_node(state, engine=engine)
 
-    assert result["status"] == AgentExecutionStatus.PLANNING
+    assert result["status"] == AgentExecutionStatus.FAILED
     assert "errors" in result
-    assert len(result["errors"]) == 1
-    err = result["errors"][0]
-    assert err.code == "PLANNER_EXECUTION_ERROR"
-    assert err.component == "plan"
-    assert err.fatal is False
-    assert "Fallo de conexión" in err.message
+    assert len(result["errors"]) >= 1
+    err_codes = [e.code for e in result["errors"]]
+    assert "PLANNER_EXECUTION_ERROR" in err_codes
+    assert "PLANNING_FAILED" in err_codes
 
     assert result["audit_trail"][0].details["has_errors"] is True
-    # Se genera un plan fallback para continuar el ciclo de forma controlada
-    assert isinstance(result["plan"], ExecutionPlan)
+    assert result["audit_trail"][0].details["is_failed"] is True
+    assert len(result["plan"].steps) == 0
 
 
 # ==========================================================
@@ -420,3 +420,54 @@ async def test_plan_node_graph_integration() -> None:
     assert len(result["execution_records"]) == 2
     assert result.get("output") is not None
     assert result["output"].status.value in ("completed", "resolved")
+
+
+@pytest.mark.asyncio
+async def test_plan_node_failure_routes_to_conclude_without_executing_tools() -> None:
+    """Verifica en grafo LangGraph compilado que una falla de planificación deriva a conclude sin ejecutar herramientas."""
+    registry = CapabilityRegistry()
+    registry.register_engine(FailingPlanner())
+
+    executed_tools: list[str] = []
+
+    def spy_tool_func(**kwargs: Any) -> ToolResult:
+        executed_tools.append("spy_tool")
+        return ToolResult(success=True, output="executed")
+
+    tool = AgentTool(
+        name="arbitrary_tool",
+        description="Herramienta en el registro",
+        category="devops",
+        func=spy_tool_func,
+        risk_level=RiskLevel.LOW,
+    )
+    registry.register_tool(tool)
+
+    builder = GraphBuilder(registry)
+    graph = builder.build()
+    config: RunnableConfig = {"configurable": {"thread_id": "thread-plan-fail-01"}}
+
+    state: AgentState = {
+        "request": AgentInput(
+            execution_id="exec-plan-fail-01",
+            thread_id="thread-plan-fail-01",
+            prompt="Ejecutar con planificador fallido",
+        ),
+        "intent": IntentModel(goal="Objetivo con fallo de planner", action_type="plan"),
+        "messages": [HumanMessage(content="Ejecutar con planificador fallido")],
+        "status": AgentExecutionStatus.IDLE,
+    }
+
+    result = await graph.ainvoke(state, config=config)
+
+    assert result["status"] == AgentExecutionStatus.FAILED
+    assert result["is_resolved"] is False
+    # Ninguna herramienta debe haber sido ejecutada
+    assert len(executed_tools) == 0
+    assert len(result.get("execution_records") or []) == 0
+    # La salida final debe indicar fallo
+    assert result.get("output") is not None
+    assert result["output"].status.value in ("failed", "cancelled")
+    assert (
+        "error" in result["output"].response.lower() or "falló" in result["output"].response.lower()
+    )

@@ -192,8 +192,8 @@ El nodo `plan` (`app/nodes/plan.py`) estructura las intenciones operativas del a
 2. **Invocación Polimórfica:** Localiza métodos de formulación (`create_plan`, `plan`, `build_plan`, `generate_plan`), aceptando ejecuciones síncronas o asíncronas con conversión robusta desde `ExecutionPlan`, diccionarios o listas de `PlanStep`.
 3. **Dependencias Explícitas entre Pasos:** Soporta el campo `dependencies` en `PlanStep`, permitiendo a los planificadores modelar secuencias causales estrictas entre herramientas.
 4. **Cálculo Consolidado de Riesgo:** Evalúa los pasos del plan y eleva `estimated_risk` al nivel más restrictivo entre ellos (`LOW < MEDIUM < HIGH < CRITICAL`), habilitando el enrutamiento adecuado hacia `risk_assess` y aprobación HITL.
-5. **Tolerancia a Fallos y Fallback:** Si no se dispone de planificador o si éste arroja una excepción, emite un `ExecutionError` no fatal y genera un plan fallback basado en el catálogo de herramientas.
-6. **Auditoría Estructurada:** Emite el evento inmutable `planning_completed` en `state["audit_trail"]` con el recuento de pasos, duración (`duration_ms`) y riesgo estimado.
+5. **Contención Segura ante Fallos (AGENTE-LOGIC-02):** Si el motor de planificación falla o no genera un plan válido y no existen `tool_calls` previas, el agente **no ejecuta ninguna herramienta por defecto**. Registra un `ExecutionError` fatal (`code="PLANNING_FAILED"`), marca el estado como `FAILED`, y el enrutador condicional `route_after_plan` desvía inmediatamente el flujo hacia `conclude` para informar al operador sin ejecutar acciones imprevistas sobre la infraestructura.
+6. **Auditoría Estructurada:** Emite el evento inmutable `planning_completed` en `state["audit_trail"]` con el recuento de pasos, duración (`duration_ms`), nivel de riesgo estimado e indicador de fallo.
 
 ---
 

@@ -135,6 +135,19 @@ async def conclude_node(
             f"de {len(rollback_recs)} paso(s) reversible(s)."
         )
 
+    # B2. Si la ejecución falló, priorizar reporte explícito de error para no enmascarar fallos con AIMessage previo
+    if not response_text and is_failed:
+        failed_steps = [r for r in records if getattr(r, "status", None) == StepStatus.FAILED]
+        if failed_steps:
+            err_msg = (
+                failed_steps[0].error
+                if failed_steps[0].error
+                else "Fallo en verificación u operación"
+            )
+            response_text = f"La ejecución falló durante el paso '{failed_steps[0].step_id}' ({failed_steps[0].tool_name}): {err_msg}"
+        elif errors:
+            response_text = f"La ejecución falló con error: {errors[-1].message}"
+
     # C. Prioridad cognitiva: Evaluación semántica (EvaluationRecord)
     eval_records = list(state.get("evaluation_records") or [])
     if not response_text and eval_records:

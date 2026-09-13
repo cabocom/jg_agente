@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from app.core.registry import CapabilityRegistry
 from app.models.state import (
+    AgentExecutionStatus,
     AgentState,
     ApprovalStatus,
     GoalStatus,
@@ -194,7 +195,19 @@ def route_after_reason(
 
 
 def route_after_plan(state: AgentState, has_risk_assessment: bool) -> str:
-    """Enruta desde 'plan' hacia evaluación de riesgo si existe, o directo a ejecución."""
+    """Enruta desde 'plan' hacia evaluación de riesgo si existe, ejecución o conclude si falló."""
+    plan = state.get("plan")
+    has_steps = bool(plan and getattr(plan, "steps", None))
+    has_fatal_error = any(getattr(e, "fatal", False) for e in (state.get("errors") or []))
+    is_failed = (
+        (not has_steps)
+        or has_fatal_error
+        or state.get("status") in (AgentExecutionStatus.FAILED, AgentExecutionStatus.FAILED.value)
+    )
+
+    if is_failed:
+        return "conclude"
+
     if has_risk_assessment:
         return "risk_assess"
     return "execute"
@@ -291,8 +304,8 @@ def route_after_evaluation(state: AgentState, has_rollback: bool = False) -> str
         return "rollback"
 
     # 2. Guardarraíl determinista de límite de iteraciones (previene bucles infinitos)
-    iteration = int(state.get("iteration", 1))
-    max_iterations = int(state.get("max_iterations", 3))
+    iteration = state.get("iteration", 1)
+    max_iterations = state.get("max_iterations", 3)
     if iteration >= max_iterations:
         return "conclude"
 
@@ -425,7 +438,7 @@ class GraphBuilder:
         self._topology_info = topology
 
         # LangGraph StateGraph agnóstico
-        builder: StateGraph[AgentState, Any, Any, Any] = StateGraph(AgentState)
+        builder = StateGraph(AgentState)
         has_tools = len(self.registry.list_tools()) > 0
 
         # --- Definición y registro de Nodos asíncronos ---
@@ -577,10 +590,20 @@ class GraphBuilder:
 
         # Conexión desde Plan (si existe)
         if topology.has_planner:
+            plan_destinations: list[str] = ["conclude"]
             if topology.has_risk_assessment:
-                builder.add_edge("plan", "risk_assess")
+                plan_destinations.append("risk_assess")
             else:
-                builder.add_edge("plan", "execute")
+                plan_destinations.append("execute")
+
+            builder.add_conditional_edges(
+                "plan",
+                lambda s: route_after_plan(
+                    s,
+                    has_risk_assessment=topology.has_risk_assessment,
+                ),
+                path_map=list(set(plan_destinations)),
+            )
 
         # Conexión desde Risk Assessment (si existe)
         if topology.has_risk_assessment:

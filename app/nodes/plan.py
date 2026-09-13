@@ -160,27 +160,25 @@ async def plan_node(
                         dependencies=[f"step-{idx - 1}"] if idx > 1 else [],
                     )
                 )
-        elif registry is not None:
-            available_tools = registry.list_tools()
-            if available_tools:
-                target_tool = available_tools[0]
-                steps.append(
-                    PlanStep(
-                        step_id="step-1",
-                        tool_name=target_tool.name,
-                        tool_args={},
-                        description=f"Ejecutar {target_tool.name}",
-                        risk_level=target_tool.risk_level,
-                        reversible=target_tool.reversible,
-                        dependencies=[],
-                    )
+        else:
+            # AGENTE-LOGIC-02: Nunca ejecutar una herramienta arbitraria (available_tools[0]) con {} por defecto.
+            logger.warning(
+                "[plan_node] No se generó un plan estructurado válido ni existen tool_calls previas. Abortando fallback ciego."
+            )
+            errors.append(
+                ExecutionError(
+                    code="PLANNING_FAILED",
+                    message="No fue posible generar un plan estructurado válido para la solicitud.",
+                    component="plan",
+                    fatal=True,
                 )
+            )
 
         plan = ExecutionPlan(
             plan_id=f"plan-{int(datetime.now(UTC).timestamp())}",
             goal=goal,
             steps=steps,
-            estimated_risk=_compute_highest_risk(steps),
+            estimated_risk=_compute_highest_risk(steps) if steps else RiskLevel.LOW,
         )
     else:
         # Asegurar consistencia del riesgo estimado consolidado
@@ -190,6 +188,9 @@ async def plan_node(
                 plan.estimated_risk = calculated_risk
 
     duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+    has_steps = bool(plan.steps)
+    has_fatal_error = any(getattr(e, "fatal", False) for e in errors)
+    is_failed = (not has_steps) or has_fatal_error
 
     # 5. Emitir traza inmutable de auditoría
     audit = AuditRecord(
@@ -201,6 +202,7 @@ async def plan_node(
             "estimated_risk": plan.estimated_risk.value,
             "duration_ms": duration_ms,
             "has_errors": len(errors) > 0,
+            "is_failed": is_failed,
         },
     )
 
@@ -210,11 +212,15 @@ async def plan_node(
         title="Planificación Estratégica (DAG Planner)"
         if planner
         else "Generación de Plan Operativo",
-        action=f"Descomposición de Tarea ({len(plan.steps)} pasos)",
+        action="Fallo de Planificación"
+        if is_failed
+        else f"Descomposición de Tarea ({len(plan.steps)} pasos)",
         description=(
-            f"Se elaboró un plan con objetivo '{plan.goal}' y nivel de riesgo estimado '{plan.estimated_risk.value.upper()}'."
+            "No fue posible generar un plan estructurado válido para la solicitud. Se aborta la ejecución de herramientas por defecto."
+            if is_failed
+            else f"Se elaboró un plan con objetivo '{plan.goal}' y nivel de riesgo estimado '{plan.estimated_risk.value.upper()}'."
         ),
-        status="completed" if not errors else "failed",
+        status="failed" if is_failed else "completed",
         details={
             "plan_id": plan.plan_id,
             "goal": plan.goal,
@@ -223,13 +229,14 @@ async def plan_node(
             "steps": [
                 s.model_dump(mode="json") if hasattr(s, "model_dump") else s for s in plan.steps
             ],
+            "failure_reason": errors[-1].message if is_failed and errors else None,
         },
         duration_ms=duration_ms,
         timestamp=datetime.now(UTC),
     )
 
     updates: dict[str, Any] = {
-        "status": AgentExecutionStatus.PLANNING,
+        "status": AgentExecutionStatus.FAILED if is_failed else AgentExecutionStatus.PLANNING,
         "plan": plan,
         "cognitive_steps": [cognitive_step],
         "audit_trail": [audit],
