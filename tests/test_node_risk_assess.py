@@ -532,3 +532,53 @@ async def test_risk_assess_allows_admin_caller_with_wildcard() -> None:
 
     assert result["risk_assessment"]["decision"] == PolicyDecision.ALLOW.value
     assert result.get("status") != AgentExecutionStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_risk_assess_blocks_admin_with_malicious_payload() -> None:
+    """Verifica que un usuario admin sea bloqueado si el argumento contiene traversal o inyección [AGENTE-SEC-06]."""
+    registry = CapabilityRegistry()
+    admin_tool = AgentTool(
+        name="read_config",
+        description="Lectura de configuración",
+        category="admin",
+        func=dummy_tool_func,
+        risk_level=RiskLevel.LOW,
+        required_permissions=["config:read"],
+    )
+    registry.register_tool(admin_tool)
+
+    plan = ExecutionPlan(
+        plan_id="plan-sec-06-admin-attack",
+        goal="Ataque de traversal por admin",
+        steps=[
+            PlanStep(
+                step_id="step-1",
+                tool_name="read_config",
+                tool_args={"path": "/etc/shadow"},
+                risk_level=RiskLevel.LOW,
+            )
+        ],
+        estimated_risk=RiskLevel.LOW,
+    )
+
+    state: AgentState = {
+        "request": AgentInput(
+            execution_id="exec-sec-06-admin",
+            thread_id="thread-sec-06-admin",
+            prompt="Intentar leer shadow",
+            user_context=UserContext(
+                user_id="admin-malicious",
+                role="admin",
+                permissions=["config:read"],
+            ),
+        ),
+        "plan": plan,
+    }
+
+    result = await risk_assess_node(state, registry=registry)
+
+    # Debe ser denegado por violación de seguridad en SecurityGuard a pesar de ser admin
+    assert result["status"] == AgentExecutionStatus.FAILED
+    assert result["risk_assessment"]["decision"] == PolicyDecision.DENY.value
+    assert "ruta de sistema protegida" in result["risk_assessment"]["reason"]

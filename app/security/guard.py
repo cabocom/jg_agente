@@ -212,10 +212,19 @@ class SecurityGuard:
             or tool_name
         )
 
-        # 1. Comprobación de Permisos del Invocador
+        # 1. Comprobación de Permisos del Invocador (RBAC)
+        # Desacople de autorización de usuario de restricciones invariantes [AGENTE-SEC-06]:
+        # La pertenencia a roles administrativos o permisos wildcard valida exclusivamente
+        # los permisos requeridos a nivel de herramienta (RBAC). Bajo ninguna circunstancia
+        # exime de las validaciones de inyección, traversal, SSRF o de la gobernanza HITL.
         if effective_perms:
             caller_perms_set = set(caller_permissions or [])
-            if "*" not in caller_perms_set and "admin" not in caller_perms_set:
+            is_admin_or_wildcard = bool(
+                "*" in caller_perms_set
+                or "admin" in caller_perms_set
+                or "role:admin" in caller_perms_set
+            )
+            if not is_admin_or_wildcard:
                 missing_perms = [p for p in effective_perms if p not in caller_perms_set]
                 if missing_perms:
                     reason = (

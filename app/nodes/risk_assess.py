@@ -127,12 +127,19 @@ async def risk_assess_node(
             if state_perms:
                 caller_perms = list(state_perms)
             elif req and req.user_context:
-                if req.user_context.role == "admin" or (
+                perms_list = (
+                    list(req.user_context.permissions) if req.user_context.permissions else []
+                )
+                is_admin = req.user_context.role == "admin" or (
                     getattr(req, "metadata", None) and req.metadata.get("user_role") == "admin"
-                ):
-                    caller_perms = ["*"]
-                elif req.user_context.permissions:
-                    caller_perms = list(req.user_context.permissions)
+                )
+                if is_admin:
+                    # Desacople de autorización de usuario e invariantes de plataforma [AGENTE-SEC-06]:
+                    # Preservar permisos específicos y agregar privilegios de rol administrativo
+                    # sin otorgar inmunidad a las directivas de seguridad invariantes.
+                    caller_perms = list(set(perms_list + ["role:admin", "admin", "*"]))
+                else:
+                    caller_perms = perms_list
 
             # Evaluar con SecurityGuard
             eval_res = guard.evaluate(

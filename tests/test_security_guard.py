@@ -76,6 +76,98 @@ class TestSecurityGuardPermissions:
         assert len(audit.get_history()) == 1
         assert audit.get_history()[0].details["decision"] == "allow"
 
+    def test_admin_and_wildcard_caller_satisfies_required_permissions(self) -> None:
+        """Verifica que permisos administrativos o wildcard satisfagan los permisos requeridos (RBAC)."""
+        audit = SecurityAuditLogger(auto_persist=False)
+        guard = SecurityGuard(audit_logger=audit)
+
+        tool = AgentTool(
+            name="cluster_ops",
+            description="Operaciones de cluster",
+            category="system",
+            args_schema=DummyArgs,
+            func=mock_tool_func,
+            required_permissions=["cluster:write", "infra:manage"],
+            risk_level=RiskLevel.LOW,
+        )
+
+        for admin_perm in (["admin"], ["role:admin"], ["*"]):
+            eval_res = guard.evaluate(
+                tool=tool,
+                tool_args={"query": "health"},
+                caller_permissions=admin_perm,
+            )
+            assert eval_res.decision == PolicyDecision.ALLOW
+
+    def test_admin_caller_cannot_bypass_directory_traversal(self) -> None:
+        """Verifica que un admin con wildcard NO pueda evadir restricciones de traversal [AGENTE-SEC-06]."""
+        audit = SecurityAuditLogger(auto_persist=False)
+        guard = SecurityGuard(audit_logger=audit)
+
+        tool = AgentTool(
+            name="read_file",
+            description="Lectura de archivo",
+            category="system",
+            args_schema=DummyArgs,
+            func=mock_tool_func,
+            required_permissions=["file:read"],
+            risk_level=RiskLevel.LOW,
+        )
+
+        eval_res = guard.evaluate(
+            tool=tool,
+            tool_args={"path": "/etc/shadow"},
+            caller_permissions=["*"],
+        )
+        assert eval_res.decision == PolicyDecision.DENY
+        assert "ruta de sistema protegida" in eval_res.reason
+
+    def test_admin_caller_cannot_bypass_shell_injection(self) -> None:
+        """Verifica que un admin con wildcard NO pueda evadir inyección shell [AGENTE-SEC-06]."""
+        audit = SecurityAuditLogger(auto_persist=False)
+        guard = SecurityGuard(audit_logger=audit)
+
+        tool = AgentTool(
+            name="exec_command",
+            description="Ejecutar comando",
+            category="system",
+            args_schema=DummyArgs,
+            func=mock_tool_func,
+            required_permissions=["cmd:exec"],
+            risk_level=RiskLevel.LOW,
+        )
+
+        eval_res = guard.evaluate(
+            tool=tool,
+            tool_args={"target": "host; cat /etc/passwd"},
+            caller_permissions=["admin"],
+        )
+        assert eval_res.decision == PolicyDecision.DENY
+        assert "inyección shell" in eval_res.reason
+
+    def test_admin_caller_cannot_bypass_hitl_governance(self) -> None:
+        """Verifica que un admin con wildcard NO pueda eludir la puerta HITL para riesgo alto [AGENTE-SEC-06]."""
+        audit = SecurityAuditLogger(auto_persist=False)
+        guard = SecurityGuard(audit_logger=audit)
+
+        tool = AgentTool(
+            name="critical_purge",
+            description="Purga crítica",
+            category="ops",
+            args_schema=DummyArgs,
+            func=mock_tool_func,
+            required_permissions=["purge:execute"],
+            risk_level=RiskLevel.CRITICAL,
+        )
+
+        eval_res = guard.evaluate(
+            tool=tool,
+            tool_args={"target": "prod-db"},
+            caller_permissions=["*"],
+        )
+        assert eval_res.decision == PolicyDecision.REQUIRE_HUMAN_APPROVAL
+        assert "autorización humana previa" in eval_res.reason
+
 
 class TestSecurityGuardInjectionAndTraversal:
     """Pruebas de detección de inyecciones de comandos shell y directory traversal."""
