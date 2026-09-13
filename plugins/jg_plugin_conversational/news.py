@@ -8,9 +8,9 @@ SSRFValidator y datos limpios sin inyección de pseudo-prompts (resolución SEC-
 import logging
 import re
 import time
-import xml.etree.ElementTree as ET
 from typing import Any
 
+import defusedxml.ElementTree as ET
 import httpx
 from pydantic import BaseModel, Field, field_validator
 

@@ -207,3 +207,45 @@ def test_capability_registry_news_registration() -> None:
     names = [t["name"] for t in summary["tools"]]
     assert "get_weather" in names
     assert "get_news" in names
+
+
+def test_news_xxe_payload_blocked_and_fallback() -> None:
+    """Verifica que un payload XML con entidades externas o DTD (XXE) sea neutralizado por defusedxml [AGENTE-SEC-07]."""
+    xxe_xml = b"""<?xml version="1.0" encoding="utf-8"?>
+    <!DOCTYPE rss [
+        <!ENTITY xxe SYSTEM "file:///etc/passwd">
+    ]>
+    <rss version="2.0">
+        <channel>
+            <title>Malicious RSS</title>
+            <item>
+                <title>&xxe;</title>
+                <description>Exploit</description>
+                <link>https://example.com</link>
+            </item>
+        </channel>
+    </rss>
+    """
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.content = xxe_xml
+
+    mock_client_instance = MagicMock()
+    mock_client_instance.get.return_value = mock_resp
+
+    with (
+        patch(
+            "socket.getaddrinfo",
+            return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("195.55.100.1", 443))],
+        ),
+        patch("httpx.Client") as mock_client_cls,
+    ):
+        mock_client_cls.return_value.__enter__.return_value = mock_client_instance
+        result = get_news_fn(NewsArgs(topic="general", limit=2))
+
+    assert isinstance(result, ToolResult)
+    assert result.success is True
+    assert result.metadata.get("source") == "simulated"
+    assert "/etc/passwd" not in result.output
+    assert "root:" not in result.output
