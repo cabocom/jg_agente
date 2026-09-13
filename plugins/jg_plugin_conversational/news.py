@@ -11,7 +11,6 @@ import time
 from typing import Any
 
 import defusedxml.ElementTree as ET
-import httpx
 from pydantic import BaseModel, Field, field_validator
 
 from app.models.tools import AgentTool, RiskLevel, ToolResult, ToolType
@@ -131,11 +130,15 @@ def get_news_fn(
     limit = args.limit
     rss_url = RSS_CHANNELS.get(topic, RSS_CHANNELS["general"])
 
-    # 1. Validación de seguridad SSRF contra el validador central del Core
-    from app.security.ssrf import SSRFValidationError, get_ssrf_validator
+    # 1. Validación de seguridad SSRF con DNS Pinning anti-TOCTOU
+    from app.security.ssrf import (
+        SSRFValidationError,
+        create_ssrf_safe_client,
+        get_ssrf_validator,
+    )
 
     ssrf_validator = validator or kwargs.get("ssrf_validator") or get_ssrf_validator()
-    is_valid, reason = ssrf_validator.validate_url(rss_url)
+    is_valid, reason, pin_info = ssrf_validator.resolve_and_pin_url(rss_url)
 
     is_dns_failure = False
     if not is_valid:
@@ -161,15 +164,20 @@ def get_news_fn(
                 f"Destino de noticias no autorizado por política SSRF: {reason}"
             )
 
-    if not is_dns_failure:
+    if not is_dns_failure and pin_info:
         try:
-            # 2. Intento de consulta en vivo vía HTTP
+            # 2. Intento de consulta en vivo vía HTTP con cliente seguro y DNS Pinning
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)",
                 "Accept": "application/rss+xml, application/xml, text/xml",
             }
+            headers.update(pin_info.get("headers", {}))
 
-            with httpx.Client(timeout=5.0) as client:
+            with create_ssrf_safe_client(
+                dns_pin_map=pin_info.get("dns_pin_map"),
+                validator=ssrf_validator,
+                timeout=5.0,
+            ) as client:
                 resp = client.get(rss_url, headers=headers)
                 if resp.status_code == 200 and resp.content:
                     # 3. Parseo seguro de XML

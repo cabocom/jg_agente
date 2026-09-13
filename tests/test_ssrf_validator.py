@@ -1,10 +1,14 @@
-"""Pruebas unitarias para el validador de protección SSRF (SSRFValidator)."""
-
+import httpx
 import pytest
 
 from app.security.ssrf import (
+    SSRFSafeAsyncTransport,
+    SSRFSafeSyncBackend,
+    SSRFSafeTransport,
     SSRFValidationError,
     SSRFValidator,
+    create_async_ssrf_safe_client,
+    create_ssrf_safe_client,
     get_ssrf_validator,
 )
 
@@ -197,3 +201,104 @@ def test_singleton_factory() -> None:
     v2 = get_ssrf_validator()
     assert v1 is v2
     assert isinstance(v1, SSRFValidator)
+
+
+class TestSSRFAsyncAndDNSPinning:
+    """Pruebas para validación asíncrona, DNS Pinning y mitigación de TOCTOU / DNS Rebinding."""
+
+    @pytest.mark.asyncio
+    async def test_validate_url_async_blocks_private(self) -> None:
+        validator = SSRFValidator()
+        is_valid, reason = await validator.validate_url_async(
+            "http://127.0.0.1:8080/status", resolve_dns=False
+        )
+        assert not is_valid
+        assert reason is not None
+        assert "bloqueada" in reason.lower()
+
+    @pytest.mark.asyncio
+    async def test_validate_url_async_allows_public(self) -> None:
+        validator = SSRFValidator()
+        is_valid, reason = await validator.validate_url_async(
+            "https://api.github.com/events", resolve_dns=False
+        )
+        assert is_valid
+        assert reason is None
+        assert (
+            await validator.is_safe_url_async("https://api.github.com/events", resolve_dns=False)
+            is True
+        )
+
+    @pytest.mark.asyncio
+    async def test_assert_safe_url_async_raises(self) -> None:
+        validator = SSRFValidator()
+        with pytest.raises(SSRFValidationError) as exc_info:
+            await validator.assert_safe_url_async("http://169.254.169.254/meta", resolve_dns=False)
+        assert exc_info.value.target == "http://169.254.169.254/meta"
+
+    def test_resolve_and_pin_url_with_mocked_dns(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        validator = SSRFValidator()
+        # Mock de resolve_host devolviendo IP pública
+        monkeypatch.setattr(validator, "resolve_host", lambda host, port: {"93.184.216.34"})
+
+        is_valid, reason, pin_info = validator.resolve_and_pin_url("https://example.com/feed.xml")
+        assert is_valid
+        assert reason is None
+        assert pin_info is not None
+        assert pin_info["pinned_ip"] == "93.184.216.34"
+        assert pin_info["dns_pin_map"] == {"example.com": "93.184.216.34"}
+        assert pin_info["headers"]["Host"] == "example.com"
+        assert "93.184.216.34" in pin_info["pinned_url"]
+
+    def test_resolve_and_pin_url_blocks_rebinding_to_private(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        validator = SSRFValidator()
+        # Mock de resolución devolviendo IP privada (intento de DNS rebinding)
+        monkeypatch.setattr(validator, "resolve_host", lambda host, port: {"127.0.0.1"})
+
+        is_valid, reason, pin_info = validator.resolve_and_pin_url(
+            "http://attacker-controlled.domain/test"
+        )
+        assert not is_valid
+        assert reason is not None
+        assert "IP prohibida 127.0.0.1" in reason
+        assert pin_info is None
+
+    @pytest.mark.asyncio
+    async def test_resolve_and_pin_url_async_with_mocked_dns(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        validator = SSRFValidator()
+
+        async def mock_resolve_async(host: str, port: int) -> set[str]:
+            return {"1.1.1.1"}
+
+        monkeypatch.setattr(validator, "resolve_host_async", mock_resolve_async)
+
+        is_valid, reason, pin_info = await validator.resolve_and_pin_url_async(
+            "https://cloudflare-dns.com/query"
+        )
+        assert is_valid
+        assert reason is None
+        assert pin_info is not None
+        assert pin_info["pinned_ip"] == "1.1.1.1"
+
+    def test_ssrf_safe_backend_blocks_private_connection(self) -> None:
+        backend = SSRFSafeSyncBackend(dns_pin_map={"evil.com": "10.0.0.1"})
+        with pytest.raises(SSRFValidationError) as exc:
+            backend.connect_tcp("evil.com", 80)
+        assert "10.0.0.1" in str(exc.value)
+
+    def test_ssrf_safe_transport_and_client_creation(self) -> None:
+        client = create_ssrf_safe_client(dns_pin_map={"example.com": "93.184.216.34"})
+        assert isinstance(client, httpx.Client)
+        assert isinstance(client._transport, SSRFSafeTransport)
+        client.close()
+
+    @pytest.mark.asyncio
+    async def test_async_ssrf_safe_transport_and_client_creation(self) -> None:
+        client = create_async_ssrf_safe_client(dns_pin_map={"example.com": "93.184.216.34"})
+        assert isinstance(client, httpx.AsyncClient)
+        assert isinstance(client._transport, SSRFSafeAsyncTransport)
+        await client.aclose()

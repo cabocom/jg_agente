@@ -5,13 +5,20 @@ metadatos de nube (ej. 169.254.169.254), interfaces loopback (127.0.0.1) y
 redes privadas (RFC 1918 / RFC 4193), con soporte de allowlists por configuración.
 """
 
+import asyncio
 import ipaddress
 import logging
 import re
 import socket
+import ssl
 from collections.abc import Sequence
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
+
+import httpcore
+import httpx
+from httpcore._backends.anyio import AnyIOBackend
+from httpcore._backends.sync import SyncBackend
 
 from app.core.config import settings
 
@@ -176,6 +183,139 @@ class SSRFValidator:
 
         return False
 
+    def resolve_host(self, hostname: str, port: int = 80) -> set[str]:
+        """Resuelve el hostname de forma sincrónica devolviendo un conjunto de direcciones IP."""
+        addr_info = socket.getaddrinfo(
+            hostname,
+            port,
+            family=socket.AF_UNSPEC,
+            type=socket.SOCK_STREAM,
+        )
+        return {str(info[4][0]) for info in addr_info}
+
+    async def resolve_host_async(self, hostname: str, port: int = 80) -> set[str]:
+        """Resuelve el hostname de forma asíncrona sin bloquear el bucle de eventos."""
+        loop = asyncio.get_running_loop()
+        addr_info = await loop.getaddrinfo(
+            hostname,
+            port,
+            family=socket.AF_UNSPEC,
+            type=socket.SOCK_STREAM,
+        )
+        return {str(info[4][0]) for info in addr_info}
+
+    def _validate_pre_dns(
+        self, url: str
+    ) -> tuple[
+        bool, str | None, Any, str | None, ipaddress.IPv4Address | ipaddress.IPv6Address | None
+    ]:
+        """Comprobaciones preliminares antes de resolución DNS.
+
+        Devuelve (is_valid, reason, parsed_url, hostname, literal_ip).
+        """
+        if not self.enforce:
+            return True, None, None, None, None
+
+        if not url or not isinstance(url, str):
+            return False, "URL vacía o de tipo incorrecto", None, None, None
+
+        clean_url = url.strip()
+        try:
+            parsed = urlparse(clean_url)
+        except Exception as exc:
+            return False, f"Error parseando URL '{clean_url}': {exc}", None, None, None
+
+        scheme = (parsed.scheme or "").lower()
+        if scheme not in DEFAULT_ALLOWED_SCHEMES:
+            return (
+                False,
+                f"Esquema de protocolo no permitido '{scheme}'. "
+                f"Solo se autorizan: {sorted(DEFAULT_ALLOWED_SCHEMES)}",
+                parsed,
+                None,
+                None,
+            )
+
+        hostname = parsed.hostname
+        if not hostname:
+            return False, f"URL sin hostname válido: '{clean_url}'", parsed, None, None
+
+        hostname_lower = hostname.lower()
+
+        # Comprobación de allowlist explícita
+        if self.is_host_allowed_explicitly(hostname_lower):
+            return True, None, parsed, hostname, None
+
+        # Comprobación de nombres de host prohibidos
+        if hostname_lower in DEFAULT_BLOCKED_HOSTNAMES:
+            return (
+                False,
+                f"Hostname '{hostname}' prohibido por política SSRF",
+                parsed,
+                hostname,
+                None,
+            )
+
+        if (
+            hostname_lower.endswith(".local")
+            or hostname_lower.endswith(".internal")
+            or hostname_lower.endswith(".localhost")
+        ):
+            return (
+                False,
+                f"Dominio interno '{hostname}' bloqueado por política SSRF",
+                parsed,
+                hostname,
+                None,
+            )
+
+        # Comprobar si el hostname es una dirección IP literal
+        try:
+            literal_ip = ipaddress.ip_address(hostname_lower)
+            blocked, reason = self.is_ip_blocked(literal_ip)
+            if blocked:
+                return False, reason, parsed, hostname, literal_ip
+            return True, None, parsed, hostname, literal_ip
+        except ValueError:
+            pass
+
+        return True, None, parsed, hostname, None
+
+    def _build_pinned_info(self, parsed: Any, hostname: str, chosen_ip: str) -> dict[str, Any]:
+        """Construye el diccionario de metadatos de conexión fijada (DNS Pinning)."""
+        scheme = (parsed.scheme or "http").lower()
+        port = parsed.port or (443 if scheme == "https" else 80)
+
+        # Cabecera Host con puerto si no es estándar
+        standard_port = (scheme == "https" and port == 443) or (scheme == "http" and port == 80)
+        host_header = hostname if standard_port else f"{hostname}:{port}"
+
+        # Reconstruir URL usando la IP en lugar del hostname (entre corchetes si es IPv6)
+        ip_obj = ipaddress.ip_address(chosen_ip)
+        ip_host_str = f"[{chosen_ip}]" if ip_obj.version == 6 else chosen_ip
+        netloc = f"{ip_host_str}:{parsed.port}" if parsed.port else ip_host_str
+        pinned_url = urlunparse(
+            (
+                parsed.scheme,
+                netloc,
+                parsed.path,
+                parsed.params,
+                parsed.query,
+                parsed.fragment,
+            )
+        )
+
+        return {
+            "hostname": hostname,
+            "pinned_ip": chosen_ip,
+            "port": port,
+            "scheme": scheme,
+            "pinned_url": pinned_url,
+            "host_header": host_header,
+            "headers": {"Host": host_header},
+            "dns_pin_map": {hostname.lower(): chosen_ip},
+        }
+
     def validate_url(
         self,
         url: str,
@@ -185,93 +325,185 @@ class SSRFValidator:
 
         Comprueba esquema, hostname, resolución de nombres a IPs y rangos restringidos.
         """
-        if not self.enforce:
+        is_valid, reason, parsed, hostname, literal_ip = self._validate_pre_dns(url)
+        if not is_valid:
+            return False, reason
+        if not self.enforce or literal_ip is not None or not resolve_dns or not hostname:
             return True, None
 
-        if not url or not isinstance(url, str):
-            return False, "URL vacía o de tipo incorrecto"
-
-        clean_url = url.strip()
         try:
-            parsed = urlparse(clean_url)
-        except Exception as exc:
-            return False, f"Error parseando URL '{clean_url}': {exc}"
+            scheme = (parsed.scheme or "").lower()
+            port = parsed.port or (443 if scheme == "https" else 80)
+            resolved_ips = self.resolve_host(hostname, port)
+            if not resolved_ips:
+                return False, f"No se pudo resolver la dirección para el host '{hostname}'"
 
-        scheme = (parsed.scheme or "").lower()
-        if scheme not in DEFAULT_ALLOWED_SCHEMES:
-            return False, (
-                f"Esquema de protocolo no permitido '{scheme}'. "
-                f"Solo se autorizan: {sorted(DEFAULT_ALLOWED_SCHEMES)}"
-            )
-
-        hostname = parsed.hostname
-        if not hostname:
-            return False, f"URL sin hostname válido: '{clean_url}'"
-
-        hostname_lower = hostname.lower()
-
-        # Comprobación de allowlist explícita
-        if self.is_host_allowed_explicitly(hostname_lower):
-            return True, None
-
-        # Comprobación de nombres de host prohibidos
-        if hostname_lower in DEFAULT_BLOCKED_HOSTNAMES:
-            return False, f"Hostname '{hostname}' prohibido por política SSRF"
-
-        if (
-            hostname_lower.endswith(".local")
-            or hostname_lower.endswith(".internal")
-            or hostname_lower.endswith(".localhost")
-        ):
-            return False, f"Dominio interno '{hostname}' bloqueado por política SSRF"
-
-        # Comprobar si el hostname es una dirección IP literal
-        try:
-            literal_ip = ipaddress.ip_address(hostname_lower)
-            blocked, reason = self.is_ip_blocked(literal_ip)
-            if blocked:
-                return False, reason
-            return True, None
-        except ValueError:
-            # Es un nombre de dominio que requiere resolución DNS
-            pass
-
-        if resolve_dns:
-            try:
-                # Obtener todas las direcciones IP asociadas (IPv4 e IPv6)
-                addr_info = socket.getaddrinfo(
-                    hostname,
-                    parsed.port or (443 if scheme == "https" else 80),
-                    family=socket.AF_UNSPEC,
-                    type=socket.SOCK_STREAM,
-                )
-                if not addr_info:
-                    return False, f"No se pudo resolver la dirección para el host '{hostname}'"
-
-                resolved_ips: set[str] = {str(info[4][0]) for info in addr_info}
-                for ip_str in resolved_ips:
-                    try:
-                        resolved_ip = ipaddress.ip_address(ip_str)
-                        blocked, reason = self.is_ip_blocked(resolved_ip)
-                        if blocked:
-                            return False, (
-                                f"Host '{hostname}' resolvió a IP prohibida {ip_str}: {reason}"
-                            )
-                    except ValueError:
-                        continue
-            except socket.gaierror as dns_err:
-                return False, f"Fallo en resolución DNS para '{hostname}': {dns_err}"
+            for ip_str in resolved_ips:
+                try:
+                    resolved_ip = ipaddress.ip_address(ip_str)
+                    blocked, block_reason = self.is_ip_blocked(resolved_ip)
+                    if blocked:
+                        return (
+                            False,
+                            f"Host '{hostname}' resolvió a IP prohibida {ip_str}: {block_reason}",
+                        )
+                except ValueError:
+                    continue
+        except socket.gaierror as dns_err:
+            return False, f"Fallo en resolución DNS para '{hostname}': {dns_err}"
 
         return True, None
+
+    async def validate_url_async(
+        self,
+        url: str,
+        resolve_dns: bool = True,
+    ) -> tuple[bool, str | None]:
+        """Valida asíncronamente una URL contra SSRF sin bloquear el event loop."""
+        is_valid, reason, parsed, hostname, literal_ip = self._validate_pre_dns(url)
+        if not is_valid:
+            return False, reason
+        if not self.enforce or literal_ip is not None or not resolve_dns or not hostname:
+            return True, None
+
+        try:
+            scheme = (parsed.scheme or "").lower()
+            port = parsed.port or (443 if scheme == "https" else 80)
+            resolved_ips = await self.resolve_host_async(hostname, port)
+            if not resolved_ips:
+                return False, f"No se pudo resolver la dirección para el host '{hostname}'"
+
+            for ip_str in resolved_ips:
+                try:
+                    resolved_ip = ipaddress.ip_address(ip_str)
+                    blocked, block_reason = self.is_ip_blocked(resolved_ip)
+                    if blocked:
+                        return (
+                            False,
+                            f"Host '{hostname}' resolvió a IP prohibida {ip_str}: {block_reason}",
+                        )
+                except ValueError:
+                    continue
+        except socket.gaierror as dns_err:
+            return False, f"Fallo en resolución DNS para '{hostname}': {dns_err}"
+
+        return True, None
+
+    def resolve_and_pin_url(
+        self,
+        url: str,
+    ) -> tuple[bool, str | None, dict[str, Any] | None]:
+        """Valida la URL y fija la IP resultante (DNS Pinning) para mitigar TOCTOU/DNS Rebinding."""
+        is_valid, reason, parsed, hostname, literal_ip = self._validate_pre_dns(url)
+        if not is_valid or parsed is None or hostname is None:
+            return False, reason, None
+
+        if not self.enforce:
+            host_str = str(literal_ip) if literal_ip else hostname
+            return True, None, self._build_pinned_info(parsed, hostname, host_str)
+
+        if literal_ip is not None:
+            return True, None, self._build_pinned_info(parsed, hostname, str(literal_ip))
+
+        try:
+            scheme = (parsed.scheme or "").lower()
+            port = parsed.port or (443 if scheme == "https" else 80)
+            resolved_ips = self.resolve_host(hostname, port)
+            if not resolved_ips:
+                return False, f"No se pudo resolver la dirección para el host '{hostname}'", None
+
+            valid_ips: list[str] = []
+            for ip_str in resolved_ips:
+                try:
+                    resolved_ip = ipaddress.ip_address(ip_str)
+                    blocked, block_reason = self.is_ip_blocked(resolved_ip)
+                    if blocked:
+                        return (
+                            False,
+                            f"Host '{hostname}' resolvió a IP prohibida {ip_str}: {block_reason}",
+                            None,
+                        )
+                    valid_ips.append(ip_str)
+                except ValueError:
+                    continue
+
+            if not valid_ips:
+                return False, f"No se obtuvieron IPs válidas para el host '{hostname}'", None
+
+            valid_ips.sort(key=lambda x: (":" in x, x))
+            chosen_ip = valid_ips[0]
+            return True, None, self._build_pinned_info(parsed, hostname, chosen_ip)
+
+        except socket.gaierror as dns_err:
+            return False, f"Fallo en resolución DNS para '{hostname}': {dns_err}", None
+
+    async def resolve_and_pin_url_async(
+        self,
+        url: str,
+    ) -> tuple[bool, str | None, dict[str, Any] | None]:
+        """Valida y fija la IP resultante de forma asíncrona para mitigar TOCTOU/DNS Rebinding."""
+        is_valid, reason, parsed, hostname, literal_ip = self._validate_pre_dns(url)
+        if not is_valid or parsed is None or hostname is None:
+            return False, reason, None
+
+        if not self.enforce:
+            host_str = str(literal_ip) if literal_ip else hostname
+            return True, None, self._build_pinned_info(parsed, hostname, host_str)
+
+        if literal_ip is not None:
+            return True, None, self._build_pinned_info(parsed, hostname, str(literal_ip))
+
+        try:
+            scheme = (parsed.scheme or "").lower()
+            port = parsed.port or (443 if scheme == "https" else 80)
+            resolved_ips = await self.resolve_host_async(hostname, port)
+            if not resolved_ips:
+                return False, f"No se pudo resolver la dirección para el host '{hostname}'", None
+
+            valid_ips: list[str] = []
+            for ip_str in resolved_ips:
+                try:
+                    resolved_ip = ipaddress.ip_address(ip_str)
+                    blocked, block_reason = self.is_ip_blocked(resolved_ip)
+                    if blocked:
+                        return (
+                            False,
+                            f"Host '{hostname}' resolvió a IP prohibida {ip_str}: {block_reason}",
+                            None,
+                        )
+                    valid_ips.append(ip_str)
+                except ValueError:
+                    continue
+
+            if not valid_ips:
+                return False, f"No se obtuvieron IPs válidas para el host '{hostname}'", None
+
+            valid_ips.sort(key=lambda x: (":" in x, x))
+            chosen_ip = valid_ips[0]
+            return True, None, self._build_pinned_info(parsed, hostname, chosen_ip)
+
+        except socket.gaierror as dns_err:
+            return False, f"Fallo en resolución DNS para '{hostname}': {dns_err}", None
 
     def is_safe_url(self, url: str, resolve_dns: bool = True) -> bool:
         """Devuelve True si la URL es segura, False en caso contrario."""
         is_safe, _ = self.validate_url(url, resolve_dns=resolve_dns)
         return is_safe
 
+    async def is_safe_url_async(self, url: str, resolve_dns: bool = True) -> bool:
+        """Devuelve True si la URL es segura (asíncrono), False en caso contrario."""
+        is_safe, _ = await self.validate_url_async(url, resolve_dns=resolve_dns)
+        return is_safe
+
     def assert_safe_url(self, url: str, resolve_dns: bool = True) -> None:
         """Verifica la URL y lanza SSRFValidationError si vulnera la política."""
         is_safe, reason = self.validate_url(url, resolve_dns=resolve_dns)
+        if not is_safe:
+            raise SSRFValidationError(reason or "Destino no permitido por SSRF", target=url)
+
+    async def assert_safe_url_async(self, url: str, resolve_dns: bool = True) -> None:
+        """Verifica la URL (asíncrono) y lanza SSRFValidationError si vulnera la política."""
+        is_safe, reason = await self.validate_url_async(url, resolve_dns=resolve_dns)
         if not is_safe:
             raise SSRFValidationError(reason or "Destino no permitido por SSRF", target=url)
 
@@ -335,3 +567,249 @@ def get_ssrf_validator() -> SSRFValidator:
     if _default_ssrf_validator is None:
         _default_ssrf_validator = SSRFValidator()
     return _default_ssrf_validator
+
+
+class SSRFSafeSyncBackend(SyncBackend):
+    """Backend sincrónico de red para httpcore con protección SSRF y DNS Pinning a nivel TCP."""
+
+    def __init__(
+        self,
+        dns_pin_map: dict[str, str] | None = None,
+        validator: SSRFValidator | None = None,
+    ) -> None:
+        super().__init__()
+        self.dns_pin_map = dns_pin_map or {}
+        self.validator = validator or get_ssrf_validator()
+
+    def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Any = None,
+    ) -> Any:
+        target_host = host
+        host_lower = host.lower()
+
+        # 1. Resolver o fijar IP
+        if host_lower in self.dns_pin_map:
+            target_host = self.dns_pin_map[host_lower]
+        else:
+            is_literal_ip = False
+            try:
+                ipaddress.ip_address(host)
+                is_literal_ip = True
+            except ValueError:
+                is_literal_ip = False
+
+            if (
+                not is_literal_ip
+                and self.validator.enforce
+                and not self.validator.is_host_allowed_explicitly(host_lower)
+            ):
+                resolved = self.validator.resolve_host(host, port)
+                if not resolved:
+                    raise SSRFValidationError(
+                        f"No se pudo resolver la dirección para el host '{host}'",
+                        target=host,
+                    )
+                for ip_str in resolved:
+                    ip_obj = ipaddress.ip_address(ip_str)
+                    blocked, reason = self.validator.is_ip_blocked(ip_obj)
+                    if blocked:
+                        raise SSRFValidationError(
+                            f"Resolución de host '{host}' apunta a IP prohibida {ip_str}: {reason}",
+                            target=host,
+                        )
+                sorted_ips = sorted(resolved, key=lambda x: (":" in x, x))
+                target_host = sorted_ips[0]
+
+        # 2. Verificación estricta de la IP final de destino
+        if self.validator.enforce:
+            target_ip_obj = None
+            try:
+                target_ip_obj = ipaddress.ip_address(target_host)
+            except ValueError:
+                target_ip_obj = None
+
+            if target_ip_obj is not None:
+                blocked, reason = self.validator.is_ip_blocked(target_ip_obj)
+                if blocked:
+                    raise SSRFValidationError(
+                        f"Conexión TCP bloqueada a IP prohibida {target_host}: {reason}",
+                        target=target_host,
+                    )
+
+        return super().connect_tcp(
+            host=target_host,
+            port=port,
+            timeout=timeout,
+            local_address=local_address,
+            socket_options=socket_options,
+        )
+
+
+class SSRFSafeAsyncBackend(AnyIOBackend):
+    """Backend asíncrono de red para httpcore con protección SSRF y DNS Pinning a nivel TCP."""
+
+    def __init__(
+        self,
+        dns_pin_map: dict[str, str] | None = None,
+        validator: SSRFValidator | None = None,
+    ) -> None:
+        super().__init__()
+        self.dns_pin_map = dns_pin_map or {}
+        self.validator = validator or get_ssrf_validator()
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Any = None,
+    ) -> Any:
+        target_host = host
+        host_lower = host.lower()
+
+        if host_lower in self.dns_pin_map:
+            target_host = self.dns_pin_map[host_lower]
+        else:
+            is_literal_ip = False
+            try:
+                ipaddress.ip_address(host)
+                is_literal_ip = True
+            except ValueError:
+                is_literal_ip = False
+
+            if (
+                not is_literal_ip
+                and self.validator.enforce
+                and not self.validator.is_host_allowed_explicitly(host_lower)
+            ):
+                resolved = await self.validator.resolve_host_async(host, port)
+                if not resolved:
+                    raise SSRFValidationError(
+                        f"No se pudo resolver la dirección para el host '{host}'",
+                        target=host,
+                    )
+                for ip_str in resolved:
+                    ip_obj = ipaddress.ip_address(ip_str)
+                    blocked, reason = self.validator.is_ip_blocked(ip_obj)
+                    if blocked:
+                        raise SSRFValidationError(
+                            f"Resolución de host '{host}' apunta a IP prohibida {ip_str}: {reason}",
+                            target=host,
+                        )
+                sorted_ips = sorted(resolved, key=lambda x: (":" in x, x))
+                target_host = sorted_ips[0]
+
+        if self.validator.enforce:
+            target_ip_obj = None
+            try:
+                target_ip_obj = ipaddress.ip_address(target_host)
+            except ValueError:
+                target_ip_obj = None
+
+            if target_ip_obj is not None:
+                blocked, reason = self.validator.is_ip_blocked(target_ip_obj)
+                if blocked:
+                    raise SSRFValidationError(
+                        f"Conexión TCP bloqueada a IP prohibida {target_host}: {reason}",
+                        target=target_host,
+                    )
+
+        return await super().connect_tcp(
+            host=target_host,
+            port=port,
+            timeout=timeout,
+            local_address=local_address,
+            socket_options=socket_options,
+        )
+
+
+class SSRFSafeTransport(httpx.HTTPTransport):
+    """Transporte HTTP sincrónico para httpx con mitigación activa contra SSRF y DNS Rebinding."""
+
+    def __init__(
+        self,
+        dns_pin_map: dict[str, str] | None = None,
+        validator: SSRFValidator | None = None,
+        verify: ssl.SSLContext | str | bool = True,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(verify=verify, **kwargs)
+        self._dns_pin_map = dns_pin_map or {}
+        self._validator = validator or get_ssrf_validator()
+        self._pool = httpcore.ConnectionPool(
+            ssl_context=getattr(self._pool, "_ssl_context", None),
+            max_connections=getattr(self._pool, "_max_connections", 10),
+            max_keepalive_connections=getattr(self._pool, "_max_keepalive_connections", None),
+            keepalive_expiry=getattr(self._pool, "_keepalive_expiry", None),
+            http1=getattr(self._pool, "_http1", True),
+            http2=getattr(self._pool, "_http2", False),
+            network_backend=SSRFSafeSyncBackend(
+                dns_pin_map=self._dns_pin_map,
+                validator=self._validator,
+            ),
+        )
+
+
+class SSRFSafeAsyncTransport(httpx.AsyncHTTPTransport):
+    """Transporte HTTP asíncrono para httpx con mitigación activa contra SSRF y DNS Rebinding."""
+
+    def __init__(
+        self,
+        dns_pin_map: dict[str, str] | None = None,
+        validator: SSRFValidator | None = None,
+        verify: ssl.SSLContext | str | bool = True,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(verify=verify, **kwargs)
+        self._dns_pin_map = dns_pin_map or {}
+        self._validator = validator or get_ssrf_validator()
+        self._pool = httpcore.AsyncConnectionPool(
+            ssl_context=getattr(self._pool, "_ssl_context", None),
+            max_connections=getattr(self._pool, "_max_connections", 10),
+            max_keepalive_connections=getattr(self._pool, "_max_keepalive_connections", None),
+            keepalive_expiry=getattr(self._pool, "_keepalive_expiry", None),
+            http1=getattr(self._pool, "_http1", True),
+            http2=getattr(self._pool, "_http2", False),
+            network_backend=SSRFSafeAsyncBackend(
+                dns_pin_map=self._dns_pin_map,
+                validator=self._validator,
+            ),
+        )
+
+
+def create_ssrf_safe_client(
+    dns_pin_map: dict[str, str] | None = None,
+    validator: SSRFValidator | None = None,
+    timeout: float | httpx.Timeout = 10.0,
+    verify: ssl.SSLContext | str | bool = True,
+    **kwargs: Any,
+) -> httpx.Client:
+    """Crea un cliente httpx sincrónico seguro contra SSRF y DNS Rebinding."""
+    transport = SSRFSafeTransport(
+        dns_pin_map=dns_pin_map,
+        validator=validator,
+        verify=verify,
+    )
+    return httpx.Client(transport=transport, timeout=timeout, **kwargs)
+
+
+def create_async_ssrf_safe_client(
+    dns_pin_map: dict[str, str] | None = None,
+    validator: SSRFValidator | None = None,
+    timeout: float | httpx.Timeout = 10.0,
+    verify: ssl.SSLContext | str | bool = True,
+    **kwargs: Any,
+) -> httpx.AsyncClient:
+    """Crea un cliente httpx asíncrono seguro contra SSRF y DNS Rebinding."""
+    transport = SSRFSafeAsyncTransport(
+        dns_pin_map=dns_pin_map,
+        validator=validator,
+        verify=verify,
+    )
+    return httpx.AsyncClient(transport=transport, timeout=timeout, **kwargs)

@@ -10,12 +10,18 @@ from app.security.auth import (
 )
 from app.security.guard import SecurityGuard, get_security_guard
 from app.security.ssrf import (
+    SSRFSafeAsyncTransport,
+    SSRFSafeTransport,
     SSRFValidationError,
     SSRFValidator,
+    create_async_ssrf_safe_client,
+    create_ssrf_safe_client,
     get_ssrf_validator,
 )
 
 __all__ = [
+    "SSRFSafeAsyncTransport",
+    "SSRFSafeTransport",
     "SSRFValidationError",
     "SSRFValidator",
     "SecurityAuditLogger",
@@ -23,6 +29,8 @@ __all__ = [
     "compute_body_sha256",
     "compute_canonical_string",
     "compute_hmac_signature",
+    "create_async_ssrf_safe_client",
+    "create_ssrf_safe_client",
     "get_security_audit_logger",
     "get_security_guard",
     "get_ssrf_validator",
