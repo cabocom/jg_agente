@@ -21,6 +21,7 @@ from app.models.state import (
     AuditRecord,
     CognitiveStepRecord,
     ExecutionPlan,
+    resolve_caller_permissions,
 )
 
 logger = logging.getLogger("jg_agente.nodes.human_approval")
@@ -83,6 +84,7 @@ async def human_approval_node(
             "human_intervention_required": False,
             "requires_approval": False,
             "approval": approval_rec,
+            "caller_permissions": resolve_caller_permissions(state),
             "approved_step_ids": approval_rec.approved_step_ids
             or state.get("approved_step_ids")
             or [],
@@ -135,6 +137,7 @@ async def human_approval_node(
             "human_intervention_required": False,
             "requires_approval": False,
             "approval": approval_rec,
+            "caller_permissions": resolve_caller_permissions(state),
             "cognitive_steps": [cog_rejected],
             "audit_trail": [
                 AuditRecord(
@@ -339,6 +342,7 @@ async def human_approval_node(
         "human_intervention_required": False,
         "requires_approval": False,
         "approval": approval_rec,
+        "caller_permissions": resolve_caller_permissions(state),
         "approved_step_ids": resumed_step_ids if is_approved else [],
         "approved_tool_names": resumed_tool_names if is_approved else [],
         "cognitive_steps": [cog_resumed],

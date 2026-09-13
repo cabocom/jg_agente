@@ -374,3 +374,37 @@ class AgentState(TypedDict, total=False):
 
     # 9. Salida Sintetizada Normalizada
     output: AgentOutput | dict[str, Any] | None
+
+
+def resolve_caller_permissions(state: AgentState | dict[str, Any]) -> list[str]:
+    """Resuelve los permisos del llamador de forma determinista y jerárquica a partir del estado.
+
+    Garantiza la trazabilidad inmutable de caller_permissions a lo largo de todo el grafo
+    cognitivo, evitando denegaciones falsas por INSUFFICIENT_PERMISSIONS (AGENTE-LOGIC-03).
+    """
+    state_perms = state.get("caller_permissions")
+    if state_perms is not None:
+        return list(state_perms)
+
+    req = state.get("request")
+    if req is not None:
+        user_context = getattr(req, "user_context", None)
+        if user_context is not None:
+            perms_list = (
+                list(user_context.permissions) if getattr(user_context, "permissions", None) else []
+            )
+            metadata = getattr(req, "metadata", None)
+            is_admin = getattr(user_context, "role", None) == "admin" or (
+                isinstance(metadata, dict) and metadata.get("user_role") == "admin"
+            )
+            if is_admin:
+                return list(set(perms_list + ["role:admin", "admin", "*"]))
+            return perms_list
+
+        metadata = getattr(req, "metadata", None)
+        if isinstance(metadata, dict) and "caller_permissions" in metadata:
+            raw = metadata.get("caller_permissions")
+            if isinstance(raw, list):
+                return [str(p) for p in raw]
+
+    return []

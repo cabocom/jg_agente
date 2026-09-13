@@ -8,7 +8,7 @@ from langchain_core.runnables import RunnableConfig
 
 from app.core.graph import GraphBuilder
 from app.core.registry import CapabilityRegistry
-from app.models.io import AgentInput
+from app.models.io import AgentInput, UserContext
 from app.models.state import (
     AgentExecutionStatus,
     AgentState,
@@ -18,6 +18,7 @@ from app.models.state import (
     IntentModel,
     PlanStep,
     StepStatus,
+    resolve_caller_permissions,
 )
 from app.models.tools import AgentTool, RiskLevel, ToolResult
 from app.nodes.execute import execute_node
@@ -659,3 +660,177 @@ class TestExecuteNode:
         assert len(records) == 2
         assert records[0].status == StepStatus.COMPLETED
         assert records[1].status == StepStatus.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_execute_node_propagates_caller_permissions_and_allows_rbac_tool(
+        self, test_registry: CapabilityRegistry
+    ) -> None:
+        """Verifica que caller_permissions en el estado se propaga y previene falsos INSUFFICIENT_PERMISSIONS (AGENTE-LOGIC-03)."""
+        test_registry.register_tool(
+            AgentTool(
+                name="rbac_tool",
+                description="Herramienta RBAC",
+                category="test",
+                func=lambda **kwargs: ToolResult(success=True, output="rbac_success"),
+                risk_level=RiskLevel.LOW,
+                required_permissions=["service:restart"],
+            )
+        )
+
+        plan = ExecutionPlan(
+            plan_id="plan-rbac-01",
+            goal="Ejecutar herramienta con permisos RBAC",
+            steps=[
+                PlanStep(
+                    step_id="step-rbac",
+                    tool_name="rbac_tool",
+                    risk_level=RiskLevel.LOW,
+                )
+            ],
+        )
+
+        state: AgentState = {
+            "plan": plan,
+            "caller_permissions": ["service:restart"],
+        }
+
+        result = await execute_node(state, test_registry)
+        records = result["execution_records"]
+
+        assert len(records) == 1
+        assert records[0].status == StepStatus.COMPLETED
+        assert records[0].output == "rbac_success"
+        # Verificar trazabilidad inmutable de permisos retornados en el estado
+        assert result.get("caller_permissions") == ["service:restart"]
+
+    @pytest.mark.asyncio
+    async def test_execute_node_denies_tool_when_caller_permissions_missing(
+        self, test_registry: CapabilityRegistry
+    ) -> None:
+        """Verifica que sin los permisos requeridos ni bypass de aprobación, el guard deniega legítimamente."""
+        test_registry.register_tool(
+            AgentTool(
+                name="protected_tool",
+                description="Herramienta protegida",
+                category="test",
+                func=lambda **kwargs: ToolResult(success=True, output="should_not_run"),
+                risk_level=RiskLevel.LOW,
+                required_permissions=["cluster:admin"],
+            )
+        )
+
+        plan = ExecutionPlan(
+            plan_id="plan-rbac-deny",
+            goal="Intento sin permisos requeridos",
+            steps=[
+                PlanStep(
+                    step_id="step-deny",
+                    tool_name="protected_tool",
+                    risk_level=RiskLevel.LOW,
+                )
+            ],
+        )
+
+        state: AgentState = {
+            "plan": plan,
+            "caller_permissions": ["operator:read"],
+        }
+
+        result = await execute_node(state, test_registry)
+        records = result["execution_records"]
+
+        assert len(records) == 1
+        assert records[0].status == StepStatus.FAILED
+        assert "Permisos insuficientes" in (records[0].error or "")
+        assert result.get("caller_permissions") == ["operator:read"]
+
+    @pytest.mark.asyncio
+    async def test_execute_node_resolves_caller_permissions_from_user_context(
+        self, test_registry: CapabilityRegistry
+    ) -> None:
+        """Verifica que si caller_permissions no está a nivel de raíz en state, se extrae de request.user_context."""
+        test_registry.register_tool(
+            AgentTool(
+                name="context_tool",
+                description="Herramienta con contexto",
+                category="test",
+                func=lambda **kwargs: ToolResult(success=True, output="context_ok"),
+                risk_level=RiskLevel.LOW,
+                required_permissions=["docker:exec"],
+            )
+        )
+
+        req = AgentInput(
+            execution_id="exec-ctx-1",
+            thread_id="thread-ctx-1",
+            prompt="ejecuta en contenedor",
+            user_context=UserContext(
+                user_id="usr-123",
+                role="developer",
+                permissions=["docker:exec", "docker:read"],
+            ),
+        )
+
+        plan = ExecutionPlan(
+            plan_id="plan-context-01",
+            goal="Ejecutar con permisos desde user_context",
+            steps=[
+                PlanStep(
+                    step_id="step-ctx",
+                    tool_name="context_tool",
+                    risk_level=RiskLevel.LOW,
+                )
+            ],
+        )
+
+        state: AgentState = {
+            "request": req,
+            "plan": plan,
+        }
+
+        result = await execute_node(state, test_registry)
+        records = result["execution_records"]
+
+        assert len(records) == 1
+        assert records[0].status == StepStatus.COMPLETED
+        assert records[0].output == "context_ok"
+        assert set(result.get("caller_permissions") or []) == {"docker:exec", "docker:read"}
+
+    def test_resolve_caller_permissions_utility(self) -> None:
+        """Verifica la función utilitaria jerárquica resolve_caller_permissions."""
+        # 1. Directo desde state
+        assert resolve_caller_permissions({"caller_permissions": ["p1", "p2"]}) == ["p1", "p2"]
+
+        # 2. Desde request.user_context normal
+        req_norm = AgentInput(
+            execution_id="exec-1",
+            thread_id="th-1",
+            prompt="test",
+            user_context=UserContext(user_id="u1", role="user", permissions=["p1"]),
+        )
+        assert resolve_caller_permissions({"request": req_norm}) == ["p1"]
+
+        # 3. Desde request.user_context admin (recibe roles de admin automáticamente)
+        req_admin = AgentInput(
+            execution_id="exec-2",
+            thread_id="th-2",
+            prompt="test",
+            user_context=UserContext(user_id="u2", role="admin", permissions=["custom"]),
+        )
+        admin_perms = resolve_caller_permissions({"request": req_admin})
+        assert "custom" in admin_perms
+        assert "*" in admin_perms
+        assert "admin" in admin_perms
+        assert "role:admin" in admin_perms
+
+        # 4. Desde metadata
+        req_meta = AgentInput(
+            execution_id="exec-3",
+            thread_id="th-3",
+            prompt="test",
+            metadata={"caller_permissions": ["meta_perm"]},
+        )
+        assert resolve_caller_permissions({"request": req_meta}) == ["meta_perm"]
+
+        # 5. Vacío por defecto
+        assert resolve_caller_permissions({}) == []

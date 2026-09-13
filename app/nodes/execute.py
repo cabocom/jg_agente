@@ -28,6 +28,7 @@ from app.models.state import (
     PlanStep,
     StepExecutionRecord,
     StepStatus,
+    resolve_caller_permissions,
 )
 from app.models.tools import RiskLevel, ToolResult
 from app.security.guard import SecurityGuard, get_security_guard
@@ -94,22 +95,7 @@ async def execute_node(
         ApprovalStatus.AUTO_APPROVED.value,
     )
 
-    caller_perms: list[str] = []
-    state_perms = state.get("caller_permissions")
-    if state_perms:
-        caller_perms = list(state_perms)
-    elif req and req.user_context:
-        perms_list = list(req.user_context.permissions) if req.user_context.permissions else []
-        is_admin = req.user_context.role == "admin" or (
-            getattr(req, "metadata", None) and req.metadata.get("user_role") == "admin"
-        )
-        if is_admin:
-            # Desacople de autorización de usuario e invariantes de plataforma [AGENTE-SEC-06]:
-            # Preservar permisos específicos y agregar privilegios de rol administrativo
-            # sin otorgar inmunidad a las directivas de seguridad invariantes.
-            caller_perms = list(set(perms_list + ["role:admin", "admin", "*"]))
-        else:
-            caller_perms = perms_list
+    caller_perms = resolve_caller_permissions(state)
 
     # 3. Determinar los pasos u operaciones a ejecutar
     raw_plan = state.get("plan")
@@ -386,6 +372,7 @@ async def execute_node(
 
     mutations: dict[str, Any] = {
         "status": AgentExecutionStatus.EXECUTING,
+        "caller_permissions": caller_perms,
         "execution_records": records,
         "cognitive_steps": cognitive_steps,
         "errors": errors,

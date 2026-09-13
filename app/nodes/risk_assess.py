@@ -24,6 +24,7 @@ from app.models.state import (
     PlanStep,
     PolicyDecision,
     SecurityEvaluationResult,
+    resolve_caller_permissions,
 )
 from app.models.tools import RiskLevel
 from app.security.guard import SecurityGuard, get_security_guard
@@ -110,6 +111,8 @@ async def risk_assess_node(
     steps_requiring_approval: list[str] = []
     tools_requiring_approval: list[str] = []
 
+    caller_perms = resolve_caller_permissions(state)
+
     if not steps_to_evaluate:
         decision = PolicyDecision.ALLOW
         reason = "No se detectaron operaciones que requieran evaluación de riesgo."
@@ -121,25 +124,6 @@ async def risk_assess_node(
             # Actualizar máximo riesgo observado
             if _RISK_ORDER.get(effective_risk, 1) > _RISK_ORDER.get(max_risk, 1):
                 max_risk = effective_risk
-
-            caller_perms: list[str] = []
-            state_perms = state.get("caller_permissions")
-            if state_perms:
-                caller_perms = list(state_perms)
-            elif req and req.user_context:
-                perms_list = (
-                    list(req.user_context.permissions) if req.user_context.permissions else []
-                )
-                is_admin = req.user_context.role == "admin" or (
-                    getattr(req, "metadata", None) and req.metadata.get("user_role") == "admin"
-                )
-                if is_admin:
-                    # Desacople de autorización de usuario e invariantes de plataforma [AGENTE-SEC-06]:
-                    # Preservar permisos específicos y agregar privilegios de rol administrativo
-                    # sin otorgar inmunidad a las directivas de seguridad invariantes.
-                    caller_perms = list(set(perms_list + ["role:admin", "admin", "*"]))
-                else:
-                    caller_perms = perms_list
 
             # Evaluar con SecurityGuard
             eval_res = guard.evaluate(
@@ -225,6 +209,7 @@ async def risk_assess_node(
 
     # 6. Generar mutaciones de estado para LangGraph
     update_state: dict[str, Any] = {
+        "caller_permissions": caller_perms,
         "risk_assessment": eval_result.model_dump(),
         "requires_approval": requires_approval,
         "human_intervention_required": requires_approval,

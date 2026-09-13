@@ -30,7 +30,12 @@ from app.models.io import (
     PersistenceMetadata,
     PersistenceStatus,
 )
-from app.models.state import AgentExecutionStatus, AgentState, ApprovalStatus
+from app.models.state import (
+    AgentExecutionStatus,
+    AgentState,
+    ApprovalStatus,
+    resolve_caller_permissions,
+)
 from app.security.auth import verify_control_plane_auth
 from app.security.guard import SecurityGuard
 
@@ -181,6 +186,7 @@ async def execute_graph_pipeline(
     initial_state: AgentState = {
         "request": input_data,
         "correlation_id": cid,
+        "caller_permissions": resolve_caller_permissions({"request": input_data}),
         "messages": [HumanMessage(content=input_data.prompt)],
         "status": AgentExecutionStatus.OBSERVING,
         "current_step": 0,
