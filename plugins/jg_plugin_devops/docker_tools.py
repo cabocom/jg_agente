@@ -866,11 +866,11 @@ def logs_container_fn(
         else:
             log_str = str(raw_output or "")
 
-        # Truncado de seguridad para evitar saturar el contexto del LLM (ej. error 413 Payload Too Large en Groq)
-        max_log_chars = 6000
+        # Truncado de seguridad para evitar saturar el contexto del LLM (ej. cuotas TPM en Groq)
+        max_log_chars = 1800
         if len(log_str) > max_log_chars:
             log_str = (
-                f"[Logs truncados a los últimos {max_log_chars} caracteres para no saturar el LLM...]\n"
+                f"[Logs truncados a los últimos {max_log_chars} caracteres para no saturar cuota TPM del LLM...]\n"
                 + log_str[-max_log_chars:]
             )
 

@@ -5,6 +5,7 @@ de lenguaje mediante LangChain BaseChatModel, incluyendo un proveedor Mock deter
 para testing y ejecución local, y un cliente compatible con OpenAI/vLLM/Ollama vía HTTP.
 """
 
+import asyncio
 import json
 import logging
 import uuid
@@ -308,10 +309,41 @@ class OpenAICompatibleChatModel(BaseChatModel):
         if tools:
             payload["tools"] = tools
 
+        max_retries = 3
+        data: dict[str, Any] = {}
         async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(url, headers=headers, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
+            for attempt in range(max_retries + 1):
+                resp = await client.post(url, headers=headers, json=payload)
+                if resp.status_code == 429:
+                    if attempt < max_retries:
+                        retry_after = resp.headers.get("retry-after")
+                        reset_tokens = resp.headers.get("x-ratelimit-reset-tokens")
+                        wait_seconds = 2.5 * (attempt + 1)
+                        if retry_after:
+                            try:
+                                wait_seconds = max(float(retry_after), 1.0)
+                            except ValueError:
+                                pass
+                        elif reset_tokens:
+                            try:
+                                if reset_tokens.endswith("ms"):
+                                    wait_seconds = max(float(reset_tokens[:-2]) / 1000.0, 0.5)
+                                elif reset_tokens.endswith("s"):
+                                    wait_seconds = max(float(reset_tokens[:-1]), 0.5)
+                            except ValueError:
+                                pass
+                        logger.warning(
+                            "[LLM] Recibido HTTP 429 (Rate Limit de %s). Reintentando en %.2fs (intento %d/%d)...",
+                            self.base_url,
+                            wait_seconds,
+                            attempt + 1,
+                            max_retries,
+                        )
+                        await asyncio.sleep(wait_seconds)
+                        continue
+                resp.raise_for_status()
+                data = resp.json()
+                break
 
         choice = data.get("choices", [{}])[0].get("message", {})
         content = choice.get("content") or ""

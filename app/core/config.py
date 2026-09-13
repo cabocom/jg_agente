@@ -139,6 +139,10 @@ class Settings(BaseSettings):
         default=None,
         description="Clave de API de Groq",
     )
+    GEMINI_API_KEY: str | None = Field(
+        default=None,
+        description="Clave de API de Google Gemini",
+    )
     AZURE_MAPS_KEY: str | None = Field(
         default=None,
         description="Clave de API de Azure Maps para WeatherTool",
@@ -174,11 +178,16 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _resolve_llm_defaults(self) -> "Settings":
         """Resuelve dinámicamente el proveedor de LLM y claves si se proporcionan en el entorno."""
-        if self.GROQ_API_KEY and not self.LLM_API_KEY:
+        if self.GEMINI_API_KEY and not self.LLM_API_KEY and self.LLM_PROVIDER == "gemini":
+            self.LLM_API_KEY = self.GEMINI_API_KEY
+        elif self.GROQ_API_KEY and not self.LLM_API_KEY:
             self.LLM_API_KEY = self.GROQ_API_KEY
 
-        # Si se suministra una clave de API pero el proveedor sigue en 'mock', promover a 'groq'
-        if (self.GROQ_API_KEY or self.LLM_API_KEY) and self.LLM_PROVIDER == "mock":
+        # Si se suministra una clave de API pero el proveedor sigue en 'mock', promover a 'groq' o 'gemini'
+        if (self.GEMINI_API_KEY or self.LLM_API_KEY) and self.LLM_PROVIDER == "gemini":
+            if self.LLM_MODEL in ("gpt-4o-mini", "mock", "gemini-2.0-flash", "gemini-2.5-flash"):
+                self.LLM_MODEL = "gemini-3.6-flash"
+        elif (self.GROQ_API_KEY or self.LLM_API_KEY) and self.LLM_PROVIDER == "mock":
             self.LLM_PROVIDER = "groq"
             if self.LLM_MODEL in ("gpt-4o-mini", "mock", "llama-3.3-70b-versatile"):
                 self.LLM_MODEL = "openai/gpt-oss-120b"
