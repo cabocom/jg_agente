@@ -22,6 +22,7 @@
        ...
    ```
    Toda funcionalidad especializada se suministra exclusivamente vía **Plugins** ([`BasePlugin`](plugins.md)) cargados dinámicamente mediante `CapabilityRegistry`.
+   Asimismo, el Core no contiene listas fijas de palabras clave ni diccionarios léxicos de dominio para clasificar intenciones; las decisiones de enrutamiento conversacional versus operativo se delegan semánticamente al propio LLM en el nodo `reason`.
 
 2. **Ausencia Absoluta de Adaptadores de Transporte:**
    `jg_agente` **NO conoce ni implementa interfaces de usuario o comunicación externa** (Asterisk, Telegram, WhatsApp, Slack, Webhooks propietarios).

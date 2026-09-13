@@ -34,14 +34,29 @@ from app.models.state import (
 logger = logging.getLogger("jg_agente.nodes.reason")
 
 
-def _is_simple_greeting_or_chat(prompt: str) -> bool:
-    """Determina si un estímulo es un saludo, interacción conversacional o consulta informativa sin tarea operativa."""
-    if not prompt:
-        return True
-    p = prompt.strip().lower()
+async def _is_simple_greeting_or_chat_llm(model: BaseChatModel, prompt: str) -> bool:
+    """Determina mediante el LLM si un estímulo es un saludo/conversación casual o una petición de acción.
 
-    # 1. Saludos y fórmulas de cortesía
-    greetings = {
+    Elimina heurísticas sintácticas fijas en el Core, delegando en la IA la clasificación semántica
+    entre 'GREETING' (saludo, cortesía o despedida) y 'ACTION' (comando, consulta operativa, estado o tarea).
+    """
+    if not prompt or not prompt.strip():
+        return True
+
+    # Atajo determinista para fórmulas unívocas de cortesía puras y aisladas (1-2 palabras),
+    # evitando latencia innecesaria en saludos elementales evidentes.
+    p_clean = (
+        prompt.strip()
+        .lower()
+        .replace("¿", "")
+        .replace("?", "")
+        .replace("¡", "")
+        .replace("!", "")
+        .replace(",", " ")
+        .replace(".", " ")
+    )
+    tokens = set(p_clean.split())
+    pure_greetings = {
         "hola",
         "saludos",
         "buenos días",
@@ -54,119 +69,41 @@ def _is_simple_greeting_or_chat(prompt: str) -> bool:
         "chao",
         "gracias",
     }
-    cleaned = (
-        p.replace("¿", "")
-        .replace("?", "")
-        .replace("!", "")
-        .replace("¡", "")
-        .replace(",", " ")
-        .replace(".", " ")
-    )
-    words = set(cleaned.split())
-    if words and words.issubset(greetings):
-        return True
-    if len(words) <= 3 and any(g in words for g in ("hola", "saludos", "hey", "hello", "hi")):
+    if tokens and tokens.issubset(pure_greetings):
         return True
 
-    # 2. Palabras operativas que SÍ requieren planificación o ejecución de herramientas
-    operational_keywords = {
-        "reinicia",
-        "reiniciar",
-        "reinicio",
-        "restart",
-        "reboot",
-        "apaga",
-        "apagar",
-        "detener",
-        "stop",
-        "arranca",
-        "arrancar",
-        "start",
-        "despliega",
-        "desplegar",
-        "deploy",
-        "escala",
-        "escalar",
-        "scale",
-        "mata",
-        "matar",
-        "kill",
-        "borra",
-        "borrar",
-        "eliminar",
-        "delete",
-        "ejecuta",
-        "ejecutar",
-        "run",
-        "aplica",
-        "aplicar",
-        "rollback",
-        "revertir",
-        "reparar",
-        "remediar",
-        "fix",
-        "remediate",
-        "restaura",
-        "restaurar",
-        "incidente",
-        "incident",
-        "alerta",
-        "alert",
-    }
-    if any(op in words for op in operational_keywords):
+    classification_messages: list[BaseMessage] = [
+        SystemMessage(
+            content=(
+                "Eres un clasificador de intenciones para un agente autónomo.\n"
+                "Determina si el siguiente mensaje del usuario es:\n"
+                "- 'GREETING': si es únicamente un saludo, despedida, agradecimiento o cortesía conversacional básica, sin ninguna solicitud de tarea, acción, comando o información técnica/operativa.\n"
+                "- 'ACTION': si contiene cualquier petición, comando, pregunta operativa, consulta de estado, diagnóstico o tarea técnica.\n\n"
+                "Responde ÚNICAMENTE con la palabra 'GREETING' o 'ACTION'."
+            )
+        ),
+        HumanMessage(content=prompt),
+    ]
+
+    try:
+        try:
+            res = await model.ainvoke(classification_messages)
+        except NotImplementedError:
+            res = model.invoke(classification_messages)
+
+        content = str(getattr(res, "content", res)).strip().upper()
+        if "ACTION" in content:
+            return False
+        if "GREETING" in content:
+            return True
+    except Exception as exc:
+        logger.warning(
+            "Error al clasificar intención con el LLM: %s. Asumiendo acción operativa.",
+            exc,
+        )
         return False
 
-    # 3. Preguntas de capacidades, identidad, ayuda o información general
-    conversational_indicators = [
-        "capacidades",
-        "habilidades",
-        "herramientas",
-        "que puedes hacer",
-        "qué puedes hacer",
-        "que sabes hacer",
-        "qué sabes hacer",
-        "quien eres",
-        "quién eres",
-        "como te llamas",
-        "cómo te llamas",
-        "como funcionas",
-        "cómo funcionas",
-        "para que sirves",
-        "para qué sirves",
-        "ayuda",
-        "help",
-        "informacion",
-        "información",
-        "presentate",
-        "preséntate",
-        "explicate",
-        "explícate",
-        "dime que",
-        "dime qué",
-    ]
-    if any(indicator in p for indicator in conversational_indicators):
-        return True
-
-    # 4. Consultas en formato pregunta (dime, qué, quién, etc.) sin acción operativa
-    question_starters = (
-        "dime",
-        "cuenta",
-        "explica",
-        "que",
-        "qué",
-        "quien",
-        "quién",
-        "como",
-        "cómo",
-        "cual",
-        "cuál",
-        "cuales",
-        "cuáles",
-        "por que",
-        "por qué",
-    )
-    first_words = [w for w in cleaned.split() if w]
-    return bool(first_words and first_words[0] in question_starters)
+    return False
 
 
 async def reason_node(
@@ -294,8 +231,8 @@ async def reason_node(
         }
         step_title = "Razonamiento e Interpretación Cognitiva"
         step_action = f"Selección de Herramienta(s): {tools_str}"
-        step_description = f"El modelo interpretó la consulta y determinó invocar la(s) herramienta(s): {tools_str}."
-    elif planner_engine is not None and not _is_simple_greeting_or_chat(prompt):
+        step_description = f"El agente interpretó la solicitud y determinó la ejecución de las herramientas: {tools_str}."
+    elif planner_engine is not None and not await _is_simple_greeting_or_chat_llm(model, prompt):
         logger.info(
             "[reason_node] Solicitud operativa detectada con planificador disponible ('%s')",
             planner_engine.name,

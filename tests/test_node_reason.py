@@ -3,7 +3,7 @@
 from typing import Any
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 
 from app.core.graph import GraphBuilder
@@ -172,7 +172,7 @@ class TestReasonNode:
         registry = CapabilityRegistry()
         llm = MockChatModel(response_content="Entendido, procediendo con el siguiente paso.")
 
-        history = [
+        history: list[BaseMessage] = [
             SystemMessage(content="Sistema preconfigurado"),
             HumanMessage(content="Paso 1: Validar"),
             AIMessage(content="Paso 1 completado con éxito."),
@@ -254,13 +254,14 @@ class TestReasonNodeInGraphBuilder:
         graph = builder.build()
 
         config: RunnableConfig = {"configurable": {"thread_id": "th-graph-reason-direct"}}
+        initial_messages: list[BaseMessage] = [HumanMessage(content="Hola agente")]
         initial_state: AgentState = {
             "request": AgentInput(
                 execution_id="exec-gr-01",
                 thread_id="th-graph-reason-direct",
                 prompt="Hola agente",
             ),
-            "messages": [HumanMessage(content="Hola agente")],
+            "messages": initial_messages,
             "status": AgentExecutionStatus.IDLE,
         }
 
@@ -322,3 +323,69 @@ class TestReasonNodeInGraphBuilder:
         assert res["is_resolved"] is True
         assert res["intent"].action_type == "conclude"
         assert res.get("plan") is None
+
+
+class TestReasonNodeIntentClassification:
+    """Pruebas para la determinación semántica mediante IA de saludos vs peticiones de acción (AGENTE-LOGIC-01)."""
+
+    @pytest.mark.asyncio
+    async def test_llm_distinguishes_greeting_from_operational_query(self) -> None:
+        """Verifica que un saludo simple concluye pero una consulta como 'Dime el estado...' deriva al planificador."""
+        from app.models.state import ExecutionPlan
+        from app.plugins.base import PlannerEngine
+
+        class DummyPlanner(PlannerEngine):
+            @property
+            def name(self) -> str:
+                return "mock_dag_planner"
+
+            async def startup(self) -> None:
+                pass
+
+            async def shutdown(self) -> None:
+                pass
+
+            def create_plan(self, state: Any = None) -> Any:
+                return ExecutionPlan(plan_id="p1", goal="planificado", steps=[])
+
+        registry = CapabilityRegistry()
+        planner = DummyPlanner()
+        registry.register_engine(planner)
+
+        llm = MockChatModel(auto_tool_calls=False)
+
+        # 1. Saludo puro -> debe concluir directamente
+        greeting_state: AgentState = {
+            "request": AgentInput(
+                execution_id="exec-greet",
+                thread_id="th-greet",
+                prompt="Hola, buenos días",
+            ),
+            "messages": [],
+            "status": AgentExecutionStatus.IDLE,
+        }
+        res_greet = await reason_node(state=greeting_state, registry=registry, llm=llm)
+        assert res_greet["intent"].action_type == "conclude"
+
+        # 2. Consultas operativas con prefijos en español -> la IA las clasifica como ACTION y deriva a plan
+        operational_queries = [
+            "Dime el estado de los contenedores",
+            "¿Cuál es el uso de memoria de los pods?",
+            "Explica los errores en los logs del servicio auth",
+            "Cuenta cuántos servicios están caídos",
+        ]
+        for query in operational_queries:
+            op_state: AgentState = {
+                "request": AgentInput(
+                    execution_id="exec-op",
+                    thread_id="th-op",
+                    prompt=query,
+                ),
+                "messages": [],
+                "status": AgentExecutionStatus.IDLE,
+            }
+            res_op = await reason_node(state=op_state, registry=registry, llm=llm)
+            assert res_op["intent"].action_type == "plan", (
+                f"La consulta '{query}' debió derivar a plan, no a conclude"
+            )
+            assert res_op["intent"].parameters["planner"] == "mock_dag_planner"

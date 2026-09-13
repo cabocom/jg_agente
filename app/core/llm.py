@@ -85,6 +85,58 @@ class MockChatModel(BaseChatModel):
                 last_human_text = str(msg.content).lower()
                 break
 
+        # Si es una invocación del clasificador de intenciones (saludo vs acción)
+        first_sys = (
+            messages[0].content if messages and isinstance(messages[0], SystemMessage) else ""
+        )
+        if "clasificador de intenciones" in str(first_sys).lower():
+            greetings = {
+                "hola",
+                "saludos",
+                "buenos días",
+                "buenas tardes",
+                "buenas noches",
+                "hey",
+                "hi",
+                "hello",
+                "adiós",
+                "chao",
+                "gracias",
+                "cómo estás",
+                "como estas",
+                "qué tal",
+                "que tal",
+                "capacidades",
+                "quién eres",
+                "quien eres",
+                "qué puedes hacer",
+                "que puedes hacer",
+            }
+            operational_markers = {
+                "estado",
+                "contenedor",
+                "docker",
+                "pod",
+                "servicio",
+                "reinicia",
+                "ejecuta",
+                "detén",
+                "para",
+                "mata",
+                "log",
+                "logs",
+                "metric",
+                "cpu",
+                "memoria",
+                "disco",
+                "red",
+                "despliega",
+            }
+            has_operational = any(marker in last_human_text for marker in operational_markers)
+            is_greeting_or_info = any(g in last_human_text for g in greetings)
+            is_simple = is_greeting_or_info and not has_operational
+            return ("GREETING", []) if is_simple else ("ACTION", [])
+
         # Si auto_tool_calls está activo y hay herramientas vinculadas
         if self.auto_tool_calls and self.bound_tools and last_human_text:
             for tool in self.bound_tools:

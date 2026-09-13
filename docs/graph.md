@@ -129,10 +129,19 @@ El nodo `reason` (`app/nodes/reason.py`) actúa como el centro de deliberación 
 
 1. **Memoria Conversacional:** Consume `AgentState["messages"]` e inyecta la directriz de sistema (`SystemMessage`) y el estímulo actual (`HumanMessage`).
 2. **Tool Binding Dinámico:** Obtiene las herramientas disponibles de `CapabilityRegistry.get_langchain_tools()` y las enlaza al LLM vía `model.bind_tools()`.
-3. **Decisión de Flujo Agnóstica:**
+3. **Decisión de Flujo Agnóstica e Inferencia de Intención con IA:**
    - Si el LLM emite `tool_calls`: Genera un `IntentModel` con `action_type = "act"`, enrutando directamente a `execute`.
-   - Si no hay `tool_calls` pero existe un motor de planificación (`PlannerEngine`) y el estímulo es operativo: Genera un `IntentModel` con `action_type = "plan"`, derivando el flujo a `plan`.
-   - Si la interacción es un saludo o respuesta conversacional directa: Genera un `IntentModel` con `action_type = "conclude"`, emitiendo la respuesta textual del LLM en `AIMessage`.
+   - Si no hay `tool_calls` pero existe un motor de planificación (`PlannerEngine`) registrado en el catálogo de capacidades:
+     - El agente realiza una **llamada asíncrona a la IA** (`_is_simple_greeting_or_chat_llm`) dedicada a clasificar la intención del usuario de manera semántica y desacoplada de vocabularios de dominio.
+     - **Especificación de la Invocación a la IA (`_is_simple_greeting_or_chat_llm`):**
+       - **Rol y Prompt del Sistema:** Actúa como clasificador de intenciones binario (`GREETING` vs. `ACTION`).
+       - **Entrada:** Estímulo del usuario (`prompt`).
+       - **Salida:** `GREETING` (saludo, despedida, cortesía o consulta sobre capacidades/identidad del agente) o `ACTION` (comando, diagnóstico, consulta de infraestructura, tarea o acción operativa).
+       - **Fail-Open Operativo:** Ante cualquier fallo o timeout en la llamada al LLM, el clasificador asume `False` (intención `ACTION`), garantizando que ninguna orden técnica sea ignorada por error.
+       - **Optimización de Latencia:** Saludos elementales aislados (ej. "hola", "buenos días") se resuelven mediante atajo léxico directo para evitar llamadas de red redundantes.
+     - Si la IA determina `ACTION`: Genera un `IntentModel` con `action_type = "plan"`, derivando el flujo a `plan`. Esto asegura que preguntas operativas en lenguaje natural (ej. *"Dime el estado de los contenedores"*, *"¿Cuál es la memoria libre?"*) no sean silenciadas por heurísticas sintácticas.
+     - Si la IA determina `GREETING`: Genera un `IntentModel` con `action_type = "conclude"`, emitiendo la respuesta directa del LLM.
+   - Si no existe planificador ni herramientas invocadas: Concluye directamente con `action_type = "conclude"`.
 4. **Auditoría Estructurada:** Registra cada invocación en `audit_trail` bajo el tipo de evento `reasoning_completed`.
 
 ---
