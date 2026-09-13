@@ -1,4 +1,4 @@
-"""Pruebas unitarias para la resiliencia del cliente LLM ante HTTP 429 (Rate Limiting)."""
+from typing import Any
 
 import httpx
 import pytest
@@ -12,7 +12,7 @@ async def test_llm_retries_on_429_success(monkeypatch: pytest.MonkeyPatch) -> No
     """Verifica que _agenerate reintente automáticamente tras recibir un 429 y tenga éxito."""
     attempts = 0
 
-    async def mock_post(*args, **kwargs):
+    async def mock_post(*args: Any, **kwargs: Any) -> httpx.Response:
         nonlocal attempts
         attempts += 1
         if attempts == 1:
@@ -56,7 +56,7 @@ async def test_llm_raises_after_max_retries(monkeypatch: pytest.MonkeyPatch) -> 
     """Verifica que _agenerate lance HTTPStatusError si se agotan todos los reintentos permitidos."""
     attempts = 0
 
-    async def mock_post_always_429(*args, **kwargs):
+    async def mock_post_always_429(*args: Any, **kwargs: Any) -> httpx.Response:
         nonlocal attempts
         attempts += 1
         req = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
