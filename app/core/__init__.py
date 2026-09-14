@@ -6,6 +6,8 @@ from app.core.boot import (
     validate_boot_capabilities,
 )
 from app.core.checkpointer import (
+    DualPostgresSaver,
+    close_checkpointer,
     get_checkpointer,
     get_memory_checkpointer,
     get_postgres_checkpointer,
@@ -23,6 +25,7 @@ __all__ = [
     "BootConflictError",
     "BootIntegrityError",
     "CapabilityRegistry",
+    "DualPostgresSaver",
     "GraphBuilder",
     "GraphTopologyInfo",
     "PluginDependencyError",
@@ -30,6 +33,7 @@ __all__ = [
     "PluginManager",
     "Settings",
     "build_agent_graph",
+    "close_checkpointer",
     "get_checkpointer",
     "get_memory_checkpointer",
     "get_postgres_checkpointer",

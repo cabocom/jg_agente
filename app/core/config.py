@@ -88,6 +88,20 @@ class Settings(BaseSettings):
         default="data/emergency_executions",
         description="Directorio local para almacenamiento de emergencia si PostgreSQL falla definitivamente",
     )
+    CHECKPOINT_SAVER: str = Field(
+        default="postgres",
+        description="Tipo de checkpointer para grafos (postgres o memory)",
+    )
+    CHECKPOINT_MAX_RETRIES: int = Field(
+        default=3,
+        ge=1,
+        description="Número máximo de reintentos para conectar el checkpointer a PostgreSQL",
+    )
+    CHECKPOINT_RETRY_BACKOFF_SECONDS: float = Field(
+        default=0.5,
+        ge=0.01,
+        description="Pausa base en segundos para el backoff exponencial de conexión del checkpointer",
+    )
 
     # Seguridad y protección SSRF
     SSRF_ENFORCE_PROTECTION: bool = Field(

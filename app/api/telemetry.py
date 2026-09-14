@@ -5,7 +5,7 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -50,10 +50,13 @@ async def get_capabilities(
     "/health",
     response_model=HealthResponse,
     status_code=status.HTTP_200_OK,
+    responses={status.HTTP_503_SERVICE_UNAVAILABLE: {"model": HealthResponse}},
     summary="Chequeo de salud y conectividad de subsistemas",
-    description="Verifica de forma asíncrona la conectividad con PostgreSQL y la preparación del modelo cognitivo LLM.",
+    description="Verifica de forma asíncrona la conectividad con PostgreSQL, el checkpointer y la preparación del modelo cognitivo LLM.",
 )
 async def get_health(
+    request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_async_session),
 ) -> HealthResponse:
     """Chequea la disponibilidad y latencia de PostgreSQL, el proveedor LLM y el checkpointer."""
@@ -100,12 +103,43 @@ async def get_health(
 
     # 3. Comprobación del checkpointer
     checkpointer_kind = getattr(settings, "CHECKPOINT_SAVER", "postgres")
+    checkpointer_instance = getattr(request.app.state, "checkpointer", None)
+    ckpt_status = "ready"
+    ckpt_error: str | None = None
+
+    if checkpointer_kind.lower() in ("postgres", "postgresql"):
+        if getattr(checkpointer_instance, "is_degraded", False):
+            ckpt_status = "degraded"
+            ckpt_error = getattr(
+                checkpointer_instance,
+                "degraded_reason",
+                "PostgresSaver no pudo conectar tras reintentos (degradado a memoria)",
+            )
+        elif checkpointer_instance is not None and not hasattr(checkpointer_instance, "conn"):
+            # Si se configuró postgres pero la instancia activa no gestiona conexiones pool/postgres
+            ckpt_status = "degraded"
+            ckpt_error = "Checkpointer configurado como postgres pero operando en memoria"
+        elif db_status == "disconnected":
+            ckpt_status = "disconnected"
+            ckpt_error = db_error or "PostgreSQL no responde"
+
     components["checkpointer"] = HealthComponentStatus(
-        status="ready",
-        details={"type": checkpointer_kind},
+        status=ckpt_status,
+        details={
+            "type": checkpointer_kind,
+            "active_class": (
+                type(checkpointer_instance).__name__ if checkpointer_instance else "None"
+            ),
+        },
+        error=ckpt_error,
     )
 
-    global_status = "healthy" if db_status == "connected" else "degraded"
+    is_healthy = db_status == "connected" and ckpt_status in ("ready", "healthy")
+    if is_healthy:
+        global_status = "healthy"
+    else:
+        global_status = "unhealthy"
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
     return HealthResponse(
         status=global_status,

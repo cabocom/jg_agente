@@ -16,6 +16,7 @@ def isolate_test_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "mock")
     monkeypatch.setenv("CHECKPOINT_SAVER", "memory")
     monkeypatch.setattr(settings, "LLM_PROVIDER", "mock")
+    monkeypatch.setattr(settings, "CHECKPOINT_SAVER", "memory")
 
 
 @pytest.fixture(autouse=True)

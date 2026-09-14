@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from app import __version__
 from app.api import executions_router, telemetry_router
 from app.core.boot import init_agent_capabilities
+from app.core.checkpointer import close_checkpointer, get_checkpointer
 from app.core.config import settings
 from app.core.correlation import CorrelationIdMiddleware, CorrelationLogFilter
 from app.core.heartbeat import HeartbeatService
@@ -40,15 +41,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.registry = registry
     app.state.plugin_manager = plugin_manager
 
-    # 2. Inicialización asíncrona de plugins
+    # 2. Inicialización y precalentamiento del checkpointer para LangGraph
+    app.state.checkpointer = get_checkpointer()
+
+    # 3. Inicialización asíncrona de plugins
     await plugin_manager.startup()
 
-    # 3. Comprobación de credenciales y aprovisionamiento con Dashboard (Zero-Trust Bootstrap)
+    # 4. Comprobación de credenciales y aprovisionamiento con Dashboard (Zero-Trust Bootstrap)
     credentials = await auto_register_agent(settings=settings, registry=registry)
     app.state.credentials = credentials
     app.state.credentials_verified = credentials.verified if credentials else False
 
-    # 4. Iniciar servicio de heartbeat periódico en segundo plano si está habilitado y autenticado
+    # 5. Iniciar servicio de heartbeat periódico en segundo plano si está habilitado y autenticado
     heartbeat_service: HeartbeatService | None = None
     if settings.ENABLE_HEARTBEAT and credentials is not None:
         heartbeat_service = HeartbeatService(settings=settings, registry=registry)
@@ -57,11 +61,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
-    # 5. Apagado ordenado
+    # 6. Apagado ordenado y liberación de recursos
     logger.info("Deteniendo jg_agente...")
     if heartbeat_service is not None:
         await heartbeat_service.stop()
     await plugin_manager.shutdown()
+    close_checkpointer(getattr(app.state, "checkpointer", None))
 
 
 app = FastAPI(

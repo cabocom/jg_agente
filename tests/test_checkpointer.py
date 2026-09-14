@@ -12,10 +12,12 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.graph import END, START, StateGraph
 
 from app.core.checkpointer import (
+    close_checkpointer,
     get_checkpointer,
     get_memory_checkpointer,
     get_postgres_checkpointer,
 )
+from app.core.config import settings
 from app.models import (
     AgentExecutionStatus,
     AgentInput,
@@ -47,6 +49,100 @@ class TestMemoryCheckpointer:
     def test_get_checkpointer_fallback(self) -> None:
         saver = get_checkpointer(saver_type="memory")
         assert isinstance(saver, MemorySaver)
+
+
+class TestCheckpointerLifecycleAndRetries:
+    """Pruebas unitarias para el ciclo de vida, cierre de conexiones y reintentos del Checkpointer."""
+
+    def test_dual_postgres_saver_close(self) -> None:
+        """Verifica que saver.close() cierre el pool subyacente de forma idempotente."""
+        from unittest.mock import MagicMock
+
+        from app.core.checkpointer import DualPostgresSaver, get_default_serializer
+
+        mock_pool = MagicMock()
+        saver = DualPostgresSaver(conn=mock_pool, serde=get_default_serializer())
+
+        saver.close()
+        mock_pool.close.assert_called_once()
+
+        # Idempotencia ante fallo
+        mock_pool.close.side_effect = RuntimeError("Already closed")
+        saver.close()  # No debe elevar excepción
+
+    def test_close_checkpointer_helper(self) -> None:
+        """Verifica que close_checkpointer invoque close() si existe y soporte None o MemorySaver."""
+        from unittest.mock import MagicMock
+
+        mock_saver = MagicMock()
+        close_checkpointer(mock_saver)
+        mock_saver.close.assert_called_once()
+
+        # No falla con None ni con MemorySaver
+        close_checkpointer(None)
+        mem_saver = get_memory_checkpointer()
+        close_checkpointer(mem_saver)
+
+    def test_get_checkpointer_retries_and_degrades_to_memory(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Verifica que get_checkpointer reintente con backoff exponencial y emita CRITICAL antes de degradar."""
+        import logging
+
+        attempts = 0
+        delays: list[float] = []
+
+        def mock_get_postgres() -> None:
+            nonlocal attempts
+            attempts += 1
+            raise psycopg.OperationalError("Connection refused to postgres:5432")
+
+        def fake_sleep(seconds: float) -> None:
+            delays.append(seconds)
+
+        monkeypatch.setattr("app.core.checkpointer.get_postgres_checkpointer", mock_get_postgres)
+        monkeypatch.setattr("time.sleep", fake_sleep)
+        monkeypatch.setattr(settings, "CHECKPOINT_MAX_RETRIES", 3)
+        monkeypatch.setattr(settings, "CHECKPOINT_RETRY_BACKOFF_SECONDS", 0.1)
+
+        with caplog.at_level(logging.WARNING):
+            saver = get_checkpointer(saver_type="postgres")
+
+        assert isinstance(saver, MemorySaver)
+        assert getattr(saver, "is_degraded", False) is True
+        assert "Connection refused" in str(getattr(saver, "degraded_reason", ""))
+        assert attempts == 3
+        assert delays == [0.1, 0.2]
+
+        critical_logs = [r for r in caplog.records if r.levelno == logging.CRITICAL]
+        assert len(critical_logs) >= 1
+        assert (
+            "No se pudo conectar ni inicializar PostgresSaver tras 3 intentos"
+            in critical_logs[0].message
+        )
+
+    def test_get_checkpointer_recovers_on_retry(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verifica recuperación exitosa si PostgreSQL responde en un intento posterior."""
+        from unittest.mock import MagicMock
+
+        attempts = 0
+        mock_saver = MagicMock(spec=PostgresSaver)
+
+        def mock_get_postgres() -> MagicMock:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise psycopg.OperationalError("Transient network glitch")
+            return mock_saver
+
+        monkeypatch.setattr("app.core.checkpointer.get_postgres_checkpointer", mock_get_postgres)
+        monkeypatch.setattr("time.sleep", lambda _: None)
+        monkeypatch.setattr(settings, "CHECKPOINT_MAX_RETRIES", 3)
+
+        saver = get_checkpointer(saver_type="postgres")
+        assert saver is mock_saver
+        assert getattr(saver, "is_degraded", False) is False
+        assert attempts == 2
 
 
 class TestPostgresCheckpointerIntegration:

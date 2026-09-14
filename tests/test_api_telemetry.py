@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from app import __version__
 from app.api.telemetry import get_app_registry
+from app.core.config import settings
 from app.core.registry import CapabilityRegistry
 from app.db.session import get_async_session
 from app.main import app
@@ -132,8 +133,8 @@ def test_get_health_healthy(client: TestClient) -> None:
     assert components["checkpointer"]["status"] == "ready"
 
 
-def test_get_health_degraded_on_database_error(client: TestClient) -> None:
-    """Verifica que /health retorna 'degraded' sin lanzar HTTP 500 cuando la BD falla."""
+def test_get_health_unhealthy_on_database_error(client: TestClient) -> None:
+    """Verifica que /health retorna HTTP 503 con status 'unhealthy' cuando la BD falla."""
     mock_db = AsyncMock()
     mock_db.execute.side_effect = ConnectionRefusedError("Could not connect to PostgreSQL")
 
@@ -143,13 +144,46 @@ def test_get_health_degraded_on_database_error(client: TestClient) -> None:
     app.dependency_overrides[get_async_session] = override_db
 
     response = client.get("/health")
-    assert response.status_code == 200
+    assert response.status_code == 503
 
     data = response.json()
-    assert data["status"] == "degraded"
+    assert data["status"] == "unhealthy"
     assert data["database"] == "disconnected"
     assert "Could not connect to PostgreSQL" in str(data["database_error"])
     assert data["components"]["database"]["status"] == "disconnected"
+
+
+def test_get_health_unhealthy_when_checkpointer_degraded(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verifica que /health retorna HTTP 503 cuando el checkpointer postgres está degradado."""
+    from app.core.checkpointer import get_memory_checkpointer
+
+    monkeypatch.setattr(settings, "CHECKPOINT_SAVER", "postgres")
+    mock_db = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.scalar.return_value = 1
+    mock_db.execute.return_value = mock_result
+
+    async def override_db() -> AsyncGenerator[Any, None]:
+        yield mock_db
+
+    app.dependency_overrides[get_async_session] = override_db
+
+    degraded_saver = get_memory_checkpointer()
+    setattr(degraded_saver, "is_degraded", True)  # noqa: B010
+    setattr(degraded_saver, "degraded_reason", "Connection pool exhausted")  # noqa: B010
+    app.state.checkpointer = degraded_saver
+
+    try:
+        response = client.get("/health")
+        assert response.status_code == 503
+        data = response.json()
+        assert data["status"] == "unhealthy"
+        assert data["components"]["checkpointer"]["status"] == "degraded"
+        assert "Connection pool exhausted" in str(data["components"]["checkpointer"]["error"])
+    finally:
+        app.state.checkpointer = None
 
 
 # ============================================================================
