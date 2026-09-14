@@ -7,12 +7,14 @@ persistencia no bloqueante para el ciclo asíncrono del agente.
 
 import asyncio
 import logging
+from collections import deque
 from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.config import settings
 from app.core.correlation import get_correlation_id
 from app.db.models import CoreAuditRecord
 from app.models.io import AgentInput, UserContext
@@ -44,8 +46,14 @@ class SecurityAuditLogger:
         self,
         session_factory: async_sessionmaker[AsyncSession] | None = None,
         auto_persist: bool = True,
+        max_history: int | None = None,
     ) -> None:
-        self._history: list[AuditRecord] = []
+        capacity = (
+            max_history
+            if max_history is not None
+            else getattr(settings, "AUDIT_LOG_MAX_HISTORY", 1000)
+        )
+        self._history: deque[AuditRecord] = deque(maxlen=capacity)
         if session_factory is None:
             from app.db.session import async_session_factory
 
@@ -416,6 +424,11 @@ class SecurityAuditLogger:
     def clear(self) -> None:
         """Limpia el buffer de auditoría en memoria."""
         self._history.clear()
+
+    @property
+    def max_history(self) -> int | None:
+        """Capacidad máxima configurada para el búfer circular en memoria."""
+        return self._history.maxlen
 
 
 # Instancia singleton perezosa

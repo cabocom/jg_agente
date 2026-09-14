@@ -119,6 +119,11 @@ class Settings(BaseSettings):
         default=False,
         description="Habilita el acceso a redes privadas si se autoriza explícitamente por configuración",
     )
+    AUDIT_LOG_MAX_HISTORY: int = Field(
+        default=1000,
+        ge=10,
+        description="Capacidad máxima del búfer circular en memoria para registros de auditoría de seguridad",
+    )
 
     # Perfil de capacidades y plugins para validación en boot
     PLUGINS_DIR: str | None = Field(

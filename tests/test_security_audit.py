@@ -152,6 +152,28 @@ class TestSecurityAuditLoggerUnit:
         audit.clear()
         assert len(audit.get_history()) == 0
 
+    def test_bounded_history_capacity_and_fifo_eviction(self) -> None:
+        """Verifica que el historial esté acotado y descarte los registros más antiguos (FIFO)."""
+        audit = SecurityAuditLogger(auto_persist=False, max_history=3)
+        assert audit.max_history == 3
+
+        for i in range(5):
+            audit.record_event(f"evt_{i}", {"index": i})
+
+        history = audit.get_history()
+        assert len(history) == 3
+        # Los eventos más antiguos (0 y 1) deben haberse descartado, conservando 2, 3 y 4
+        event_types = [rec.event_type for rec in history]
+        assert event_types == ["evt_2", "evt_3", "evt_4"]
+
+    def test_default_max_history_from_settings(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verifica que max_history respete la configuración AUDIT_LOG_MAX_HISTORY de Settings."""
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "AUDIT_LOG_MAX_HISTORY", 50)
+        audit = SecurityAuditLogger(auto_persist=False)
+        assert audit.max_history == 50
+
 
 @pytest.mark.asyncio
 class TestSecurityAuditLoggerIntegration:
