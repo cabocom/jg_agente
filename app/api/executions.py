@@ -973,7 +973,6 @@ async def _resolve_hitl_execution(
     approved: bool,
     payload: HITLResolutionRequest,
     graph: Any,
-    db: AsyncSession | None = None,
 ) -> AgentOutput:
     """Reanuda o cancela una ejecución detenida en el nodo human_approval mediante Command(resume=...)."""
     # 1. Validar existencia del hilo en el checkpointer
@@ -1149,7 +1148,6 @@ async def approve_execution_by_thread_id(
     thread_id: str,
     payload: HITLResolutionRequest | None = None,
     graph: Any = Depends(get_agent_graph),
-    db: AsyncSession = Depends(get_async_session),
 ) -> AgentOutput:
     """Reanuda el grafo en el paso de ejecución con aprobación del operador."""
     req_payload = payload or HITLResolutionRequest()
@@ -1158,7 +1156,6 @@ async def approve_execution_by_thread_id(
         approved=True,
         payload=req_payload,
         graph=graph,
-        db=db,
     )
 
 
@@ -1179,7 +1176,6 @@ async def reject_execution_by_thread_id(
     thread_id: str,
     payload: HITLResolutionRequest | None = None,
     graph: Any = Depends(get_agent_graph),
-    db: AsyncSession = Depends(get_async_session),
 ) -> AgentOutput:
     """Cancela el plan y concluye el grafo con estado cancelled."""
     req_payload = payload or HITLResolutionRequest()
@@ -1188,7 +1184,6 @@ async def reject_execution_by_thread_id(
         approved=False,
         payload=req_payload,
         graph=graph,
-        db=db,
     )
 
 
@@ -1209,7 +1204,6 @@ async def reject_execution_by_thread_id(
 async def approve_execution(
     payload: HITLResolutionRequest,
     graph: Any = Depends(get_agent_graph),
-    db: AsyncSession = Depends(get_async_session),
 ) -> AgentOutput:
     """Endpoint alternativo para aprobar indicando thread_id en el payload JSON."""
     if not payload.thread_id:
@@ -1222,7 +1216,6 @@ async def approve_execution(
         approved=True,
         payload=payload,
         graph=graph,
-        db=db,
     )
 
 
@@ -1243,7 +1236,6 @@ async def approve_execution(
 async def reject_execution(
     payload: HITLResolutionRequest,
     graph: Any = Depends(get_agent_graph),
-    db: AsyncSession = Depends(get_async_session),
 ) -> AgentOutput:
     """Endpoint alternativo para rechazar indicando thread_id en el payload JSON."""
     if not payload.thread_id:
@@ -1256,5 +1248,4 @@ async def reject_execution(
         approved=False,
         payload=payload,
         graph=graph,
-        db=db,
     )
