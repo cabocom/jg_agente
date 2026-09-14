@@ -38,6 +38,7 @@ services:
     environment:
       ENV: ${ENV:-development}
       AGENT_ID: ${AGENT_ID:-jg_agente_local}
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-2}
       POSTGRES_HOST: jg_agente_postgres
       POSTGRES_PORT: 5432
       POSTGRES_USER: ${JG_AGENTE_POSTGRES_USER:-postgres}

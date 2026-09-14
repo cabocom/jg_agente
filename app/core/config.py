@@ -21,6 +21,9 @@ class Settings(BaseSettings):
         default=None, description="Nombre descriptivo del agente para el Dashboard"
     )
     AGENT_PORT: int = Field(default=8000, description="Puerto interno de escucha")
+    UVICORN_WORKERS: int = Field(
+        default=2, ge=1, description="Número de workers paralelos para el servidor Uvicorn"
+    )
     AGENT_API_URL: str | None = Field(
         default=None, description="URL accesible internamente para jg_dashboard"
     )
