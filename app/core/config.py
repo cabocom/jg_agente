@@ -66,6 +66,16 @@ class Settings(BaseSettings):
         gt=0.0,
         description="Timeout en segundos para la petición HTTP de heartbeat",
     )
+    EXECUTION_CALLBACK_TIMEOUT_SECONDS: float = Field(
+        default=5.0,
+        gt=0.0,
+        description="Timeout en segundos para la notificación webhook de finalización asíncrona",
+    )
+    EXECUTION_CALLBACK_MAX_RETRIES: int = Field(
+        default=3,
+        ge=1,
+        description="Número máximo de reintentos para la notificación webhook de finalización asíncrona",
+    )
 
     # PostgreSQL para Checkpoints y tablas core_*
     POSTGRES_HOST: str = Field(default="jg_agente_postgres", description="Host de PostgreSQL")

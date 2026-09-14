@@ -92,6 +92,10 @@ class AgentInput(BaseModel):
         default_factory=dict,
         description="Metadatos arbitrarios complementarios de la solicitud",
     )
+    callback_url: str | None = Field(
+        default=None,
+        description="URL opcional de webhook HTTP para notificar la finalización de tareas asíncronas",
+    )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         description="Timestamp UTC de generación o recepción de la solicitud",

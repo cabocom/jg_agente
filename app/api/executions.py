@@ -9,12 +9,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from langchain_core.messages import HumanMessage
 from langgraph.errors import GraphInterrupt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import __version__
 from app.core.checkpointer import get_checkpointer
 from app.core.config import settings
 from app.core.correlation import get_correlation_id
@@ -599,19 +601,194 @@ async def execute_graph_pipeline(
         return agent_output
 
 
+def _get_agent_credentials() -> tuple[str, str | None]:
+    """Obtiene el identificador y secreto del agente para autenticación contra el Control Plane."""
+    agent_id = settings.AGENT_ID
+    secret = settings.PERMANENT_AGENT_SECRET
+    if not secret:
+        from app.core.registration import CredentialStore
+
+        creds = CredentialStore.load(settings.CREDENTIALS_FILE)
+        if creds:
+            agent_id = creds.agent_id or agent_id
+            secret = creds.permanent_secret or secret
+    return agent_id, secret
+
+
+async def notify_execution_completion(
+    output: AgentOutput,
+    callback_url: str | None = None,
+) -> bool:
+    """Envía notificación webhook hacia el Dashboard o URL de callback tras la finalización asíncrona."""
+    target_url = (
+        callback_url
+        or f"{settings.DASHBOARD_URL.rstrip('/')}/api/v1/internal/executions/{output.execution_id}/complete"
+    )
+    fallback_url = (
+        f"{settings.DASHBOARD_URL.rstrip('/')}/api/internal/executions/{output.execution_id}/complete"
+        if not callback_url
+        else None
+    )
+
+    agent_id, secret = _get_agent_credentials()
+    cid = output.correlation_id or get_correlation_id() or ""
+
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": f"jg_agente/{__version__}",
+        "X-Correlation-ID": cid,
+    }
+    if agent_id:
+        headers["X-Agent-ID"] = agent_id
+    if secret:
+        headers["Authorization"] = f"Bearer {secret}"
+        headers["X-Agent-Secret"] = secret
+
+    status_str = output.status.value if hasattr(output.status, "value") else str(output.status)
+    payload = {
+        "execution_id": output.execution_id,
+        "thread_id": output.thread_id,
+        "correlation_id": cid,
+        "status": status_str,
+        "response": output.response,
+        "output": output.response,
+        "data": output.data,
+        "execution_time_ms": output.execution_time_ms,
+        "requires_approval": output.requires_approval,
+        "pending_approval_id": output.pending_approval_id,
+        "metadata": output.metadata,
+        "completed_at": (
+            output.completed_at.isoformat()
+            if output.completed_at
+            else datetime.now(UTC).isoformat()
+        ),
+    }
+
+    timeout = getattr(settings, "EXECUTION_CALLBACK_TIMEOUT_SECONDS", 5.0)
+    max_retries = getattr(settings, "EXECUTION_CALLBACK_MAX_RETRIES", 3)
+
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(target_url, json=payload, headers=headers)
+                if resp.status_code == 404 and fallback_url and target_url != fallback_url:
+                    resp = await client.post(fallback_url, json=payload, headers=headers)
+
+                if resp.is_success:
+                    logger.info(
+                        "Notificación webhook entregada con éxito a '%s' (Status: %d, execution_id: %s).",
+                        target_url,
+                        resp.status_code,
+                        output.execution_id,
+                    )
+                    return True
+
+                if 400 <= resp.status_code < 500:
+                    logger.warning(
+                        "Notificación webhook rechazada con código de cliente %d en '%s': %s",
+                        resp.status_code,
+                        target_url,
+                        resp.text,
+                    )
+                    return False
+
+                logger.warning(
+                    "Intento %d/%d de notificación webhook a '%s' devolvió código %d: %s",
+                    attempt + 1,
+                    max_retries,
+                    target_url,
+                    resp.status_code,
+                    resp.text,
+                )
+        except httpx.RequestError as req_err:
+            logger.warning(
+                "Error de red en intento %d/%d al notificar webhook en '%s': %s",
+                attempt + 1,
+                max_retries,
+                target_url,
+                req_err,
+            )
+        except Exception as err:
+            logger.warning(
+                "Error inesperado al emitir notificación webhook a '%s': %s",
+                target_url,
+                err,
+            )
+            return False
+
+        if attempt < max_retries - 1:
+            await asyncio.sleep(0.5 * (2**attempt))
+
+    logger.error(
+        "Se agotaron los %d reintentos para entregar webhook de '%s' a '%s'.",
+        max_retries,
+        output.execution_id,
+        target_url,
+    )
+    return False
+
+
 async def run_in_background(
     graph: Any,
     input_data: AgentInput,
 ) -> None:
-    """Función de soporte para ejecución asíncrona delegada en BackgroundTasks."""
+    """Función de soporte para ejecución asíncrona delegada en BackgroundTasks con webhook."""
+    callback_url = (
+        getattr(input_data, "callback_url", None)
+        or (
+            input_data.parameters.get("callback_url")
+            if isinstance(input_data.parameters, dict)
+            else None
+        )
+        or (
+            input_data.parameters.get("webhook_url")
+            if isinstance(input_data.parameters, dict)
+            else None
+        )
+        or (
+            input_data.metadata.get("callback_url")
+            if isinstance(input_data.metadata, dict)
+            else None
+        )
+        or (
+            input_data.metadata.get("webhook_url")
+            if isinstance(input_data.metadata, dict)
+            else None
+        )
+    )
+
+    agent_output: AgentOutput | None = None
     try:
-        await execute_graph_pipeline(graph, input_data)
+        agent_output = await execute_graph_pipeline(graph, input_data)
     except Exception as exc:
         logger.error(
             "Fallo en ejecución en segundo plano '%s': %s",
             input_data.execution_id,
             exc,
+            exc_info=True,
         )
+        agent_output = AgentOutput(
+            execution_id=input_data.execution_id,
+            thread_id=input_data.thread_id,
+            correlation_id=input_data.correlation_id,
+            status=ExecutionStatus.FAILED,
+            response=f"Error durante ejecución en segundo plano: {exc}",
+            data={"error": str(exc), "error_type": type(exc).__name__},
+            execution_time_ms=0.0,
+            completed_at=datetime.now(UTC),
+            metadata=input_data.metadata,
+        )
+    finally:
+        if agent_output is not None:
+            try:
+                await notify_execution_completion(agent_output, callback_url=callback_url)
+            except Exception as notify_err:
+                logger.warning(
+                    "Error no controlado al notificar webhook de '%s': %s",
+                    input_data.execution_id,
+                    notify_err,
+                )
 
 
 @router.post(
