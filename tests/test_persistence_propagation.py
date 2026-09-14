@@ -1,18 +1,24 @@
-"""Pruebas unitarias para semántica y propagación de errores en la persistencia de ejecuciones (ISSUE-AGENT-006)."""
+"""Pruebas unitarias para resiliencia, reintentos y propagación de errores en persistencia (AGENTE-STATE-01)."""
 
 from collections.abc import Generator
+from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import OperationalError
 
 from app.api.executions import (
     _persist_or_update_execution,
+    _persist_with_retry,
+    _spool_emergency_execution,
     execute_graph_pipeline,
     get_agent_graph,
 )
 from app.core.checkpointer import get_memory_checkpointer
+from app.core.config import settings
 from app.core.graph import GraphBuilder
 from app.core.llm import MockChatModel
 from app.core.registry import CapabilityRegistry
@@ -84,6 +90,86 @@ async def test_persist_or_update_execution_raises_persistence_error_on_db_failur
 
 
 @pytest.mark.asyncio
+async def test_persist_with_retry_transient_failure_recovery() -> None:
+    """Verifica que _persist_with_retry reintente y tenga éxito si el fallo de DB es transitorio."""
+    input_data = AgentInput(
+        execution_id="exec-retry-transient",
+        thread_id="thread-retry-transient",
+        prompt="Test transient recovery",
+    )
+
+    call_count = 0
+
+    async def mock_persist_call(*args: Any, **kwargs: Any) -> MagicMock:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise PersistenceError("Transient DB glitch")
+        record = MagicMock()
+        record.execution_id = "exec-retry-transient"
+        return record
+
+    with patch("app.api.executions._persist_or_update_execution", side_effect=mock_persist_call):
+        record = await _persist_with_retry(
+            input_data=input_data,
+            status_val="completed",
+            max_retries=3,
+            backoff_base=0.01,
+        )
+
+    assert record.execution_id == "exec-retry-transient"
+    assert call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_persist_with_retry_fatal_failure_raises_persistence_error() -> None:
+    """Verifica que _persist_with_retry agote los reintentos y eleve PersistenceError si la DB sigue caída."""
+    input_data = AgentInput(
+        execution_id="exec-retry-fatal",
+        thread_id="thread-retry-fatal",
+        prompt="Test fatal outage",
+    )
+
+    call_count = 0
+
+    async def mock_persist_always_fails(*args: Any, **kwargs: Any) -> MagicMock:
+        nonlocal call_count
+        call_count += 1
+        raise PersistenceError("Persistent DB outage")
+
+    with (
+        patch(
+            "app.api.executions._persist_or_update_execution",
+            side_effect=mock_persist_always_fails,
+        ),
+        pytest.raises(PersistenceError) as exc_info,
+    ):
+        await _persist_with_retry(
+            input_data=input_data,
+            status_val="completed",
+            max_retries=3,
+            backoff_base=0.01,
+        )
+
+    assert call_count == 3
+    assert "Fallo irrecuperable tras 3 reintentos" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_spool_emergency_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verifica que _spool_emergency_execution escribe el volcado de la ejecución en disco."""
+    monkeypatch.setattr(settings, "EMERGENCY_PERSISTENCE_DIR", str(tmp_path / "emergency"))
+
+    payload = {"execution_id": "exec-spool-01", "status": "completed", "result": "ok"}
+    spool_path = _spool_emergency_execution("exec-spool-01", payload)
+
+    assert spool_path is not None
+    assert spool_path.exists()
+    assert "exec-spool-01.json" in str(spool_path)
+    assert "completed" in spool_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
 async def test_execute_graph_pipeline_persisted_success() -> None:
     """Verifica que execute_graph_pipeline incluye PersistenceMetadata con status=persisted en éxito."""
     registry = CapabilityRegistry()
@@ -100,9 +186,7 @@ async def test_execute_graph_pipeline_persisted_success() -> None:
         prompt="Prueba de éxito",
     )
 
-    with patch(
-        "app.api.executions._persist_or_update_execution", new_callable=AsyncMock
-    ) as mock_persist:
+    with patch("app.api.executions._persist_with_retry", new_callable=AsyncMock) as mock_persist:
         mock_persist.return_value = MagicMock()
         output = await execute_graph_pipeline(graph, input_data)
 
@@ -116,8 +200,12 @@ async def test_execute_graph_pipeline_persisted_success() -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_graph_pipeline_degraded_persistence_propagation() -> None:
-    """Verifica que si la persistencia falla en execute_graph_pipeline, se propaga degradación tipada sin tumbar la salida."""
+async def test_execute_graph_pipeline_fatal_persistence_failure_spools_and_raises_500(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verifica que si la persistencia falla definitivamente tras la ejecución, se vuelca a disco y se eleva HTTP 500."""
+    monkeypatch.setattr(settings, "EMERGENCY_PERSISTENCE_DIR", str(tmp_path / "emergency"))
+
     registry = CapabilityRegistry()
     builder = GraphBuilder(
         registry=registry,
@@ -127,25 +215,26 @@ async def test_execute_graph_pipeline_degraded_persistence_propagation() -> None
     graph = builder.build(checkpointer=get_memory_checkpointer())
 
     input_data = AgentInput(
-        execution_id="exec-pipe-degraded",
-        thread_id="thread-pipe-degraded",
-        prompt="Prueba de degradación",
+        execution_id="exec-pipe-fatal-db",
+        thread_id="thread-pipe-fatal-db",
+        prompt="Prueba de fallo fatal de persistencia",
     )
 
-    with patch(
-        "app.api.executions._persist_or_update_execution",
-        side_effect=PersistenceError("Simulated DB storage outage"),
+    with (
+        patch(
+            "app.api.executions._persist_with_retry",
+            side_effect=PersistenceError("Simulated DB storage outage"),
+        ),
+        pytest.raises(HTTPException) as exc_info,
     ):
-        output = await execute_graph_pipeline(graph, input_data)
+        await execute_graph_pipeline(graph, input_data)
 
-    assert isinstance(output, AgentOutput)
-    assert output.status == ExecutionStatus.COMPLETED
-    assert "persistence" in output.metadata
-    meta = PersistenceMetadata(**output.metadata["persistence"])
-    assert meta.status == PersistenceStatus.DEGRADED
-    assert meta.persisted is False
-    assert "Simulated DB storage outage" in (meta.error or "")
-    assert meta.error_type == "PersistenceError"
+    assert exc_info.value.status_code == 500
+    assert "Fallo crítico de persistencia tras finalización" in exc_info.value.detail
+
+    # Verificar que se creó el fichero de emergencia en disco
+    emergency_file = tmp_path / "emergency" / "exec-pipe-fatal-db.json"
+    assert emergency_file.exists()
 
 
 @pytest.fixture
@@ -166,32 +255,40 @@ def client_with_mock_graph() -> Generator[TestClient, None, None]:
     app.dependency_overrides.clear()
 
 
-def test_trigger_execution_degraded_persistence_initial(client_with_mock_graph: TestClient) -> None:
-    """Verifica que POST /executions/trigger maneja fallo inicial de persistencia propagando metadata degradada."""
+def test_trigger_execution_fatal_persistence_failure_returns_500(
+    client_with_mock_graph: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verifica que POST /executions/trigger devuelve HTTP 500 si falla la persistencia inicial (no oculta con 200)."""
+    monkeypatch.setattr(settings, "EMERGENCY_PERSISTENCE_DIR", str(tmp_path / "emergency"))
+
     payload = {
-        "execution_id": "exec-trigger-degraded",
-        "thread_id": "thread-trigger-degraded",
-        "prompt": "Test trigger degradation",
+        "execution_id": "exec-trigger-fatal-db",
+        "thread_id": "thread-trigger-fatal-db",
+        "prompt": "Test trigger fatal persistence",
     }
 
     with patch(
-        "app.api.executions._persist_or_update_execution",
+        "app.api.executions._persist_with_retry",
         side_effect=PersistenceError("Failed initial DB registration"),
     ):
         response = client_with_mock_graph.post("/executions/trigger", json=payload)
 
-    assert response.status_code == 200
+    assert response.status_code == 500
     data = response.json()
-    assert data["execution_id"] == "exec-trigger-degraded"
-    assert "persistence" in data["metadata"]
-    assert data["metadata"]["persistence"]["status"] == "degraded"
-    assert data["metadata"]["persistence"]["persisted"] is False
-    assert "Failed initial DB registration" in data["metadata"]["persistence"]["error"]
+    assert "Fallo crítico de persistencia" in data["detail"]
+
+    # Verificar que se generó spool de emergencia
+    emergency_file = tmp_path / "emergency" / "exec-trigger-fatal-db.json"
+    assert emergency_file.exists()
 
 
 @pytest.mark.asyncio
-async def test_resolve_hitl_execution_degraded_persistence() -> None:
-    """Verifica que _resolve_hitl_execution maneja fallo de persistencia marcando status=degraded."""
+async def test_resolve_hitl_execution_fatal_persistence_failure_raises_500(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verifica que _resolve_hitl_execution eleva HTTP 500 ante fallo fatal de persistencia."""
+    monkeypatch.setattr(settings, "EMERGENCY_PERSISTENCE_DIR", str(tmp_path / "emergency"))
+
     from app.api.executions import _resolve_hitl_execution
     from app.models.io import HITLResolutionRequest
 
@@ -199,7 +296,7 @@ async def test_resolve_hitl_execution_degraded_persistence() -> None:
     mock_snapshot = MagicMock()
     mock_snapshot.values = {
         "request": AgentInput(
-            execution_id="exec-hitl-01", thread_id="thread-hitl-01", prompt="test"
+            execution_id="exec-hitl-fatal", thread_id="thread-hitl-fatal", prompt="test"
         ),
         "is_resolved": True,
     }
@@ -208,33 +305,33 @@ async def test_resolve_hitl_execution_degraded_persistence() -> None:
 
     mock_final_state = {
         "request": AgentInput(
-            execution_id="exec-hitl-01", thread_id="thread-hitl-01", prompt="test"
+            execution_id="exec-hitl-fatal", thread_id="thread-hitl-fatal", prompt="test"
         ),
         "output": AgentOutput(
-            execution_id="exec-hitl-01",
-            thread_id="thread-hitl-01",
+            execution_id="exec-hitl-fatal",
+            thread_id="thread-hitl-fatal",
             status=ExecutionStatus.COMPLETED,
             response="Aprobado y ejecutado.",
         ),
     }
     mock_graph.ainvoke.return_value = mock_final_state
 
-    mock_db = AsyncMock()
-
-    with patch(
-        "app.api.executions._persist_or_update_execution",
-        side_effect=PersistenceError("Fallo en commit final HITL"),
+    with (
+        patch(
+            "app.api.executions._persist_with_retry",
+            side_effect=PersistenceError("Fallo en commit final HITL"),
+        ),
+        pytest.raises(HTTPException) as exc_info,
     ):
-        output = await _resolve_hitl_execution(
-            thread_id="thread-hitl-01",
+        await _resolve_hitl_execution(
+            thread_id="thread-hitl-fatal",
             approved=True,
             payload=HITLResolutionRequest(approver="supervisor", notes="approved"),
             graph=mock_graph,
-            db=mock_db,
         )
 
-    assert output.status == ExecutionStatus.COMPLETED
-    assert "persistence" in output.metadata
-    assert output.metadata["persistence"]["status"] == "degraded"
-    assert output.metadata["persistence"]["persisted"] is False
-    assert "Fallo en commit final HITL" in output.metadata["persistence"]["error"]
+    assert exc_info.value.status_code == 500
+    assert "Fallo crítico de persistencia al actualizar resolución HITL" in exc_info.value.detail
+
+    emergency_file = tmp_path / "emergency" / "exec-hitl-fatal.json"
+    assert emergency_file.exists()

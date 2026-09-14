@@ -74,6 +74,20 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: str = Field(default="postgres", description="Contraseña de base de datos")
     POSTGRES_DB: str = Field(default="jg_agente", description="Nombre de la base de datos")
     DATABASE_URL: str | None = Field(default=None, description="URL de conexión SQLAlchemy async")
+    PERSISTENCE_MAX_RETRIES: int = Field(
+        default=3,
+        ge=1,
+        description="Número máximo de reintentos con backoff al persistir en DB",
+    )
+    PERSISTENCE_RETRY_BACKOFF_SECONDS: float = Field(
+        default=0.2,
+        ge=0.01,
+        description="Pausa base en segundos para el backoff exponencial de persistencia",
+    )
+    EMERGENCY_PERSISTENCE_DIR: str = Field(
+        default="data/emergency_executions",
+        description="Directorio local para almacenamiento de emergencia si PostgreSQL falla definitivamente",
+    )
 
     # Seguridad y protección SSRF
     SSRF_ENFORCE_PROTECTION: bool = Field(

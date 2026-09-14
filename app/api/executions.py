@@ -1,10 +1,12 @@
 """Endpoints REST para el control y disparo de ejecuciones cognitivas en jg_agente."""
 
+import asyncio
 import contextlib
 import json
 import logging
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
@@ -14,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.checkpointer import get_checkpointer
+from app.core.config import settings
 from app.core.correlation import get_correlation_id
 from app.core.graph import GraphBuilder
 from app.core.llm import get_chat_model
@@ -165,6 +168,99 @@ async def _persist_or_update_execution(
         ) from exc
 
 
+def _spool_emergency_execution(
+    execution_id: str,
+    payload: dict[str, Any],
+) -> Path | None:
+    """Almacena el estado/salida de la ejecución en disco local ante caída irrecuperable de PostgreSQL."""
+    try:
+        spool_dir = Path(settings.EMERGENCY_PERSISTENCE_DIR)
+        spool_dir.mkdir(parents=True, exist_ok=True)
+        target_file = spool_dir / f"{execution_id}.json"
+        target_file.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+        logger.warning(
+            "Respaldo de emergencia escrito en '%s' para ejecución '%s'",
+            target_file,
+            execution_id,
+        )
+        return target_file
+    except Exception as spool_err:
+        logger.critical(
+            "Fallo crítico: No se pudo escribir el respaldo de emergencia en disco para '%s': %s",
+            execution_id,
+            spool_err,
+            exc_info=True,
+        )
+        return None
+
+
+async def _persist_with_retry(
+    input_data: AgentInput,
+    status_val: str = "in_progress",
+    response_text: str | None = None,
+    data_payload: dict[str, Any] | None = None,
+    execution_time_ms: float = 0.0,
+    requires_approval: bool = False,
+    pending_approval_id: str | None = None,
+    error_msg: str | None = None,
+    completed_at: datetime | None = None,
+    max_retries: int | None = None,
+    backoff_base: float | None = None,
+) -> CoreExecution:
+    """Persiste o actualiza la ejecución en core_executions aplicando reintentos exponenciales.
+
+    Cada intento utiliza una sesión asíncrona nueva obtenida de async_session_factory()
+    para prevenir contaminación de estado ante fallos de conexión o rollback.
+    """
+    retries = max_retries if max_retries is not None else settings.PERSISTENCE_MAX_RETRIES
+    backoff = (
+        backoff_base if backoff_base is not None else settings.PERSISTENCE_RETRY_BACKOFF_SECONDS
+    )
+    last_err: Exception | None = None
+
+    for attempt in range(retries):
+        try:
+            async with async_session_factory() as db:
+                return await _persist_or_update_execution(
+                    db,
+                    input_data=input_data,
+                    status_val=status_val,
+                    response_text=response_text,
+                    data_payload=data_payload,
+                    execution_time_ms=execution_time_ms,
+                    requires_approval=requires_approval,
+                    pending_approval_id=pending_approval_id,
+                    error_msg=error_msg,
+                    completed_at=completed_at,
+                )
+        except Exception as exc:
+            last_err = exc
+            if attempt < retries - 1:
+                wait_time = backoff * (2**attempt)
+                logger.warning(
+                    "Fallo transitorio al persistir ejecución '%s' en intento %d/%d: %s. Reintentando en %.2fs...",
+                    input_data.execution_id,
+                    attempt + 1,
+                    retries,
+                    exc,
+                    wait_time,
+                )
+                await asyncio.sleep(wait_time)
+            else:
+                logger.error(
+                    "Agotados los %d intentos de persistencia para ejecución '%s'. Fallo fatal: %s",
+                    retries,
+                    input_data.execution_id,
+                    exc,
+                    exc_info=True,
+                )
+
+    raise PersistenceError(
+        f"Fallo irrecuperable tras {retries} reintentos al persistir ejecución '{input_data.execution_id}': {last_err}",
+        original_error=last_err,
+    )
+
+
 async def execute_graph_pipeline(
     graph: Any,
     input_data: AgentInput,
@@ -282,34 +378,33 @@ async def execute_graph_pipeline(
                 completed_at=datetime.now(UTC),
             )
             try:
-                async with async_session_factory() as db:
-                    await _persist_or_update_execution(
-                        db,
-                        input_data=input_data,
-                        status_val=ExecutionStatus.WAITING_APPROVAL.value,
-                        response_text=agent_output.response,
-                        data_payload=agent_output.data,
-                        execution_time_ms=agent_output.execution_time_ms,
-                        requires_approval=True,
-                        pending_approval_id=agent_output.pending_approval_id,
-                    )
+                await _persist_with_retry(
+                    input_data=input_data,
+                    status_val=ExecutionStatus.WAITING_APPROVAL.value,
+                    response_text=agent_output.response,
+                    data_payload=agent_output.data,
+                    execution_time_ms=agent_output.execution_time_ms,
+                    requires_approval=True,
+                    pending_approval_id=agent_output.pending_approval_id,
+                )
                 agent_output.metadata["persistence"] = PersistenceMetadata(
                     status=PersistenceStatus.PERSISTED,
                     persisted=True,
                 ).model_dump()
             except (PersistenceError, Exception) as db_err:
+                _spool_emergency_execution(
+                    input_data.execution_id, agent_output.model_dump(mode="json")
+                )
                 logger.error(
-                    "Fallo al actualizar DB tras HITL pause en '%s': %s",
+                    "Fallo irrecuperable al actualizar DB tras HITL pause en '%s': %s",
                     input_data.execution_id,
                     db_err,
                     exc_info=True,
                 )
-                agent_output.metadata["persistence"] = PersistenceMetadata(
-                    status=PersistenceStatus.DEGRADED,
-                    persisted=False,
-                    error=str(db_err),
-                    error_type=type(db_err).__name__,
-                ).model_dump()
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Fallo crítico de persistencia en pausa HITL para '{input_data.execution_id}'.",
+                ) from db_err
 
             return agent_output
 
@@ -333,38 +428,37 @@ async def execute_graph_pipeline(
                 completed_at=datetime.now(UTC),
             )
 
-        # Actualizar persistencia en DB si es posible
+        # Actualizar persistencia en DB
         try:
-            async with async_session_factory() as db:
-                await _persist_or_update_execution(
-                    db,
-                    input_data=input_data,
-                    status_val=agent_output.status.value,
-                    response_text=agent_output.response,
-                    data_payload=agent_output.data,
-                    execution_time_ms=agent_output.execution_time_ms,
-                    requires_approval=agent_output.requires_approval,
-                    pending_approval_id=agent_output.pending_approval_id,
-                    error_msg=agent_output.error,
-                    completed_at=agent_output.completed_at,
-                )
+            await _persist_with_retry(
+                input_data=input_data,
+                status_val=agent_output.status.value,
+                response_text=agent_output.response,
+                data_payload=agent_output.data,
+                execution_time_ms=agent_output.execution_time_ms,
+                requires_approval=agent_output.requires_approval,
+                pending_approval_id=agent_output.pending_approval_id,
+                error_msg=agent_output.error,
+                completed_at=agent_output.completed_at,
+            )
             agent_output.metadata["persistence"] = PersistenceMetadata(
                 status=PersistenceStatus.PERSISTED,
                 persisted=True,
             ).model_dump()
         except (PersistenceError, Exception) as db_err:
+            _spool_emergency_execution(
+                input_data.execution_id, agent_output.model_dump(mode="json")
+            )
             logger.error(
-                "Fallo al actualizar DB tras finalización en '%s': %s",
+                "Fallo irrecuperable al actualizar DB tras finalización en '%s': %s",
                 input_data.execution_id,
                 db_err,
                 exc_info=True,
             )
-            agent_output.metadata["persistence"] = PersistenceMetadata(
-                status=PersistenceStatus.DEGRADED,
-                persisted=False,
-                error=str(db_err),
-                error_type=type(db_err).__name__,
-            ).model_dump()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Fallo crítico de persistencia tras finalización para '{input_data.execution_id}'.",
+            ) from db_err
 
         if cid:
             agent_output.correlation_id = cid
@@ -417,34 +511,33 @@ async def execute_graph_pipeline(
         )
 
         try:
-            async with async_session_factory() as db:
-                await _persist_or_update_execution(
-                    db,
-                    input_data=input_data,
-                    status_val=ExecutionStatus.WAITING_APPROVAL.value,
-                    response_text=agent_output.response,
-                    data_payload=agent_output.data,
-                    execution_time_ms=agent_output.execution_time_ms,
-                    requires_approval=True,
-                    pending_approval_id=agent_output.pending_approval_id,
-                )
+            await _persist_with_retry(
+                input_data=input_data,
+                status_val=ExecutionStatus.WAITING_APPROVAL.value,
+                response_text=agent_output.response,
+                data_payload=agent_output.data,
+                execution_time_ms=agent_output.execution_time_ms,
+                requires_approval=True,
+                pending_approval_id=agent_output.pending_approval_id,
+            )
             agent_output.metadata["persistence"] = PersistenceMetadata(
                 status=PersistenceStatus.PERSISTED,
                 persisted=True,
             ).model_dump()
         except (PersistenceError, Exception) as db_err:
+            _spool_emergency_execution(
+                input_data.execution_id, agent_output.model_dump(mode="json")
+            )
             logger.error(
-                "Fallo al actualizar DB tras HITL pause en '%s': %s",
+                "Fallo irrecuperable al actualizar DB tras HITL pause en '%s': %s",
                 input_data.execution_id,
                 db_err,
                 exc_info=True,
             )
-            agent_output.metadata["persistence"] = PersistenceMetadata(
-                status=PersistenceStatus.DEGRADED,
-                persisted=False,
-                error=str(db_err),
-                error_type=type(db_err).__name__,
-            ).model_dump()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Fallo crítico de persistencia en interrupción HITL para '{input_data.execution_id}'.",
+            ) from db_err
 
         if cid:
             agent_output.correlation_id = cid
@@ -453,6 +546,8 @@ async def execute_graph_pipeline(
 
         return agent_output
 
+    except HTTPException:
+        raise
     except Exception as exc:
         elapsed_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
         logger.exception("Error no controlado durante la ejecución del grafo: %s", exc)
@@ -469,33 +564,32 @@ async def execute_graph_pipeline(
         )
 
         try:
-            async with async_session_factory() as db:
-                await _persist_or_update_execution(
-                    db,
-                    input_data=input_data,
-                    status_val=ExecutionStatus.FAILED.value,
-                    response_text=agent_output.response,
-                    execution_time_ms=agent_output.execution_time_ms,
-                    error_msg=str(exc),
-                    completed_at=datetime.now(UTC),
-                )
+            await _persist_with_retry(
+                input_data=input_data,
+                status_val=ExecutionStatus.FAILED.value,
+                response_text=agent_output.response,
+                execution_time_ms=agent_output.execution_time_ms,
+                error_msg=str(exc),
+                completed_at=datetime.now(UTC),
+            )
             agent_output.metadata["persistence"] = PersistenceMetadata(
                 status=PersistenceStatus.PERSISTED,
                 persisted=True,
             ).model_dump()
         except (PersistenceError, Exception) as db_err:
+            _spool_emergency_execution(
+                input_data.execution_id, agent_output.model_dump(mode="json")
+            )
             logger.error(
-                "Degradación de persistencia al registrar fallo no controlado en '%s': %s",
+                "Fallo irrecuperable de persistencia al registrar fallo no controlado en '%s': %s",
                 input_data.execution_id,
                 db_err,
                 exc_info=True,
             )
-            agent_output.metadata["persistence"] = PersistenceMetadata(
-                status=PersistenceStatus.DEGRADED,
-                persisted=False,
-                error=str(db_err),
-                error_type=type(db_err).__name__,
-            ).model_dump()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Fallo crítico de persistencia al registrar fallo no controlado en '{input_data.execution_id}'.",
+            ) from db_err
 
         if cid:
             agent_output.correlation_id = cid
@@ -547,7 +641,6 @@ async def trigger_execution(
         description="Si es False, inicia la ejecución en segundo plano y responde HTTP 202 Accepted.",
     ),
     graph: Any = Depends(get_agent_graph),
-    db: AsyncSession = Depends(get_async_session),
 ) -> Any:
     """Punto de entrada principal para la ejecución de agentes en jg_agente."""
     # 0. Sincronizar e inyectar correlation_id
@@ -566,31 +659,27 @@ async def trigger_execution(
             input_data.metadata["correlation_id"] = cid
 
     # 1. Registrar o asegurar registro inicial en DB
-    initial_persistence: PersistenceMetadata
     try:
-        await _persist_or_update_execution(
-            db,
+        await _persist_with_retry(
             input_data=input_data,
             status_val=ExecutionStatus.IN_PROGRESS.value,
         )
-        initial_persistence = PersistenceMetadata(
+        input_data.metadata["persistence"] = PersistenceMetadata(
             status=PersistenceStatus.PERSISTED,
             persisted=True,
-        )
+        ).model_dump()
     except (PersistenceError, Exception) as p_err:
+        _spool_emergency_execution(input_data.execution_id, input_data.model_dump(mode="json"))
         logger.error(
-            "Degradación de persistencia al registrar inicio de ejecución '%s': %s",
+            "Fallo irrecuperable de persistencia al registrar inicio de ejecución '%s': %s",
             input_data.execution_id,
             p_err,
             exc_info=True,
         )
-        initial_persistence = PersistenceMetadata(
-            status=PersistenceStatus.DEGRADED,
-            persisted=False,
-            error=str(p_err),
-            error_type=type(p_err).__name__,
-        )
-    input_data.metadata["persistence"] = initial_persistence.model_dump()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Fallo crítico de persistencia: no se pudo registrar la ejecución '{input_data.execution_id}' en la base de datos.",
+        ) from p_err
 
     # 2. Flujo Asíncrono (sync=False o indicado en parámetros)
     async_requested = (
@@ -884,7 +973,7 @@ async def _resolve_hitl_execution(
     approved: bool,
     payload: HITLResolutionRequest,
     graph: Any,
-    db: AsyncSession,
+    db: AsyncSession | None = None,
 ) -> AgentOutput:
     """Reanuda o cancela una ejecución detenida en el nodo human_approval mediante Command(resume=...)."""
     # 1. Validar existencia del hilo en el checkpointer
@@ -1013,8 +1102,7 @@ async def _resolve_hitl_execution(
         prompt=getattr(req_data, "prompt", "HITL Decision") if req_data else "HITL Decision",
     )
     try:
-        await _persist_or_update_execution(
-            db,
+        await _persist_with_retry(
             input_data=dummy_input,
             status_val=agent_output.status.value,
             response_text=agent_output.response,
@@ -1029,18 +1117,17 @@ async def _resolve_hitl_execution(
             persisted=True,
         ).model_dump()
     except (PersistenceError, Exception) as db_err:
+        _spool_emergency_execution(agent_output.execution_id, agent_output.model_dump(mode="json"))
         logger.error(
-            "Degradación de persistencia al actualizar resolución HITL en '%s': %s",
+            "Fallo irrecuperable de persistencia al actualizar resolución HITL en '%s': %s",
             agent_output.execution_id,
             db_err,
             exc_info=True,
         )
-        agent_output.metadata["persistence"] = PersistenceMetadata(
-            status=PersistenceStatus.DEGRADED,
-            persisted=False,
-            error=str(db_err),
-            error_type=type(db_err).__name__,
-        ).model_dump()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Fallo crítico de persistencia al actualizar resolución HITL para '{agent_output.execution_id}'.",
+        ) from db_err
 
     return agent_output
 

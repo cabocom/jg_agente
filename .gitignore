@@ -36,5 +36,7 @@ credentials.json
 *.swo
 .DS_Store
 
-# Logs
+# Logs y datos de spool local
 *.log
+data/
+storage/
