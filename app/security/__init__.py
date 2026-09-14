@@ -1,6 +1,6 @@
 """Módulo de seguridad de ejecución de jg_agente."""
 
-from app.security.audit import SecurityAuditLogger, get_security_audit_logger
+from app.security.audit import SecurityAuditLogger, get_audit_logger, get_security_audit_logger
 from app.security.auth import (
     compute_body_sha256,
     compute_canonical_string,
@@ -31,6 +31,7 @@ __all__ = [
     "compute_hmac_signature",
     "create_async_ssrf_safe_client",
     "create_ssrf_safe_client",
+    "get_audit_logger",
     "get_security_audit_logger",
     "get_security_guard",
     "get_ssrf_validator",

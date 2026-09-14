@@ -15,6 +15,11 @@ from app.core.config import settings
 from app.core.correlation import CorrelationIdMiddleware, CorrelationLogFilter
 from app.core.heartbeat import HeartbeatService
 from app.core.registration import auto_register_agent
+from app.security import (
+    get_security_audit_logger,
+    get_security_guard,
+    get_ssrf_validator,
+)
 
 logger = logging.getLogger("jg_agente")
 correlation_filter = CorrelationLogFilter()
@@ -35,6 +40,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         settings.AGENT_ID,
         settings.ENV,
     )
+
+    # 0. Pre-inicialización determinista de singletons de seguridad (AGENTE-CONC-01)
+    get_security_audit_logger()
+    get_ssrf_validator()
+    get_security_guard()
 
     # 1. Autodescubrimiento, validación de integridad de arranque y registro
     registry, plugin_manager = init_agent_capabilities(settings)

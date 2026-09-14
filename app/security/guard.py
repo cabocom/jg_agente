@@ -13,6 +13,7 @@ import inspect
 import logging
 import os
 import re
+import threading
 import time
 import urllib.parse
 from collections.abc import Sequence
@@ -503,13 +504,16 @@ class SecurityGuard:
         return tool_res
 
 
-# Instancia singleton por defecto
+# Instancia singleton por defecto y cerrojo de concurrencia
+_guard_lock = threading.Lock()
 _default_security_guard: SecurityGuard | None = None
 
 
 def get_security_guard() -> SecurityGuard:
-    """Factory singleton para SecurityGuard."""
+    """Factory singleton thread-safe para SecurityGuard."""
     global _default_security_guard
     if _default_security_guard is None:
-        _default_security_guard = SecurityGuard()
+        with _guard_lock:
+            if _default_security_guard is None:
+                _default_security_guard = SecurityGuard()
     return _default_security_guard

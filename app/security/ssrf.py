@@ -11,6 +11,7 @@ import logging
 import re
 import socket
 import ssl
+import threading
 from collections.abc import Sequence
 from typing import Any
 from urllib.parse import urlparse, urlunparse
@@ -557,15 +558,18 @@ class SSRFValidator:
         return True, None
 
 
-# Instancia singleton por defecto
+# Instancia singleton por defecto y cerrojo de concurrencia
+_ssrf_lock = threading.Lock()
 _default_ssrf_validator: SSRFValidator | None = None
 
 
 def get_ssrf_validator() -> SSRFValidator:
-    """Factory para obtener la instancia singleton de SSRFValidator."""
+    """Factory singleton thread-safe para obtener SSRFValidator."""
     global _default_ssrf_validator
     if _default_ssrf_validator is None:
-        _default_ssrf_validator = SSRFValidator()
+        with _ssrf_lock:
+            if _default_ssrf_validator is None:
+                _default_ssrf_validator = SSRFValidator()
     return _default_ssrf_validator
 
 

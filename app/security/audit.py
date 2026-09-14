@@ -7,6 +7,7 @@ persistencia no bloqueante para el ciclo asíncrono del agente.
 
 import asyncio
 import logging
+import threading
 from collections import deque
 from datetime import UTC, datetime
 from typing import Any
@@ -431,13 +432,20 @@ class SecurityAuditLogger:
         return self._history.maxlen
 
 
-# Instancia singleton perezosa
+# Instancia singleton perezosa y cerrojo de concurrencia
+_audit_lock = threading.Lock()
 _default_audit_logger: SecurityAuditLogger | None = None
 
 
 def get_security_audit_logger() -> SecurityAuditLogger:
-    """Factory para obtener la instancia singleton por defecto de SecurityAuditLogger."""
+    """Factory singleton thread-safe para obtener SecurityAuditLogger."""
     global _default_audit_logger
     if _default_audit_logger is None:
-        _default_audit_logger = SecurityAuditLogger()
+        with _audit_lock:
+            if _default_audit_logger is None:
+                _default_audit_logger = SecurityAuditLogger()
     return _default_audit_logger
+
+
+# Alias canónico
+get_audit_logger = get_security_audit_logger
