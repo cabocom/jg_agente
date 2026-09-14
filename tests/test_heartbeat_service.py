@@ -67,7 +67,10 @@ async def test_heartbeat_send_success() -> None:
     assert service.failed_count == 0
     assert service.last_successful_heartbeat is not None
     assert "/api/v1/agents/heartbeat" in captured["url"]
-    assert "Bearer test_secret_123" in captured["headers"]["authorization"]
+    assert "authorization" not in captured["headers"]
+    assert "x-agent-secret" not in captured["headers"]
+    assert "x-signature" in captured["headers"]
+    assert "x-timestamp" in captured["headers"]
     assert captured["headers"]["x-agent-id"] == "test-agent-uuid"
 
 

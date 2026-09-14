@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import resource
@@ -15,6 +16,7 @@ import httpx
 from app import __version__
 from app.core.config import Settings
 from app.core.registry import CapabilityRegistry
+from app.security.auth import compute_canonical_string, compute_hmac_signature
 
 logger = logging.getLogger("jg_agente.heartbeat")
 
@@ -86,19 +88,26 @@ class HeartbeatService:
         """Emite una petición individual de heartbeat hacia el Dashboard."""
         metrics = collect_system_metrics(self._start_time, self.registry)
 
-        headers = {
-            "Authorization": f"Bearer {permanent_secret}",
-            "X-Agent-ID": agent_id,
-            "X-Agent-Secret": permanent_secret,
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": f"jg_agente/{__version__}",
-        }
-
         payload = {
             "agent_id": agent_id,
             "status": status,
             "metrics": metrics,
+        }
+
+        timestamp = int(time.time())
+        raw_body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        canonical_v1 = compute_canonical_string(
+            "POST", "/api/v1/agents/heartbeat", timestamp, raw_body
+        )
+        sig_v1 = compute_hmac_signature(permanent_secret, canonical_v1)
+
+        headers = {
+            "X-Agent-ID": agent_id,
+            "X-Timestamp": str(timestamp),
+            "X-Signature": sig_v1,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": f"jg_agente/{__version__}",
         }
 
         endpoint_v1 = f"{self.settings.DASHBOARD_URL.rstrip('/')}/api/v1/agents/heartbeat"
@@ -108,9 +117,18 @@ class HeartbeatService:
             async with httpx.AsyncClient(
                 timeout=self.settings.HEARTBEAT_TIMEOUT_SECONDS, transport=self.transport
             ) as client:
-                response = await client.post(endpoint_v1, json=payload, headers=headers)
+                response = await client.post(endpoint_v1, content=raw_body, headers=headers)
                 if response.status_code == 404:
-                    response = await client.post(endpoint_fallback, json=payload, headers=headers)
+                    canonical_fallback = compute_canonical_string(
+                        "POST", "/api/agents/heartbeat", timestamp, raw_body
+                    )
+                    headers_fallback = dict(headers)
+                    headers_fallback["X-Signature"] = compute_hmac_signature(
+                        permanent_secret, canonical_fallback
+                    )
+                    response = await client.post(
+                        endpoint_fallback, content=raw_body, headers=headers_fallback
+                    )
 
                 if response.status_code == 200:
                     self.last_successful_heartbeat = datetime.now(UTC).isoformat()
