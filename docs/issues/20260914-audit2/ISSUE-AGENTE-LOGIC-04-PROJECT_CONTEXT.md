@@ -4,13 +4,13 @@
 - **ID:** `jg_agente#69`
 - **Código:** `AGENTE-LOGIC-04`
 - **Severidad:** 🟡 MEDIO
-- **Ubicación:** [`jg_agente/app/nodes/execute.py:350-380`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/nodes/execute.py)
+- **Ubicación:** [`jg_agente/app/nodes/execute.py:350-380`](../../../app/nodes/execute.py)
 - **Componentes relacionados:**
-  - [`jg_agente/app/models/state.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/models/state.py) (`PlanStep`, `ExecutionPlan`)
-  - [`jg_agente/app/models/tools.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/models/tools.py) (`AgentTool`)
-  - [`jg_agente/app/nodes/execute.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/nodes/execute.py)
-  - [`jg_agente/app/nodes/evaluate.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/nodes/evaluate.py)
-  - [`jg_agente/app/nodes/plan.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/nodes/plan.py)
+  - [`jg_agente/app/models/state.py`](../../../app/models/state.py) (`PlanStep`, `ExecutionPlan`)
+  - [`jg_agente/app/models/tools.py`](../../../app/models/tools.py) (`AgentTool`)
+  - [`jg_agente/app/nodes/execute.py`](../../../app/nodes/execute.py)
+  - [`jg_agente/app/nodes/evaluate.py`](../../../app/nodes/evaluate.py)
+  - [`jg_agente/app/nodes/plan.py`](../../../app/nodes/plan.py)
 
 ---
 

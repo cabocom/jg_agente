@@ -315,3 +315,18 @@ Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de 
   - [x] `ISSUE-F11-T04`: Implementación de herramientas Docker con `rollback_func` en plugin DevOps (`DockerRestartTool`, `DockerRestartArgs`, contrato `AgentTool`, `risk_level=HIGH`, `reversible=True`, `rollback_context` con estado previo y compensación funcional).
 
 Consulte [TODO-PENDIENTES.md](TODO-PENDIENTES.md) para el detalle de ítems pendientes y deuda técnica para la siguiente fase de desarrollo.
+
+---
+
+## Licencia y Modelo Dual (Open Source / Comercial Enterprise)
+
+`jg_agente` se distribuye bajo un esquema de **Doble Licenciamiento (Dual Licensing)**:
+
+- **Licencia de Código Abierto:** [GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE) - Copyright (C) 2026 Javier Gálvez.
+- **Licencia Comercial Enterprise:** Exención de la obligación de copyleft de red (Sección 13 de AGPLv3) para despliegues comerciales, SaaS y uso corporativo cerrado:
+  - **Tarifa:** **200 € / mes** por cada bloque de hasta 3 agentes (sin rappel por volumen).
+  - **Mayor volumen:** Si necesita mayor volumen o licenciamiento corporativo global, contacte a través de **[https://javiergalvez.com](https://javiergalvez.com)**.
+
+Para más detalles sobre derechos, exenciones de copyleft y contratación, consulte [COMMERCIAL_TERMS.md](COMMERCIAL_TERMS.md).
+
+

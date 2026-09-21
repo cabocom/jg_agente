@@ -8,19 +8,19 @@
 
 ## 1. Resumen de Componentes Creados
 
-1. **Dockerfile Multi-Stage ([Dockerfile](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/Dockerfile)):**
+1. **Dockerfile Multi-Stage ([Dockerfile](../../../Dockerfile)):**
    - Basado en el patrón probado en `Devops60k/app/Dockerfile`.
    - Etapa builder instala paquetes en prefijo `/install` a partir de `pyproject.toml`.
    - Etapa runner utiliza usuario no-root `appuser` (10001:10001) y define directiva `HEALTHCHECK` nativa.
-2. **Orquestación de Desarrollo Local ([docker-compose.yml](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/docker-compose.yml)):**
+2. **Orquestación de Desarrollo Local ([docker-compose.yml](../../../docker-compose.yml)):**
    - Servicio `jg_agente_postgres` (`postgres:16-alpine`) con volumen persistente `jg_agente_postgres_data` y puerto host `5433` (evita conflicto con puerto 5432 existente).
    - Servicio `jg_agente` con inicio condicionado a `service_healthy` de la base de datos.
    - Restricciones de privilegios `security_opt: no-new-privileges:true` y `cap_drop: ALL`.
 3. **Módulos de Configuración y Aplicación:**
-   - [app/core/config.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/core/config.py): Gestión de settings con Pydantic y generación de `async_database_url`.
-   - [app/main.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/main.py): FastAPI con endpoint `/health` que ejecuta `SELECT 1` asíncrono para verificar conectividad real con PostgreSQL.
-   - [.env.example](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/.env.example): Plantilla de configuración.
-4. **Tests de Integración Base ([tests/test_health_endpoint.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/tests/test_health_endpoint.py)):**
+   - [app/core/config.py](../../../app/core/config.py): Gestión de settings con Pydantic y generación de `async_database_url`.
+   - [app/main.py](../../../app/main.py): FastAPI con endpoint `/health` que ejecuta `SELECT 1` asíncrono para verificar conectividad real con PostgreSQL.
+   - [.env.example](../../../.env.example): Plantilla de configuración.
+4. **Tests de Integración Base ([tests/test_health_endpoint.py](../../../tests/test_health_endpoint.py)):**
    - Pruebas sobre endpoints `/` y `/health`.
 
 ---

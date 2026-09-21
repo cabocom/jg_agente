@@ -17,18 +17,18 @@ Configurar el empaquetamiento en contenedores para `jg_agente` y la orquestació
 
 ## 2. Requerimientos y Criterios de Aceptación
 
-1. **Dockerfile Multi-Stage ([Dockerfile](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/Dockerfile)):**
+1. **Dockerfile Multi-Stage ([Dockerfile](../../../Dockerfile)):**
    - **Etapa 1 (Builder):** `python:3.12-slim` con compilación determinista e instalación de dependencias en `/install` mediante `pyproject.toml`.
    - **Etapa 2 (Runner):** Imagen final limpia, sin compiladores, ejecutando bajo usuario no-root `appuser:appgroup` (UID/GID 10001) para máxima seguridad (`security_opt`, `cap_drop: ALL`).
    - `HEALTHCHECK` activo contra el endpoint `/health`.
-2. **Orquestación Local ([docker-compose.yml](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/docker-compose.yml)):**
+2. **Orquestación Local ([docker-compose.yml](../../../docker-compose.yml)):**
    - Servicio `jg_agente_postgres` con `postgres:16-alpine`, volumen persistente y healthcheck `pg_isready`.
    - Puerto del host configurable (`${POSTGRES_PORT:-5433}:5432`) para evitar conflictos con instancias existentes en 5432.
    - Servicio `jg_agente` enlazado con `depends_on` (condición `service_healthy`).
    - Red aislada `jg_agente_net`.
 3. **Servidor Base y Verificación de Conectividad:**
-   - [app/core/config.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/core/config.py): Ajustes con Pydantic Settings para variables de entorno de PostgreSQL.
-   - [app/main.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/main.py): Endpoint `/health` con verificación real de conexión a PostgreSQL mediante `SELECT 1`.
+   - [app/core/config.py](../../../app/core/config.py): Ajustes con Pydantic Settings para variables de entorno de PostgreSQL.
+   - [app/main.py](../../../app/main.py): Endpoint `/health` con verificación real de conexión a PostgreSQL mediante `SELECT 1`.
 4. **Criterio de Aceptación Principal:**
    - Los contenedores arrancan correctamente con `docker compose up -d`.
    - `jg_agente` responde en `/health` reportando `database: connected` y código HTTP 200.

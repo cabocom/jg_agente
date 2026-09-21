@@ -5,10 +5,10 @@
 - **Issue:** [jg_agente#70](https://gitlab.com/javiergalvez-ia/jg_agente/-/work_items/70) - `[AGENTE-LOGIC-05] Saturación de Cuota TPM (HTTP 429) por Salidas Masivas de Herramientas y Ausencia de Reintentos`
 - **Severidad:** 🔴 ALTO / RESILIENCIA OPERATIVA
 - **Componentes Afectados:**
-  - [`app/core/llm.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/core/llm.py)
-  - [`plugins/jg_plugin_devops/docker_tools.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/plugins/jg_plugin_devops/docker_tools.py)
-  - [`app/core/config.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/core/config.py)
-  - [`tests/test_llm_retries.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/tests/test_llm_retries.py)
+  - [`app/core/llm.py`](../../../app/core/llm.py)
+  - [`plugins/jg_plugin_devops/docker_tools.py`](../../../plugins/jg_plugin_devops/docker_tools.py)
+  - [`app/core/config.py`](../../../app/core/config.py)
+  - [`tests/test_llm_retries.py`](../../../tests/test_llm_retries.py)
 
 ---
 
@@ -36,7 +36,7 @@
    - Soporte para parametrización de proveedores y claves de API alternativas (`GEMINI_API_KEY`, etc.).
 
 4. **Suite de Pruebas Automatizadas:**
-   - Creado [`tests/test_llm_retries.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/tests/test_llm_retries.py) con 2 casos de prueba:
+   - Creado [`tests/test_llm_retries.py`](../../../tests/test_llm_retries.py) con 2 casos de prueba:
      - `test_llm_retries_on_429_success`: valida reintento automático y respuesta exitosa tras HTTP 429.
      - `test_llm_raises_after_max_retries`: valida elevación de excepción tras agotar el número máximo de reintentos permitidos.
 

@@ -36,9 +36,9 @@ No obstante, la auditoría exhaustiva del código fuente revela cinco ítems pen
   1. Diseñar un ciclo de vida en `BasePlugin.on_startup()` o un subcomando Alembic por plugin que detecte si el plugin aporta tablas con su prefijo autorizado (`devops_*`).
   2. Ejecutar la creación o migración declarativa de dichas tablas de forma no disruptiva para el Core.
 - **Archivos de Referencia:**
-  - [alembic/env.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/alembic/env.py)
-  - [plugins/jg_plugin_devops/models/orm.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/plugins/jg_plugin_devops/models/orm.py)
-  - [docs/database.md](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/docs/database.md)
+  - [alembic/env.py](alembic/env.py)
+  - [plugins/jg_plugin_devops/models/orm.py](plugins/jg_plugin_devops/models/orm.py)
+  - [docs/database.md](docs/database.md)
 
 ---
 
@@ -53,9 +53,9 @@ No obstante, la auditoría exhaustiva del código fuente revela cinco ítems pen
   1. Evaluar la reintroducción de un contenedor intermediario `docker-socket-proxy` con perfil de solo lectura o comandos específicos autorizados (`CONTAINERS=1`, `POST=1` para reinicios controlados).
   2. Crear un perfil no-root en el contenedor `jg_agente_devops` perteneciente únicamente al grupo `docker`.
 - **Archivos de Referencia:**
-  - [docker-compose.yml](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/docker-compose.yml)
-  - [plugins/jg_plugin_devops/tools/docker_tools.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/plugins/jg_plugin_devops/tools/docker_tools.py)
-  - [docs/security.md](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/docs/security.md)
+  - [docker-compose.yml](docker-compose.yml)
+  - [plugins/jg_plugin_devops/tools/docker_tools.py](plugins/jg_plugin_devops/tools/docker_tools.py)
+  - [docs/security.md](docs/security.md)
 
 ---
 
@@ -67,10 +67,10 @@ No obstante, la auditoría exhaustiva del código fuente revela cinco ítems pen
 - **Resolución Implementada:**
   Se ha implementado el módulo de autenticación criptográfica `app/security/auth.py` con verificación estricta de firma HMAC-SHA256 (`canonical_string = METHOD\nPATH\nTIMESTAMP\nSHA256(RAW_BODY)`), control anti-replay ($\le 300$s) y comprobación del `X-Agent-ID`. La dependencia FastAPI `verify_control_plane_auth` protege todo el router `/executions` en `app/api/executions.py`.
 - **Archivos de Referencia:**
-  - [app/api/executions.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/api/executions.py)
-  - [app/security/auth.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/security/auth.py)
-  - [tests/test_api_executions_auth.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/tests/test_api_executions_auth.py)
-  - [docs/issues/ISSUE-AGENT-001-walkthrough.md](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/docs/issues/ISSUE-AGENT-001-walkthrough.md)
+  - [app/api/executions.py](app/api/executions.py)
+  - [app/security/auth.py](app/security/auth.py)
+  - [tests/test_api_executions_auth.py](tests/test_api_executions_auth.py)
+  - [docs/issues/ISSUE-AGENT-001-walkthrough.md](docs/issues/ISSUE-AGENT-001-walkthrough.md)
 
 ---
 
@@ -85,7 +85,7 @@ No obstante, la auditoría exhaustiva del código fuente revela cinco ítems pen
   1. Definir contrato `AgentProxyTool` para invocar APIs de agentes pares autorizados.
   2. Implementar paso de contexto y propagación de trazas distribuidas (OpenTelemetry trace context).
 - **Archivos de Referencia:**
-  - [docs/architecture.md](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/docs/architecture.md)
+  - [docs/architecture.md](docs/architecture.md)
 
 ---
 
@@ -102,5 +102,5 @@ No obstante, la auditoría exhaustiva del código fuente revela cinco ítems pen
 - **Acciones Necesarias para Resolución:**
   1. Crear un target multi-stage en el Dockerfile (`development` o `test`) que ejecute `pip install .[test]` para permitir diagnósticos y pruebas in-container.
 - **Archivos de Referencia:**
-  - [Dockerfile](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/Dockerfile)
-  - [pyproject.toml](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/pyproject.toml)
+  - [Dockerfile](Dockerfile)
+  - [pyproject.toml](pyproject.toml)

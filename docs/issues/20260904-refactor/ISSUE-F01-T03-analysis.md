@@ -17,7 +17,7 @@ Configurar el pipeline de Integración Continua (GitLab CI/CD) para el repositor
 
 ## 2. Requerimientos y Criterios de Aceptación
 
-1. **Configuración de Pipeline ([.gitlab-ci.yml](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/.gitlab-ci.yml)):**
+1. **Configuración de Pipeline ([.gitlab-ci.yml](../../../.gitlab-ci.yml)):**
    - Etapas (`stages`): `lint`, `test` y `build`.
    - Imagen base estándar: `python:3.12-slim` para lint/test y `docker:24.0.7` con dind para build.
    - Estrategia de caché para dependencias pip (`PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"`).

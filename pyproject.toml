@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Motor Autónomo de Ejecución Cognitiva y Accionamiento (Execution Plane)"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "Proprietary" }
+license = "AGPL-3.0-or-later"
 authors = [{ name = "Javier Gálvez" }]
 dependencies = [
     "fastapi>=0.115.0",

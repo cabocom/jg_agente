@@ -8,7 +8,7 @@
 
 ## 1. Resumen de Componentes Creados
 
-1. **Definición Canónica del Estado ([app/models/state.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/models/state.py)):**
+1. **Definición Canónica del Estado ([app/models/state.py](../../../app/models/state.py)):**
    - **`append_reducer`**: Reducer seguro para concatenación de listas en canales del grafo.
    - **Enums Operacionales**: `AgentExecutionStatus`, `ApprovalStatus`, `StepStatus`, `VerificationStatus`.
    - **Submodelos Cognitivos**: `IntentModel`, `PlanStep`, `ExecutionPlan`, `ApprovalRecord`, `StepExecutionRecord`, `AuditRecord`, `ExecutionError`.
@@ -23,10 +23,10 @@
      - `status`: Estado del ciclo de vida (`AgentExecutionStatus`).
      - `errors` y `audit_trail`: Registro acumulativo de incidentes y auditoría inmutable.
 
-2. **Exposición en Namespace Core ([app/models/__init__.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/models/__init__.py)):**
+2. **Exposición en Namespace Core ([app/models/__init__.py](../../../app/models/__init__.py)):**
    - Exporta todos los componentes de estado para su consumo directo por el motor de orquestación y plugins.
 
-3. **Suite de Tests de Integración con LangGraph ([tests/test_agent_state.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/tests/test_agent_state.py)):**
+3. **Suite de Tests de Integración con LangGraph ([tests/test_agent_state.py](../../../tests/test_agent_state.py)):**
    - Pruebas unitarias de reducers (`append_reducer`).
    - Pruebas de submodelos estructurados.
    - Pruebas de agnosticismo sobre `environment_snapshot`.

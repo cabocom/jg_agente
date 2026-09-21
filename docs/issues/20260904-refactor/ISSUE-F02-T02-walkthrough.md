@@ -8,7 +8,7 @@
 
 ## 1. Resumen de Cambios Realizados
 
-1. **Definición de Contratos Core ([app/models/tools.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/models/tools.py)):**
+1. **Definición de Contratos Core ([app/models/tools.py](../../../app/models/tools.py)):**
    - **`RiskLevel(StrEnum)`**: Niveles `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`.
    - **`ToolType(StrEnum)`**: Roles funcionales `OBSERVER`, `ACTUATOR`, `VERIFIER`, `READ`, `MUTATION`.
    - **`ToolResult(BaseModel)`**: Encapsula `success`, `output`, `error`, `duration_ms`, `metadata` y `rollback_context`.
@@ -20,10 +20,10 @@
      - Compensación (`rollback_func`, método `rollback(context)`).
      - Métodos de ejecución: `run(*args, **kwargs)` y compatibilidad con LangChain `as_langchain_tool()`.
 
-2. **Exposición en Namespace de Modelos ([app/models/__init__.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/models/__init__.py)):**
+2. **Exposición en Namespace de Modelos ([app/models/__init__.py](../../../app/models/__init__.py)):**
    - Exporta `AgentTool`, `ToolResult`, `RiskLevel` y `ToolType`.
 
-3. **Suite de Pruebas Unitarias ([tests/test_tool_models.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/tests/test_tool_models.py)):**
+3. **Suite de Pruebas Unitarias ([tests/test_tool_models.py](../../../tests/test_tool_models.py)):**
    - Validación de instanciación mínima y completa con argumentos y esquemas Pydantic.
    - Validación de errores ante `func` no invocable, `args_schema` inválido o `timeout_sec` negativo.
    - Ajuste automático de `reversible=True` cuando se proporciona `rollback_func`.

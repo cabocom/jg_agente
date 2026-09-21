@@ -3,7 +3,7 @@
 ## 1. Resumen de Cambios
 
 ### Core de Registro (`app/core/registration.py`)
-- **[CredentialStore.save](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/core/registration.py)**:
+- **[CredentialStore.save](../../../app/core/registration.py)**:
   - Creación de archivo temporal `target.with_name(f"{target.name}.tmp")` en el mismo directorio.
   - Creación y apertura mediante `os.open(tmp_target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)`.
   - Aplicación explícita de `os.fchmod(fd, 0o600)` en sistemas POSIX.

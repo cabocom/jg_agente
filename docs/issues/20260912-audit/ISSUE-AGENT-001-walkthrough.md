@@ -4,14 +4,14 @@
 Se implementó en `jg_agente` la verificación estricta de autenticación criptográfica HMAC-SHA256 y control anti-replay para todos los endpoints del Execution Plane (`/executions/*`).
 
 ## 2. Archivos Creados y Modificados
-- **[app/security/auth.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/security/auth.py)**:
+- **[app/security/auth.py](../../../app/security/auth.py)**:
   - Implementación de `compute_canonical_string`, `compute_hmac_signature`, `verify_hmac_signature`.
   - Implementación de la dependencia `verify_control_plane_auth`.
-- **[app/security/__init__.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/security/__init__.py)**:
+- **[app/security/__init__.py](../../../app/security/__init__.py)**:
   - Exportación de las funciones de autenticación canónica.
-- **[app/api/executions.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/api/executions.py)**:
+- **[app/api/executions.py](../../../app/api/executions.py)**:
   - Aplicación de `dependencies=[Depends(verify_control_plane_auth)]` a nivel de APIRouter.
-- **[tests/test_api_executions_auth.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/tests/test_api_executions_auth.py)**:
+- **[tests/test_api_executions_auth.py](../../../tests/test_api_executions_auth.py)**:
   - 12 pruebas automatizadas exhaustivas validando:
     1. Petición exitosa con firma válida.
     2. Rechazo 401 por falta de cabecera `X-Signature`.
@@ -25,7 +25,7 @@ Se implementó en `jg_agente` la verificación estricta de autenticación cripto
     10. Rechazo 401 por alteración de la ruta de la petición (path tampering).
     11. Reconstrucción canónica exacta con cuerpo vacío (GET).
     12. Preservación del body para que los endpoints downstream puedan parsear Pydantic sin error.
-- **[tests/conftest.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/tests/conftest.py)**:
+- **[tests/conftest.py](../../../tests/conftest.py)**:
   - Fixture autouse condicional que bypasea la autenticación en tests funcionales generales ajenos a auth, manteniendo activa la autenticación real en `test_api_executions_auth.py`.
 
 ## 3. Verificación

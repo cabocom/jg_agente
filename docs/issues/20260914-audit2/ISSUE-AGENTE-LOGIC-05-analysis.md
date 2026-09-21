@@ -3,7 +3,7 @@
 ## Diagnóstico y Estado Previo
 
 ### 1. Invocación inmediata sin reintentos en `OpenAICompatibleChatModel`
-En [`app/core/llm.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/core/llm.py):
+En [`app/core/llm.py`](../../../app/core/llm.py):
 ```python
 async with httpx.AsyncClient(timeout=60.0) as client:
     resp = await client.post(url, headers=headers, json=payload)
@@ -13,7 +13,7 @@ async with httpx.AsyncClient(timeout=60.0) as client:
 Cualquier limitación transitoria de tasa (HTTP 429) lanzaba un `httpx.HTTPStatusError` de forma inmediata, ignorando las cabeceras estándar de control de congestión (`retry-after`, `x-ratelimit-reset-tokens`).
 
 ### 2. Inyección de volúmenes excesivos de texto en herramientas DevOps
-En [`plugins/jg_plugin_devops/docker_tools.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/plugins/jg_plugin_devops/docker_tools.py):
+En [`plugins/jg_plugin_devops/docker_tools.py`](../../../plugins/jg_plugin_devops/docker_tools.py):
 ```python
 max_log_chars = 6000
 if len(log_str) > max_log_chars:

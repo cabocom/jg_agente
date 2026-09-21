@@ -2,7 +2,7 @@
 
 ## Resumen de Cambios Aplicados
 
-### 1. Desacoplamiento de Sesiones en Endpoints ([`app/api/executions.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/api/executions.py))
+### 1. Desacoplamiento de Sesiones en Endpoints ([`app/api/executions.py`](../../../app/api/executions.py))
 - **`_resolve_hitl_execution`:** Eliminado el parámetro no utilizado `db: AsyncSession | None = None`.
 - **`approve_execution_by_thread_id`:** Eliminada la inyección de `db: AsyncSession = Depends(get_async_session)`.
 - **`reject_execution_by_thread_id`:** Eliminada la inyección de `db: AsyncSession = Depends(get_async_session)`.
@@ -10,7 +10,7 @@
 - **`reject_execution`:** Eliminada la inyección de `db: AsyncSession = Depends(get_async_session)`.
 - *(Nota: En `trigger_execution`, la inyección de `db` ya había sido eliminada en la resolución de `AGENTE-STATE-01`).*
 
-### 2. Suite de Pruebas Automatizadas ([`tests/test_session_pool_saturation.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/tests/test_session_pool_saturation.py))
+### 2. Suite de Pruebas Automatizadas ([`tests/test_session_pool_saturation.py`](../../../tests/test_session_pool_saturation.py))
 - **`test_execution_endpoints_do_not_inject_long_running_db_session`:**
   Inspecciona las dependencias registradas en FastAPI para las 5 rutas críticas:
   - `POST /executions/trigger`

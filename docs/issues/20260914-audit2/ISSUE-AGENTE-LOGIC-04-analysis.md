@@ -2,7 +2,7 @@
 
 ## Diagnóstico y Estado Actual
 
-En [`jg_agente/app/nodes/execute.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/nodes/execute.py#L350-L368):
+En [`jg_agente/app/nodes/execute.py`](../../../app/nodes/execute.py#L350-L368):
 ```python
         # Manejo de fallos operacionales
         if not tool_result.success:
@@ -23,7 +23,7 @@ En [`jg_agente/app/nodes/execute.py`](file:///Users/javiergalvez/Documents/Code/
 
 ### Problemas Detectados
 1. **Falta de soporte para pasos opcionales o tolerantes a fallos en el esquema:**
-   [`PlanStep`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/models/state.py#L117-L135) no contiene ningún campo para indicar si el paso admite fallos no fatales (`allow_failure: bool`).
+   [`PlanStep`](../../../app/models/state.py#L117-L135) no contiene ningún campo para indicar si el paso admite fallos no fatales (`allow_failure: bool`).
 2. **Abrupción prematura del plan:**
    Si un plan consta de pasos como:
    - Paso 1: `diagnose_cache` (herramienta de comprobación no crítica)

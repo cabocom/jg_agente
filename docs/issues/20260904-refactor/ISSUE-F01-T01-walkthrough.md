@@ -10,7 +10,7 @@
 
 Se ha inicializado con éxito la estructura troncal de desarrollo para `jg_agente`:
 
-1. **Configuración de Empaquetado ([pyproject.toml](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/pyproject.toml)):**
+1. **Configuración de Empaquetado ([pyproject.toml](../../../pyproject.toml)):**
    - Declaradas dependencias de producción: `fastapi`, `pydantic`, `pydantic-settings`, `httpx`, `langgraph`, `langchain-core`, `sqlalchemy[asyncio]`, `asyncpg`, `uvicorn`.
    - Declaradas dependencias de desarrollo: `pytest`, `pytest-asyncio`, `ruff`, `mypy`.
    - Reglas de linting en `[tool.ruff.lint]` (E, W, F, I, B, C4, UP, SIM) con ordenación automática de imports (`isort`).
@@ -18,16 +18,16 @@ Se ha inicializado con éxito la estructura troncal de desarrollo para `jg_agent
    - Configuración de `[tool.pytest.ini_options]` con soporte asyncio y pythonpath.
 
 2. **Estructura de Directorios y Módulos Iniciales:**
-   - [app/__init__.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/__init__.py): Define versión `0.1.0` del paquete.
-   - [app/core/__init__.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/core/__init__.py): Espacio de nombres para el Core agnóstico.
-   - [.gitignore](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/.gitignore): Exclusión de `.venv`, caches, entornos locales y ficheros temporales.
+   - [app/__init__.py](../../../app/__init__.py): Define versión `0.1.0` del paquete.
+   - [app/core/__init__.py](../../../app/core/__init__.py): Espacio de nombres para el Core agnóstico.
+   - [.gitignore](../../../.gitignore): Exclusión de `.venv`, caches, entornos locales y ficheros temporales.
 
-3. **Smoke Tests ([tests/test_bootstrap.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/tests/test_bootstrap.py)):**
+3. **Smoke Tests ([tests/test_bootstrap.py](../../../tests/test_bootstrap.py)):**
    - `test_package_metadata`: Verifica que `__version__` esté accesible.
    - `test_python_version_supported`: Garantiza runtime Python >= 3.11.
    - `test_core_dependencies_importable`: Valida importación exitosa de FastAPI, Pydantic, LangGraph, SQLAlchemy, httpx y asyncpg.
 
-4. **Script de Verificación Unificado ([scripts/check.sh](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/scripts/check.sh)):**
+4. **Script de Verificación Unificado ([scripts/check.sh](../../../scripts/check.sh)):**
    - Automatiza la ejecución secuencial de Ruff (linter + format check), MyPy y Pytest con detección del `.venv` local.
 
 ---

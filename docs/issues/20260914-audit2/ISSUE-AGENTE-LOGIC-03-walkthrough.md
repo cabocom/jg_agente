@@ -5,12 +5,12 @@
 - **Issue:** [jg_agente#68](https://gitlab.com/javiergalvez-ia/jg_agente/-/work_items/68) - `[AGENTE-LOGIC-03] Omisión de caller_permissions en execute_node Causa Denegaciones Falsas`
 - **Severidad:** 🟠 ALTO
 - **Componentes Afectados:**
-  - [`app/models/state.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/models/state.py)
-  - [`app/api/executions.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/api/executions.py)
-  - [`app/nodes/risk_assess.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/nodes/risk_assess.py)
-  - [`app/nodes/human_approval.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/nodes/human_approval.py)
-  - [`app/nodes/execute.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/nodes/execute.py)
-  - [`tests/test_node_execute.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/tests/test_node_execute.py)
+  - [`app/models/state.py`](../../../app/models/state.py)
+  - [`app/api/executions.py`](../../../app/api/executions.py)
+  - [`app/nodes/risk_assess.py`](../../../app/nodes/risk_assess.py)
+  - [`app/nodes/human_approval.py`](../../../app/nodes/human_approval.py)
+  - [`app/nodes/execute.py`](../../../app/nodes/execute.py)
+  - [`tests/test_node_execute.py`](../../../tests/test_node_execute.py)
 
 ---
 
@@ -26,7 +26,7 @@ En el ciclo cognitivo de ejecución de herramientas:
 ## Solución Implementada
 
 1. **Función Centralizada y Canónica de Resolución de Permisos:**
-   - En [`app/models/state.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/models/state.py), se implementó `resolve_caller_permissions(state: AgentState | dict[str, Any]) -> list[str]`.
+   - En [`app/models/state.py`](../../../app/models/state.py), se implementó `resolve_caller_permissions(state: AgentState | dict[str, Any]) -> list[str]`.
    - Resuelve permisos con precedencia determinista:
      1. `state.get("caller_permissions")`
      2. `request.user_context.permissions` (con expansión de rol admin `["role:admin", "admin", "*"]`)
@@ -34,15 +34,15 @@ En el ciclo cognitivo de ejecución de herramientas:
      4. Default seguro: `[]`
 
 2. **Inyección en Estado Inicial:**
-   - En [`app/api/executions.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/api/executions.py), `initial_state` incluye `"caller_permissions": resolve_caller_permissions({"request": input_data})`.
+   - En [`app/api/executions.py`](../../../app/api/executions.py), `initial_state` incluye `"caller_permissions": resolve_caller_permissions({"request": input_data})`.
 
 3. **Propagación Inmutable a lo Largo del Grafo:**
-   - En [`app/nodes/risk_assess.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/nodes/risk_assess.py): unificación mediante `resolve_caller_permissions(state)` y retorno explícito en `update_state["caller_permissions"]`.
-   - En [`app/nodes/human_approval.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/nodes/human_approval.py): preservación de `caller_permissions` en los tres caminos de retorno (pre-aprobado, pre-rechazado y reanudación con decisión).
-   - En [`app/nodes/execute.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/nodes/execute.py): resolución unificada y retorno en `mutations["caller_permissions"]`.
+   - En [`app/nodes/risk_assess.py`](../../../app/nodes/risk_assess.py): unificación mediante `resolve_caller_permissions(state)` y retorno explícito en `update_state["caller_permissions"]`.
+   - En [`app/nodes/human_approval.py`](../../../app/nodes/human_approval.py): preservación de `caller_permissions` en los tres caminos de retorno (pre-aprobado, pre-rechazado y reanudación con decisión).
+   - En [`app/nodes/execute.py`](../../../app/nodes/execute.py): resolución unificada y retorno en `mutations["caller_permissions"]`.
 
 4. **Cobertura de Pruebas Automatizadas:**
-   - Nuevos tests añadidos a [`tests/test_node_execute.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/tests/test_node_execute.py):
+   - Nuevos tests añadidos a [`tests/test_node_execute.py`](../../../tests/test_node_execute.py):
      - `test_execute_node_propagates_caller_permissions_and_allows_rbac_tool`: verificación de ejecución exitosa con permisos en estado y trazabilidad en retorno.
      - `test_execute_node_denies_tool_when_caller_permissions_missing`: denegación legítima cuando faltan permisos requeridos.
      - `test_execute_node_resolves_caller_permissions_from_user_context`: extracción transparente desde `request.user_context`.

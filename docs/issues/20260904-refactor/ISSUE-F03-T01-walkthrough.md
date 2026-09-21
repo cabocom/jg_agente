@@ -8,14 +8,14 @@
 
 ## 1. Resumen de Componentes Creados
 
-1. **Configuración Base y Convención de Nombres ([app/db/base.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/db/base.py)):**
+1. **Configuración Base y Convención de Nombres ([app/db/base.py](../../../app/db/base.py)):**
    - Declarative base `Base` enlazada a `core_metadata` con regla estricta de nombres para índices, claves foráneas, primarias y restricciones con prefijo `core_`.
 
-2. **Modelos ORM Troncales ([app/db/models.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/db/models.py)):**
+2. **Modelos ORM Troncales ([app/db/models.py](../../../app/db/models.py)):**
    - **`CoreExecution` (`core_executions`)**: Almacena `execution_id`, `thread_id`, `status`, `prompt`, `response`, `parameters`, `data`, `user_context`, `execution_time_ms`, flags HITL y marcas de tiempo UTC.
    - **`CoreAuditRecord` (`core_audit_records`)**: Registro inmutable de eventos con `id`, `execution_id` (FK en cascada), `event_type`, `actor`, `details` JSON y `timestamp`.
 
-3. **Gestor de Sesiones Asíncronas ([app/db/session.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/db/session.py)):**
+3. **Gestor de Sesiones Asíncronas ([app/db/session.py](../../../app/db/session.py)):**
    - Motor asíncrono `async_engine`, factoría `async_sessionmaker` y generador `get_async_session` con commit y rollback automáticos.
 
 4. **Infraestructura de Migraciones con Alembic:**
@@ -28,10 +28,10 @@
    - **`alembic/versions/0001_initial_core_tables.py`**: Migración inicial que crea las dos tablas y cinco índices/restricciones con prefijo `core_`.
 
 5. **Actualización de Docker y Dependencias:**
-   - [pyproject.toml](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/pyproject.toml): Añadida dependencia `alembic>=1.14.0`.
-   - [Dockerfile](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/Dockerfile): Inclusión de `alembic/` y `alembic.ini` en la etapa runner del contenedor.
+   - [pyproject.toml](../../../pyproject.toml): Añadida dependencia `alembic>=1.14.0`.
+   - [Dockerfile](../../../Dockerfile): Inclusión de `alembic/` y `alembic.ini` en la etapa runner del contenedor.
 
-6. **Suite de Pruebas ([tests/test_database_migrations.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/tests/test_database_migrations.py)):**
+6. **Suite de Pruebas ([tests/test_database_migrations.py](../../../tests/test_database_migrations.py)):**
    - Verificación estricta de prefijos `core_` en modelos y metadata.
    - Ejecución programática de `alembic upgrade head`, `downgrade base` y re-upgrade.
    - Operaciones CRUD asíncronas con `AsyncSession` sobre entidades persistidas y sus relaciones.

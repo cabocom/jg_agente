@@ -3,20 +3,20 @@
 ## Resumen de Cambios Aplicados
 
 ### 1. Implementación de Double-Checked Locking con `threading.Lock`
-- **[`app/security/guard.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/security/guard.py):**
+- **[`app/security/guard.py`](../../../app/security/guard.py):**
   - Declarado `_guard_lock = threading.Lock()`.
   - Protegida la factoría `get_security_guard()` con el patrón de doble comprobación.
-- **[`app/security/ssrf.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/security/ssrf.py):**
+- **[`app/security/ssrf.py`](../../../app/security/ssrf.py):**
   - Declarado `_ssrf_lock = threading.Lock()`.
   - Protegida la factoría `get_ssrf_validator()` con el patrón de doble comprobación.
-- **[`app/security/audit.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/security/audit.py):**
+- **[`app/security/audit.py`](../../../app/security/audit.py):**
   - Declarado `_audit_lock = threading.Lock()`.
   - Protegida la factoría `get_security_audit_logger()` con el patrón de doble comprobación.
   - Añadido alias canónico `get_audit_logger = get_security_audit_logger`.
-- **[`app/security/__init__.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/security/__init__.py):**
+- **[`app/security/__init__.py`](../../../app/security/__init__.py):**
   - Re-exportado `get_audit_logger` en `__all__`.
 
-### 2. Pre-inicialización Determinista en `lifespan` ([`app/main.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/main.py))
+### 2. Pre-inicialización Determinista en `lifespan` ([`app/main.py`](../../../app/main.py))
 - Al inicio de la función `lifespan(app: FastAPI)`:
   ```python
   # 0. Pre-inicialización determinista de singletons de seguridad (AGENTE-CONC-01)
@@ -26,7 +26,7 @@
   ```
   Se garantiza que los singletons estén construidos y calientes antes de registrar plugins o iniciar servicios de red.
 
-### 3. Suite de Pruebas de Concurrencia ([`tests/test_security_singletons_concurrency.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/tests/test_security_singletons_concurrency.py))
+### 3. Suite de Pruebas de Concurrencia ([`tests/test_security_singletons_concurrency.py`](../../../tests/test_security_singletons_concurrency.py))
 - **`test_security_guard_concurrent_initialization_threads`:** 50 hilos concurrentes compitiendo por instanciar `SecurityGuard`; valida identidad estricta (`is` e `id`).
 - **`test_security_guard_concurrent_initialization_coroutines`:** 50 tareas asíncronas con context-switch forzado; valida identidad estricta.
 - **`test_ssrf_validator_concurrent_initialization_threads`:** 50 hilos concurrentes compitiendo por `SSRFValidator`.

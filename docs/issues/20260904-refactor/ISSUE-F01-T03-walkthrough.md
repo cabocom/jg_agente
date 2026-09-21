@@ -8,7 +8,7 @@
 
 ## 1. Resumen de Componentes Creados
 
-1. **Pipeline de Integración Continua ([.gitlab-ci.yml](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/.gitlab-ci.yml)):**
+1. **Pipeline de Integración Continua ([.gitlab-ci.yml](../../../.gitlab-ci.yml)):**
    - Definidas etapas estructuradas `lint`, `test` y `build`.
    - Implementado job `lint:ruff` (valida formato y reglas estáticas con ruff).
    - Implementado job `typecheck:mypy` (instala `.[dev]` y ejecuta `mypy app tests` en modo estricto).
@@ -20,7 +20,7 @@
    - Configurada caché de paquetes pip por rama (`python-pip-${CI_COMMIT_REF_SLUG}`).
    - Establecidas reglas anti-duplicación para Merge Requests.
 
-2. **Alineación con Herramientas Locales ([scripts/check.sh](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/scripts/check.sh)):**
+2. **Alineación con Herramientas Locales ([scripts/check.sh](../../../scripts/check.sh)):**
    - El script local ejecuta de manera idéntica los tres pasos de CI:
      1. Ruff linter y format check.
      2. MyPy strict typechecking.

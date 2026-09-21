@@ -8,16 +8,16 @@
 
 ## 1. Resumen de Cambios Realizados
 
-1. **Módulo de Modelos y Contratos I/O ([app/models/io.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/models/io.py)):**
+1. **Módulo de Modelos y Contratos I/O ([app/models/io.py](../../../app/models/io.py)):**
    - **`ExecutionStatus(StrEnum)`**: Estados canónicos (`completed`, `waiting_approval`, `failed`, `cancelled`, `in_progress`, `timeout`).
    - **`UserContext(BaseModel)`**: Contexto seguro propagado desde el Dashboard (`user_id`, `username`, `email`, `role`, `permissions`, `metadata`).
    - **`AgentInput(BaseModel)`**: Contrato de entrada agnóstico con `execution_id`, `thread_id` (alias `session_id`), `prompt` (alias `message`), `parameters`, `user_context`, `metadata` y `created_at`.
    - **`AgentOutput(BaseModel)`**: Contrato de salida normalizado con `execution_id`, `thread_id` (alias `session_id`), `status`, `response` (alias `answer`), `data`, `execution_time_ms`, flags HITL (`requires_approval`, `pending_approval_id`), `error`, `metadata` y `completed_at`.
 
-2. **Punto de Entrada Público ([app/models/__init__.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/models/__init__.py)):**
+2. **Punto de Entrada Público ([app/models/__init__.py](../../../app/models/__init__.py)):**
    - Exporta los cuatro símbolos bajo `__all__` para consumo limpio desde cualquier capa del Core o plugins.
 
-3. **Suite de Tests Unitarios ([tests/test_io_models.py](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/tests/test_io_models.py)):**
+3. **Suite de Tests Unitarios ([tests/test_io_models.py](../../../tests/test_io_models.py)):**
    - Pruebas de instanciación con campos canónicos y alias.
    - Pruebas de rechazo y excepciones ante campos obligatorios faltantes o valores inválidos (ej. tiempos negativos).
    - Pruebas de serialización/deserialización JSON roundtrip íntegro.

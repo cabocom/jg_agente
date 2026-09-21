@@ -5,13 +5,13 @@ Durante la ejecución de herramientas que no cuentan con bypass de aprobación h
 
 ### Cambios Implementados
 1. **Resolución Jerárquica Determinista:**
-   - Creada la función `resolve_caller_permissions(state)` en [`app/models/state.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/models/state.py), con soporte para extracción desde `state.caller_permissions`, `request.user_context.permissions` (incluyendo expansión de privilegios para rol admin), `request.metadata.caller_permissions` y fallback seguro a lista vacía.
+   - Creada la función `resolve_caller_permissions(state)` en [`app/models/state.py`](../../../app/models/state.py), con soporte para extracción desde `state.caller_permissions`, `request.user_context.permissions` (incluyendo expansión de privilegios para rol admin), `request.metadata.caller_permissions` y fallback seguro a lista vacía.
 2. **Inyección en Ciclo de Disparo:**
-   - En [`app/api/executions.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/api/executions.py), se inicializa `caller_permissions` en `initial_state`.
+   - En [`app/api/executions.py`](../../../app/api/executions.py), se inicializa `caller_permissions` en `initial_state`.
 3. **Propagación Inmutable en Nodos:**
-   - En [`app/nodes/risk_assess.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/nodes/risk_assess.py), [`app/nodes/human_approval.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/nodes/human_approval.py) y [`app/nodes/execute.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/app/nodes/execute.py), se unificó la resolución y se garantiza que `caller_permissions` viaje en las mutaciones de retorno hacia LangGraph.
+   - En [`app/nodes/risk_assess.py`](../../../app/nodes/risk_assess.py), [`app/nodes/human_approval.py`](../../../app/nodes/human_approval.py) y [`app/nodes/execute.py`](../../../app/nodes/execute.py), se unificó la resolución y se garantiza que `caller_permissions` viaje en las mutaciones de retorno hacia LangGraph.
 4. **Verificación y Pruebas Unitarias:**
-   - En [`tests/test_node_execute.py`](file:///Users/javiergalvez/Documents/Code/javiergalvez-ia/jg_agente/tests/test_node_execute.py), se añadieron tests unitarios para verificar la ejecución permitida con permisos RBAC, la denegación esperada ante falta de permisos, la resolución desde `user_context`, y la función de resolución jerárquica.
+   - En [`tests/test_node_execute.py`](../../../tests/test_node_execute.py), se añadieron tests unitarios para verificar la ejecución permitida con permisos RBAC, la denegación esperada ante falta de permisos, la resolución desde `user_context`, y la función de resolución jerárquica.
 
 ### Verificación
 - Suite de nodos de `jg_agente`: 73/73 tests pasados (`pytest tests/test_node_*.py`).
