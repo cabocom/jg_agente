@@ -91,9 +91,36 @@ class CapabilityRegistry:
         max_risk: RiskLevel | None = None,
     ) -> list[BaseTool]:
         """Exporta las herramientas filtradas como instancias nativas BaseTool de LangChain."""
-        return [
-            t.as_langchain_tool() for t in self.list_tools(category=category, max_risk=max_risk)
-        ]
+        from langchain_core.tools import StructuredTool
+
+        tools: list[BaseTool] = []
+        for t in self.list_tools(category=category, max_risk=max_risk):
+            if hasattr(t, "as_langchain_tool") and callable(t.as_langchain_tool):
+                tools.append(t.as_langchain_tool())
+            else:
+
+                def _wrapper(*args: Any, _tool=t, **kwargs: Any) -> str:
+                    result = _tool.run(*args, **kwargs)
+                    return str(result)
+
+                if getattr(t, "args_schema", None) is not None:
+                    tools.append(
+                        StructuredTool.from_function(
+                            func=_wrapper,
+                            name=t.name,
+                            description=t.description,
+                            args_schema=t.args_schema,
+                        )
+                    )
+                else:
+                    tools.append(
+                        StructuredTool.from_function(
+                            func=_wrapper,
+                            name=t.name,
+                            description=t.description,
+                        )
+                    )
+        return tools
 
     @property
     def tool_names(self) -> list[str]:

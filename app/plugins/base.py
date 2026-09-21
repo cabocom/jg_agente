@@ -187,3 +187,14 @@ class BasePlugin(ABC):
     ) -> None:
         """Soporte para gestor de contexto asíncrono con shutdown automático."""
         await self.shutdown()
+
+
+# Interoperabilidad nativa con jg_sdk (SDK desacoplado de plugins)
+try:
+    import jg_sdk.contracts as _sdk_contracts
+
+    BasePlugin.register(_sdk_contracts.BasePlugin)
+    BaseEngine.register(_sdk_contracts.BaseEngine)
+except Exception:
+    pass
+
