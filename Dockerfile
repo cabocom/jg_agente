@@ -45,7 +45,7 @@ RUN if [ "$OBFUSCATE" = "true" ]; then \
         apt-get update && \
         apt-get install -y --no-install-recommends gcc libc6-dev && \
         pip install --no-cache-dir cython setuptools && \
-        python compile_cython.py app plugins && \
+        python compile_cython.py /stage && \
         rm -rf /var/lib/apt/lists/*; \
     else \
         echo "⚡ [CYTHON] Desactivado: empaquetando código estándar..."; \

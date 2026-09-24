@@ -14,65 +14,65 @@ from setuptools import setup
 from Cython.Build import cythonize
 
 
-def compile_modules(target_dirs: list[Path]) -> None:
-    py_files: list[str] = []
-
-    for base in target_dirs:
-        if not base.exists():
-            continue
-        for p in base.rglob("*.py"):
-            # Preservar __init__.py como archivos Python para garantizar el descubrimiento de paquetes
-            if p.name == "__init__.py":
-                continue
-            # Omitir suites de tests para evitar fallos con pytest
-            if "tests" in p.parts or p.name.startswith("test_"):
-                continue
-            py_files.append(str(p))
-
+def compile_package(pkg_dir: Path, base_dir: Path) -> int:
+    py_files = [
+        str(p.relative_to(base_dir))
+        for p in pkg_dir.rglob("*.py")
+        if p.name != "__init__.py" and "tests" not in p.parts and not p.name.startswith("test_")
+    ]
     if not py_files:
-        print("ℹ️  No se encontraron archivos .py elegibles para compilación Cython.")
-        return
+        return 0
 
-    print(f"🔒 Compilando {len(py_files)} módulos Python con Cython a código máquina C (.so)...")
+    print(f"🔒 Compilando {len(py_files)} módulos en {pkg_dir.name} (base: {base_dir})...")
 
-    ext_modules = cythonize(
-        py_files,
-        compiler_directives={
-            "language_level": "3",
-            "always_allow_keywords": True,
-        },
-        nthreads=os.cpu_count() or 2,
-        quiet=True,
-    )
-
-    setup(
-        ext_modules=ext_modules,
-        script_args=["build_ext", "--inplace"],
-    )
-
-    # Eliminar código fuente .py y archivos temporales .c
+    cur_dir = os.getcwd()
+    os.chdir(base_dir)
     compiled_count = 0
-    for f in py_files:
-        py_path = Path(f)
-        c_path = py_path.with_suffix(".c")
-        if c_path.exists():
-            c_path.unlink()
-
-        so_matches = list(py_path.parent.glob(f"{py_path.stem}.*.so")) + list(
-            py_path.parent.glob(f"{py_path.stem}.so")
+    try:
+        exts = cythonize(
+            py_files,
+            compiler_directives={"language_level": "3", "always_allow_keywords": True},
+            nthreads=os.cpu_count() or 2,
+            quiet=True,
         )
-        if so_matches:
-            py_path.unlink()
-            compiled_count += 1
-            print(f"  ✓ Binario nativo generado: {py_path.name} -> {so_matches[0].name}")
-        else:
-            print(f"  ⚠️  Advertencia: No se generó .so para {py_path.name}, conservando .py")
+        setup(ext_modules=exts, script_args=["build_ext", "--inplace"])
 
-    print(f"\n✅ Compilación Cython completada: {compiled_count} módulos convertidos a binarios .so.")
+        for rel_f in py_files:
+            p = base_dir / rel_f
+            c_p = p.with_suffix(".c")
+            if c_p.exists():
+                c_p.unlink()
+            sos = list(p.parent.glob(f"{p.stem}.*.so")) + list(p.parent.glob(f"{p.stem}.so"))
+            if sos:
+                p.unlink()
+                compiled_count += 1
+                print(f"  ✓ {p.name} -> {sos[0].name}")
+            else:
+                print(f"  ⚠️  Advertencia: No se generó .so para {p.name}")
+    finally:
+        os.chdir(cur_dir)
+
+    return compiled_count
+
+
+def main() -> None:
+    root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+    app_dir = root / "app"
+    plugins_dir = root / "plugins"
+
+    total = 0
+    # 1. Compilar app troncal (base_dir es root)
+    if app_dir.exists():
+        total += compile_package(app_dir, root)
+
+    # 2. Compilar cada plugin individualmente (base_dir es plugins_dir)
+    if plugins_dir.exists():
+        for plg in plugins_dir.iterdir():
+            if plg.is_dir() and (plg / "__init__.py").exists():
+                total += compile_package(plg, plugins_dir)
+
+    print(f"\n✅ Compilación Cython completada exitosamente: {total} módulos protegidos en .so.")
 
 
 if __name__ == "__main__":
-    dirs = [Path(arg) for arg in sys.argv[1:] if Path(arg).exists()]
-    if not dirs:
-        dirs = [Path("app"), Path("plugins")]
-    compile_modules(dirs)
+    main()
