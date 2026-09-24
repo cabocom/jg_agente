@@ -24,6 +24,9 @@ def compile_modules(target_dirs: list[Path]) -> None:
             # Preservar __init__.py como archivos Python para garantizar el descubrimiento de paquetes
             if p.name == "__init__.py":
                 continue
+            # Omitir suites de tests para evitar fallos con pytest
+            if "tests" in p.parts or p.name.startswith("test_"):
+                continue
             py_files.append(str(p))
 
     if not py_files:
@@ -32,7 +35,6 @@ def compile_modules(target_dirs: list[Path]) -> None:
 
     print(f"🔒 Compilando {len(py_files)} módulos Python con Cython a código máquina C (.so)...")
 
-    # Compilar en el mismo lugar (--inplace)
     ext_modules = cythonize(
         py_files,
         compiler_directives={

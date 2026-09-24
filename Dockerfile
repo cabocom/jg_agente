@@ -43,7 +43,7 @@ ARG OBFUSCATE=true
 RUN if [ "$OBFUSCATE" = "true" ]; then \
         echo "🔒 [CYTHON] Compilando lógica Python a binarios nativos ELF (.so)..."; \
         apt-get update && \
-        apt-get install -y --no-install-recommends gcc python3-dev && \
+        apt-get install -y --no-install-recommends gcc libc6-dev && \
         pip install --no-cache-dir cython setuptools && \
         python compile_cython.py app plugins && \
         rm -rf /var/lib/apt/lists/*; \
