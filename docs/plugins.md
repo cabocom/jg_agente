@@ -16,6 +16,8 @@ Un plugin es una unidad distribuible e independiente que expone sus capacidades 
 
 ## 2. Contratos Base (`app/plugins/base.py`)
 
+> **Interoperabilidad con SDK:** Los contratos `BasePlugin`, `BaseEngine` y `PluginMetadata` son 100% interoperables con el paquete público **`jg_agente_sdk`** (`jg_sdk.contracts`). Cualquier plugin desarrollado importando las clases base desde el SDK es compatible y reconocido nativamente por el Core de `jg_agente`.
+
 ### 2.1. Metadatos del Plugin (`PluginMetadata`)
 
 Representa la identidad formal, versión, restricciones de compatibilidad y dependencias de un plugin:

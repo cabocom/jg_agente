@@ -193,8 +193,7 @@ class BasePlugin(ABC):
 try:
     import jg_sdk.contracts as _sdk_contracts
 
-    BasePlugin.register(_sdk_contracts.BasePlugin)
-    BaseEngine.register(_sdk_contracts.BaseEngine)
+    BasePlugin.register(_sdk_contracts.BasePlugin)  # type: ignore[type-abstract]
+    BaseEngine.register(_sdk_contracts.BaseEngine)  # type: ignore[type-abstract]
 except Exception:
     pass
-

@@ -1,20 +1,22 @@
 # CONTEXTO DE PROYECTO: jg_agente
 
-**Versión del documento:** 2.36.0  
-**Fecha de consolidación:** 12 de septiembre de 2026  
+**Versión del documento:** 2.38.0  
+**Fecha de consolidación:** 24 de septiembre de 2026  
 **Componente:** Execution Plane (Motor Autónomo de Ejecución)  
-**Estado:** Fases 01 a 11 completadas (100%). Post-Auditoría 2 en curso.  
+**Estado:** Fases 01 a 11 completadas (100%). Integración con `jg_agente_sdk` consolidada.  
+- Integración Canónica con `jg_agente_sdk` (REFACTOR-SDK-001): Establecimiento del SDK como Fuente Única de Verdad (SSOT) para contratos de herramientas (`AgentTool`, `ToolResult`, `RiskLevel`, `ToolType`) y plugins (`BasePlugin`, `BaseEngine`). `app.models.tools.AgentTool` hereda directamente de `jg_sdk.contracts.AgentTool` añadiendo únicamente el adaptador de LangChain (`as_langchain_tool`). Eliminada la duplicidad de 240 líneas de código.
+- Razonamiento Iterativo Proactivo (LOOPING): Soporte de re-evaluación semántica en grafo cognitivo con `GoalStatus` (`satisfied`, `needs_more_info`), contador de iteraciones `iteration`/`max_iterations`, y nodo `conclude` enriquecido con mensajes amigables y transparentes al alcanzar el tope de ciclos.
 - Fase 08 completada: Cliente de registro Zero-Trust, bootstrap tokens, CredentialStore (permisos POSIX 0600) y heartbeat periódico.  
-- Fase 11 completada: Extracción e integración de plugins especializados (`jg_plugin_conversational` y `jg_plugin_devops`).  
-- Despliegue Multi-Agente Unificado: Soporte de múltiples perfiles desde la misma imagen Docker mediante `ENABLED_PLUGINS` (`jg_agente_conversacional` en :8001 y `jg_agente_devops` en :8002).  
-- Persistencia Core y Aislamiento Multi-Agente (GLOBAL-002 / ISSUE-AGENT-003): Cada runtime dispone de su propia base de datos dedicada (`jg_agente_conversacional` y `jg_agente_devops`) en el PostgreSQL compartido `jg_agente_postgres` (puerto 5433), garantizando aislamiento absoluto de checkpoints, transacciones e hilos de ejecución sin alterar el agnosticismo del Core.  
+- Fase 11 completada: Extracción e integración de plugins especializados (`jg_plugin_conversational`, `jg_plugin_devops` y `jg_plugin_datosgob`).  
+- Despliegue Multi-Agente Unificado: Soporte de múltiples perfiles desde la misma imagen Docker mediante `ENABLED_PLUGINS` (`jg_agente_conversacional` en :8001, `jg_agente_devops` en :8002 y `jg_agente_datosgob` en :8881).  
+- Persistencia Core y Aislamiento Multi-Agente (GLOBAL-002 / ISSUE-AGENT-003): Cada runtime dispone de su propia base de datos dedicada en el PostgreSQL compartido `jg_agente_postgres` (puerto 5433), garantizando aislamiento absoluto de checkpoints, transacciones e hilos de ejecución sin alterar el agnosticismo del Core.  
 - Post-Auditoría Codex (GLOBAL-001 / ISSUE-AGENT-001): Autenticación estricta y anti-replay en router `/executions` con firma canónica HMAC-SHA256 (`METHOD\nPATH\nTIMESTAMP\nSHA256(BODY)`), ventana de 300s y validación de `X-Agent-ID`.  
 - Post-Auditoría 2 (GLOBAL-01 / GitLab jg_agente#52): Erradicación total de secretos pre-aprovisionados hardcodeados en orquestación (`docker-compose.yml`); adopción de interpolación obligatoria `${JG_CONVERSATIONAL_SECRET:?err}` y `${JG_DEVOPS_SECRET:?err}` garantizando sincronización simétrica de firmas HMAC con el Dashboard.  
 - Post-Auditoría 2 (GLOBAL-02 / GitLab jg_agente#53): Consolidación del flujo criptográfico simétrico para registro dinámico de agentes; jg_agente persiste localmente el `permanent_secret` suministrado por el Dashboard en `.agent_credentials.json` (permisos 0600) y valida las peticiones entrantes contra su secreto único mientras el Dashboard lo preserva cifrado en reposo para computar las cabeceras `X-Signature`.  
 - Post-Auditoría 2 (GLOBAL-03 / GitLab jg_agente#54): Compatibilización de tiempos de respuesta del ciclo cognitivo de 9-10 nodos (`observe` a `conclude`); elevación del timeout de conexión síncrona en el Dashboard a 120s (`AGENT_HTTP_TIMEOUT=120`) y consolidación del flujo asíncrono (`sync=false` / `parameters.async=True`) con respuesta inmediata HTTP 202 Accepted encolada en BackgroundTasks y consulta periódica vía `GET /executions/{thread_id}`.  
 - Post-Auditoría 2 (GLOBAL-05 / GitLab jg_agente#56): Trazabilidad distribuida y propagación de Correlation-ID; implementación de `app/core/correlation.py` con `ContextVar`, `CorrelationLogFilter` y `CorrelationIdMiddleware` para captura/retorno de `X-Correlation-ID`; inyección en esquemas Pydantic (`AgentInput`, `AgentOutput`, `ExecutionThreadDetail`, `AuditRecord`, `AgentState`), en la orquestación de LangGraph y en el registro persistido de `SecurityAuditLogger` (`CoreAuditRecord.details`).  
 - Post-Auditoría 2 (AGENTE-SEC-01 / GitLab jg_agente#57): Mitigación de escape de contenedor y compromiso root; erradicación de montaje directo de `/var/run/docker.sock` y eliminación de `user: "0:0"` en `jg_agente_devops` (ejecución no-root obligatoria UID 10001 `appuser`); integración del servicio `jg_docker_socket_proxy` (`tecnativa/docker-socket-proxy`) con ACLs restrictivas (`CONTAINERS=1`, `POST=1`, `VOLUMES=0`, `EXEC=0`), vinculación de puertos a `127.0.0.1` y protección en código (`PROTECTED_INFRASTRUCTURE_CONTAINERS`).  
-- Suite de Pruebas: Suite completa pasando al 100% (368 tests).
+- Suite de Pruebas: Suite completa pasando al 100% (Ruff, MyPy estricto en 112 ficheros, 437 tests Pytest).
 
 ---
 

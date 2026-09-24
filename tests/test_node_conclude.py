@@ -298,3 +298,59 @@ class TestConcludeNode:
         # Debe haber descartado el meta-comentario y seleccionado la salida sustantiva del clima
         assert output.response == "El clima actual en Alcobendas es de 20.0°C con cielo despejado."
         assert "La respuesta del tool" not in output.response
+
+    @pytest.mark.asyncio
+    async def test_conclude_node_friendly_message_on_iteration_limit(self) -> None:
+        """Verifica que al alcanzar max_iterations con NEEDS_MORE_INFO emita una respuesta amigable."""
+        state: AgentState = {
+            "request": AgentInput(
+                execution_id="exec-maxiter-01",
+                thread_id="thread-maxiter-01",
+                prompt="¿Cuántas farmacias hay en Toledo?",
+            ),
+            "iteration": 3,
+            "max_iterations": 3,
+            "execution_records": [
+                StepExecutionRecord(
+                    step_id="step-1",
+                    tool_name="buscar_datasets_catalogo",
+                    status=StepStatus.COMPLETED,
+                    output="Dataset de farmacias localizado",
+                    duration_ms=30.0,
+                ),
+                StepExecutionRecord(
+                    step_id="step-2",
+                    tool_name="consultar_recurso_datosgob",
+                    status=StepStatus.COMPLETED,
+                    output="Muestra de 25 registros descargada",
+                    duration_ms=40.0,
+                ),
+            ],
+            "evaluation_records": [
+                EvaluationRecord(
+                    goal_status=GoalStatus.NEEDS_MORE_INFO,
+                    explanation="Se necesita extraer del dataset de farmacias de Castilla‑La Mancha cuántas filas corresponden al municipio de Toledo.",
+                    iteration=3,
+                    timestamp=datetime.now(UTC),
+                )
+            ],
+            "status": AgentExecutionStatus.EXECUTING,
+        }
+
+        result = await conclude_node(state)
+
+        assert result["status"] == AgentExecutionStatus.FAILED
+        assert result["is_resolved"] is False
+        output = result["output"]
+        assert isinstance(output, AgentOutput)
+        assert output.status == ExecutionStatus.COMPLETED
+
+        # Verificación del mensaje amigable
+        assert "He avanzado hasta el siguiente punto" in output.response
+        assert "buscar_datasets_catalogo, consultar_recurso_datosgob" in output.response
+        assert (
+            "Se necesita extraer del dataset de farmacias de Castilla‑La Mancha cuántas filas corresponden al municipio de Toledo"
+            in output.response
+        )
+        assert "límite de seguridad de 3 iteraciones consecutivas" in output.response
+        assert "Te sugiero formular una consulta más acotada" in output.response

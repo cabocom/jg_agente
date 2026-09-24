@@ -5,6 +5,7 @@ import contextlib
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any, cast
 
@@ -19,6 +20,7 @@ from app.models.registration import (
     AgentRegistrationPayload,
     AgentRegistrationResponse,
 )
+from app.security.auth import compute_canonical_string, compute_hmac_signature
 
 logger = logging.getLogger("jg_agente.registration")
 
@@ -291,15 +293,6 @@ class DashboardRegistrationClient:
         if not token or not aid:
             raise RegistrationAuthError("Identificador de agente o credencial permanente vacíos.")
 
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "X-Agent-ID": aid,
-            "X-Agent-Secret": token,
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": f"jg_agente/{__version__}",
-        }
-
         payload = {
             "agent_id": aid,
             "status": "ACTIVE",
@@ -308,14 +301,41 @@ class DashboardRegistrationClient:
             },
         }
 
+        timestamp = int(time.time())
+        raw_body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        canonical_v1 = compute_canonical_string(
+            "POST", "/api/v1/agents/heartbeat", timestamp, raw_body
+        )
+        sig_v1 = compute_hmac_signature(token, canonical_v1)
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "X-Agent-ID": aid,
+            "X-Agent-Secret": token,
+            "X-Timestamp": str(timestamp),
+            "X-Signature": sig_v1,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": f"jg_agente/{__version__}",
+        }
+
         endpoint_v1 = f"{self.dashboard_url}/api/v1/agents/heartbeat"
         endpoint_fallback = f"{self.dashboard_url}/api/agents/heartbeat"
 
         async with httpx.AsyncClient(timeout=self.timeout, transport=self.transport) as client:
             try:
-                response = await client.post(endpoint_v1, json=payload, headers=headers)
+                response = await client.post(endpoint_v1, content=raw_body, headers=headers)
                 if response.status_code == 404:
-                    response = await client.post(endpoint_fallback, json=payload, headers=headers)
+                    canonical_fallback = compute_canonical_string(
+                        "POST", "/api/agents/heartbeat", timestamp, raw_body
+                    )
+                    headers_fallback = dict(headers)
+                    headers_fallback["X-Signature"] = compute_hmac_signature(
+                        token, canonical_fallback
+                    )
+                    response = await client.post(
+                        endpoint_fallback, content=raw_body, headers=headers_fallback
+                    )
 
                 if response.status_code == 200:
                     data = response.json()

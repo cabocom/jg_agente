@@ -21,6 +21,7 @@ from app.models.state import (
     ApprovalStatus,
     AuditRecord,
     CognitiveStepRecord,
+    GoalStatus,
     IntentModel,
     StepStatus,
     VerificationStatus,
@@ -89,6 +90,23 @@ async def conclude_node(
         or state.get("status") in (AgentExecutionStatus.FAILED, AgentExecutionStatus.ROLLING_BACK)
     )
 
+    eval_records = list(state.get("evaluation_records") or [])
+    last_eval = eval_records[-1] if eval_records else None
+    goal_status = getattr(last_eval, "goal_status", None) if last_eval else None
+    if goal_status is None and isinstance(last_eval, dict):
+        goal_status = last_eval.get("goal_status")
+    status_val = (
+        goal_status.value
+        if isinstance(goal_status, GoalStatus)
+        else str(goal_status or "").lower().strip()
+    )
+    curr_iteration = int(state.get("iteration", 1))
+    max_iterations = int(state.get("max_iterations", 3))
+    is_iteration_limit_reached = curr_iteration >= max_iterations and status_val in (
+        GoalStatus.NEEDS_MORE_INFO.value,
+        "needs_more_info",
+    )
+
     if is_cancelled:
         final_agent_status = AgentExecutionStatus.FAILED
         final_output_status = ExecutionStatus.CANCELLED
@@ -96,6 +114,10 @@ async def conclude_node(
     elif is_failed:
         final_agent_status = AgentExecutionStatus.FAILED
         final_output_status = ExecutionStatus.FAILED
+        is_resolved = False
+    elif is_iteration_limit_reached:
+        final_agent_status = AgentExecutionStatus.FAILED
+        final_output_status = ExecutionStatus.COMPLETED
         is_resolved = False
     else:
         final_agent_status = AgentExecutionStatus.RESOLVED
@@ -149,48 +171,60 @@ async def conclude_node(
             response_text = f"La ejecución falló con error: {errors[-1].message}"
 
     # C. Prioridad cognitiva: Evaluación semántica (EvaluationRecord)
-    eval_records = list(state.get("evaluation_records") or [])
     if not response_text and eval_records:
-        last_eval = eval_records[-1]
         explanation = getattr(last_eval, "explanation", None) or (
             last_eval.get("explanation") if isinstance(last_eval, dict) else None
         )
         if explanation and str(explanation).strip():
             candidate_text = str(explanation).strip()
-            # Detección defensiva de meta-comentarios de auditoría (ej. "La respuesta del tool get_weather indica...")
-            is_meta_comment = bool(
-                re.search(
-                    r"^(?:la\s+respuesta|el\s+resultado)\s+del?\s+(?:tool|herramienta)\b",
-                    candidate_text,
-                    re.IGNORECASE,
+
+            # Caso amigable: límite de iteraciones de seguridad alcanzado
+            if is_iteration_limit_reached:
+                clean_exp = candidate_text.rstrip(".")
+                executed_tools = [r.tool_name for r in records if getattr(r, "tool_name", None)]
+                unique_tools = list(dict.fromkeys(executed_tools))
+                tools_info = f" (tras consultar: {', '.join(unique_tools)})" if unique_tools else ""
+                response_text = (
+                    f"He avanzado hasta el siguiente punto{tools_info}: {clean_exp}.\n\n"
+                    f"No he podido continuar procesando más detalles porque el agente está programado para no exceder un límite de seguridad de "
+                    f"{max_iterations} iteraciones consecutivas. "
+                    f"Te sugiero formular una consulta más acotada o específica para obtener el dato restante directamente."
                 )
-                or re.search(
-                    r"^(?:el\s+tool|la\s+herramienta)\s+[\w:_-]+\s+(?:indica|muestra|devolvió|devuelve|ha\s+devuelto)\b",
-                    candidate_text,
-                    re.IGNORECASE,
-                )
-                or re.search(
-                    r"\bcumpliendo\s+(?:con\s+)?la\s+solicitud\b",
-                    candidate_text,
-                    re.IGNORECASE,
-                )
-            )
-            # Si es un meta-comentario y tenemos una salida limpia en texto de la herramienta, preferir la salida directa
-            if is_meta_comment and records:
-                clean_tool_output = None
-                for rec in reversed(records):
-                    out = getattr(rec, "output", None)
-                    if isinstance(out, str) and out.strip():
-                        out_str = out.strip()
-                        if not (
-                            (out_str.startswith("{") and out_str.endswith("}"))
-                            or (out_str.startswith("[") and out_str.endswith("]"))
-                        ):
-                            clean_tool_output = out_str
-                            break
-                response_text = clean_tool_output or candidate_text
             else:
-                response_text = candidate_text
+                # Detección defensiva de meta-comentarios de auditoría (ej. "La respuesta del tool get_weather indica...")
+                is_meta_comment = bool(
+                    re.search(
+                        r"^(?:la\s+respuesta|el\s+resultado)\s+del?\s+(?:tool|herramienta)\b",
+                        candidate_text,
+                        re.IGNORECASE,
+                    )
+                    or re.search(
+                        r"^(?:el\s+tool|la\s+herramienta)\s+[\w:_-]+\s+(?:indica|muestra|devolvió|devuelve|ha\s+devuelto)\b",
+                        candidate_text,
+                        re.IGNORECASE,
+                    )
+                    or re.search(
+                        r"\bcumpliendo\s+(?:con\s+)?la\s+solicitud\b",
+                        candidate_text,
+                        re.IGNORECASE,
+                    )
+                )
+                # Si es un meta-comentario y tenemos una salida limpia en texto de la herramienta, preferir la salida directa
+                if is_meta_comment and records:
+                    clean_tool_output = None
+                    for rec in reversed(records):
+                        out = getattr(rec, "output", None)
+                        if isinstance(out, str) and out.strip():
+                            out_str = out.strip()
+                            if not (
+                                (out_str.startswith("{") and out_str.endswith("}"))
+                                or (out_str.startswith("[") and out_str.endswith("]"))
+                            ):
+                                clean_tool_output = out_str
+                                break
+                    response_text = clean_tool_output or candidate_text
+                else:
+                    response_text = candidate_text
 
     # D. Buscar en el último AIMessage con contenido conversacional (evitando salidas crudas de tools)
     if not response_text:

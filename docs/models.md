@@ -46,6 +46,8 @@ class AgentOutput(BaseModel):
 
 ## 2. Contratos de Herramientas (`AgentTool` y `ToolResult`)
 
+> **Fuente Única de Verdad (SSOT):** Los contratos base de herramientas (`AgentTool`), resultados (`ToolResult`) y clasificaciones (`RiskLevel`, `ToolType`) se definen de forma canónica y desacoplada en el paquete **`jg_agente_sdk`** (`jg_sdk.contracts`). El Core (`app.models.tools`) hereda directamente de este contrato e implementa el adaptador hacia LangChain (`as_langchain_tool`).
+
 Toda capacidad invocable por el agente debe satisfacer el contrato estricto `AgentTool`.
 
 ```python

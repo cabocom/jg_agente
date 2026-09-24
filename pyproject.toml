@@ -22,6 +22,7 @@ dependencies = [
     "docker>=7.0.0",
     "psutil>=6.0.0",
     "defusedxml>=0.7.1",
+    "jg-agente-sdk>=1.0.0",
 ]
 
 [project.optional-dependencies]

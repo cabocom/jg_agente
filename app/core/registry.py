@@ -99,7 +99,7 @@ class CapabilityRegistry:
                 tools.append(t.as_langchain_tool())
             else:
 
-                def _wrapper(*args: Any, _tool=t, **kwargs: Any) -> str:
+                def _wrapper(*args: Any, _tool: Any = t, **kwargs: Any) -> str:
                     result = _tool.run(*args, **kwargs)
                     return str(result)
 

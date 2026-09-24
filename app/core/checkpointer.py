@@ -62,10 +62,23 @@ STATE_ALLOWED_CLASSES = [
     ("app.models.state", "SecurityEvaluationResult"),
     ("app.models", "ExecutionError"),
     ("app.models.state", "ExecutionError"),
+    ("app.models", "CognitiveStepRecord"),
+    ("app.models.state", "CognitiveStepRecord"),
     ("app.models", "GoalStatus"),
     ("app.models.state", "GoalStatus"),
     ("app.models", "EvaluationRecord"),
     ("app.models.state", "EvaluationRecord"),
+    # Clases canónicas de jg_agente_sdk (SSOT)
+    ("jg_sdk.contracts", "RiskLevel"),
+    ("jg_sdk.contracts", "ToolType"),
+    ("jg_sdk.contracts", "ToolResult"),
+    ("jg_sdk.contracts", "AgentTool"),
+    ("jg_sdk.contracts", "ExecutionStatus"),
+    ("jg_sdk.contracts", "StepStatus"),
+    ("jg_sdk.models", "AgentInput"),
+    ("jg_sdk.models", "AgentOutput"),
+    ("jg_sdk.models", "UserContext"),
+    ("jg_sdk.models", "ExecutionStatus"),
 ]
 
 

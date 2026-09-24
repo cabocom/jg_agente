@@ -10,11 +10,17 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends gcc libpq-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# Copiar manifiesto de dependencias y README
-COPY pyproject.toml README.md ./
+# Argumento opcional para origen de instalación del SDK (GitLab Registry, PyPI, wheel o git URL)
+ARG SDK_INSTALL_SOURCE=""
+
+# Copiar manifiesto de dependencias, requirements y README
+COPY pyproject.toml requirements.txt* README.md ./
 
 # Instalar dependencias del proyecto en prefijo aislado /install
 RUN pip install --no-cache-dir --upgrade pip && \
+    if [ -n "$SDK_INSTALL_SOURCE" ]; then \
+        pip install --no-cache-dir --prefix=/install "$SDK_INSTALL_SOURCE"; \
+    fi && \
     pip install --no-cache-dir --prefix=/install .
 
 # ==============================================================================

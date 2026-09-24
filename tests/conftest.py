@@ -1,5 +1,3 @@
-"""Configuración global y fixtures compartidos para la suite de pruebas de jg_agente."""
-
 from collections.abc import Generator
 from typing import Any
 
