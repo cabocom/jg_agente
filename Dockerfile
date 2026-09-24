@@ -66,6 +66,9 @@ WORKDIR /app
 # Copiar paquetes instalados desde la etapa builder (incluye SDK y CLI jg en /usr/local/bin)
 COPY --from=builder /install /usr/local
 
+# Hook de compatibilidad transparente Cython + Pydantic v2
+COPY docker/sitecustomize.py /usr/local/lib/python3.12/site-packages/sitecustomize.py
+
 # Copiar código preparado/ofuscado desde la etapa code-obfuscator
 COPY --from=code-obfuscator /stage/app ./app
 COPY --from=code-obfuscator /stage/plugins ./plugins

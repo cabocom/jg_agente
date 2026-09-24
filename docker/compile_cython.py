@@ -10,8 +10,9 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from setuptools import setup
+
 from Cython.Build import cythonize
+from setuptools import setup
 
 
 def compile_package(pkg_dir: Path, base_dir: Path) -> int:
