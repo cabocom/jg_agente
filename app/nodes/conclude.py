@@ -13,6 +13,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage
 
+from app.core.async_compat import ensure_awaited, is_awaitable_or_coroutine
 from app.core.registry import CapabilityRegistry
 from app.models.io import AgentOutput, ExecutionStatus
 from app.models.state import (
@@ -302,9 +303,17 @@ async def conclude_node(
     data_payload: dict[str, Any] = {}
     if records:
         data_payload["steps_count"] = len(records)
-        data_payload["execution_records"] = [
-            r.model_dump(mode="json") if hasattr(r, "model_dump") else dict(r) for r in records
-        ]
+        serialized_records = []
+        for r in records:
+            if hasattr(r, "output") and is_awaitable_or_coroutine(r.output):
+                try:
+                    r.output = await ensure_awaited(r.output)
+                except Exception:
+                    r.output = str(r.output)
+            serialized_records.append(
+                r.model_dump(mode="json") if hasattr(r, "model_dump") else dict(r)
+            )
+        data_payload["execution_records"] = serialized_records
 
     # Consolidación de saltos cognitivos (Cognitive Steps Trace)
     cog_steps = list(state.get("cognitive_steps") or [])

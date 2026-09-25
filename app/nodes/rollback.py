@@ -4,12 +4,12 @@ Revierte los efectos colaterales de herramientas reversibles ejecutadas (en orde
 inverso) cuando el nodo verify detecta anomalías o fallos operacionales en el sistema.
 """
 
-import inspect
 import logging
 import time
 from datetime import UTC, datetime
 from typing import Any
 
+from app.core.async_compat import ensure_awaited
 from app.core.registry import CapabilityRegistry
 from app.models.state import (
     AgentExecutionStatus,
@@ -53,7 +53,7 @@ async def rollback_node(
                 )
                 try:
                     res = tool.rollback(rec.rollback_context)
-                    tool_res = await res if inspect.iscoroutine(res) else res
+                    tool_res = await ensure_awaited(res)
 
                     rollback_traces.append(
                         {

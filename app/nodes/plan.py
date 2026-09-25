@@ -11,6 +11,7 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
+from app.core.async_compat import is_awaitable_or_coroutine
 from app.core.registry import CapabilityRegistry
 from app.models.state import (
     AgentExecutionStatus,
@@ -88,7 +89,7 @@ async def plan_node(
                 call_with_state = True
 
             res = plan_fn(state) if call_with_state else plan_fn()
-            raw_plan = await res if inspect.iscoroutine(res) else res
+            raw_plan = await res if is_awaitable_or_coroutine(res) else res
 
             if isinstance(raw_plan, ExecutionPlan):
                 plan = raw_plan

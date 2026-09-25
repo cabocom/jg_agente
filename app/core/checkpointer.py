@@ -108,8 +108,66 @@ def get_default_serializer() -> JsonPlusSerializer:
     return JsonPlusSerializer(allowed_msgpack_modules=STATE_ALLOWED_CLASSES)
 
 
+async def _async_sanitize_for_storage(obj: Any, depth: int = 0) -> Any:
+    """Resuelve recursivamente corutinas o awaitables en estructuras de datos para checkpoints."""
+    if depth > 8 or obj is None:
+        return obj
+    from app.core.async_compat import ensure_awaited, is_awaitable_or_coroutine
+
+    if is_awaitable_or_coroutine(obj):
+        try:
+            resolved = await ensure_awaited(obj)
+            return await _async_sanitize_for_storage(resolved, depth + 1)
+        except Exception as exc:
+            logger.warning("Error resolviendo coroutine para checkpoint: %s", exc)
+            return str(obj)
+    if isinstance(obj, dict):
+        return {k: await _async_sanitize_for_storage(v, depth + 1) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [await _async_sanitize_for_storage(v, depth + 1) for v in obj]
+    if isinstance(obj, tuple):
+        return tuple([await _async_sanitize_for_storage(v, depth + 1) for v in obj])
+    if hasattr(obj, "__dict__"):
+        for k, v in list(vars(obj).items()):
+            if is_awaitable_or_coroutine(v):
+                try:
+                    setattr(obj, k, await ensure_awaited(v))
+                except Exception:
+                    setattr(obj, k, str(v))
+    return obj
+
+
+def _sync_sanitize_for_storage(obj: Any, depth: int = 0) -> Any:
+    """Sanitiza recursivamente objetos no serializables en modo síncrono."""
+    if depth > 8 or obj is None:
+        return obj
+    from app.core.async_compat import is_awaitable_or_coroutine
+
+    if is_awaitable_or_coroutine(obj):
+        return f"[Unresolved awaitable: {type(obj).__name__}]"
+    if isinstance(obj, dict):
+        return {k: _sync_sanitize_for_storage(v, depth + 1) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sync_sanitize_for_storage(v, depth + 1) for v in obj]
+    if isinstance(obj, tuple):
+        return tuple(_sync_sanitize_for_storage(v, depth + 1) for v in obj)
+    if hasattr(obj, "__dict__"):
+        for k, v in list(vars(obj).items()):
+            if is_awaitable_or_coroutine(v):
+                setattr(obj, k, f"[Unresolved awaitable: {type(v).__name__}]")
+    return obj
+
+
 class DualPostgresSaver(PostgresSaver):
     """PostgresSaver compatible con ejecución síncrona y asíncrona (ainvoke) de LangGraph."""
+
+    def put(self, config: Any, checkpoint: Any, metadata: Any, new_versions: Any) -> Any:
+        clean_checkpoint = _sync_sanitize_for_storage(checkpoint)
+        return super().put(config, clean_checkpoint, metadata, new_versions)
+
+    def put_writes(self, config: Any, writes: Any, task_id: Any, task_path: Any = "") -> Any:
+        clean_writes = _sync_sanitize_for_storage(writes)
+        return super().put_writes(config, clean_writes, task_id, task_path)
 
     async def aget_tuple(self, config: Any) -> Any:
         import asyncio
@@ -119,12 +177,14 @@ class DualPostgresSaver(PostgresSaver):
     async def aput(self, config: Any, checkpoint: Any, metadata: Any, new_versions: Any) -> Any:
         import asyncio
 
-        return await asyncio.to_thread(self.put, config, checkpoint, metadata, new_versions)
+        clean_checkpoint = await _async_sanitize_for_storage(checkpoint)
+        return await asyncio.to_thread(self.put, config, clean_checkpoint, metadata, new_versions)
 
     async def aput_writes(self, config: Any, writes: Any, task_id: Any, task_path: Any = "") -> Any:
         import asyncio
 
-        return await asyncio.to_thread(self.put_writes, config, writes, task_id, task_path)
+        clean_writes = await _async_sanitize_for_storage(writes)
+        return await asyncio.to_thread(self.put_writes, config, clean_writes, task_id, task_path)
 
     async def alist(
         self, config: Any, *, filter: Any = None, before: Any = None, limit: Any = None

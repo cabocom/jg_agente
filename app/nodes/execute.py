@@ -7,13 +7,13 @@ captura fallos operacionales y preserva el contexto de compensación (rollback_c
 """
 
 import asyncio
-import inspect
 import logging
 from datetime import UTC, datetime
 from typing import Any
 
 from langchain_core.messages import ToolMessage
 
+from app.core.async_compat import is_awaitable_or_coroutine
 from app.core.registry import CapabilityRegistry
 from app.models.state import (
     AgentExecutionStatus,
@@ -269,7 +269,7 @@ async def execute_node(
             )
 
         # Soporte para herramientas que devuelven corrutinas (retrocompatibilidad)
-        if inspect.iscoroutine(tool_result.output):
+        if is_awaitable_or_coroutine(tool_result.output):
             try:
                 tool_result.output = await asyncio.wait_for(
                     tool_result.output,
@@ -288,6 +288,14 @@ async def execute_node(
                     metadata={"timeout_sec": timeout_sec, "timed_out": True},
                 )
 
+        # Salvaguarda final contra corrutinas no serializables en StepExecutionRecord
+        final_output = tool_result.output
+        if is_awaitable_or_coroutine(final_output):
+            try:
+                final_output = await final_output
+            except Exception as e:
+                final_output = f"<coroutine unresolved: {e}>"
+
         step_status = StepStatus.COMPLETED if tool_result.success else StepStatus.FAILED
         step.status = step_status
 
@@ -296,7 +304,7 @@ async def execute_node(
             tool_name=step.tool_name,
             tool_args=step.tool_args,
             status=step_status,
-            output=tool_result.output,
+            output=final_output,
             error=tool_result.error,
             duration_ms=tool_result.duration_ms,
             rollback_context=tool_result.rollback_context,

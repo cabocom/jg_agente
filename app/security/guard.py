@@ -9,7 +9,6 @@ Interpone una capa de seguridad determinista previa a la invocación de herramie
 """
 
 import asyncio
-import inspect
 import logging
 import os
 import re
@@ -19,6 +18,7 @@ import urllib.parse
 from collections.abc import Sequence
 from typing import Any
 
+from app.core.async_compat import is_awaitable_or_coroutine, is_coroutine_callable
 from app.models.state import PolicyDecision, SecurityEvaluationResult
 from app.models.tools import AgentTool, RiskLevel, ToolResult
 
@@ -437,7 +437,7 @@ class SecurityGuard:
                         return tool.func(parsed_args)
                     raise
 
-            if inspect.iscoroutinefunction(tool.func):
+            if is_coroutine_callable(tool.func):
 
                 async def _invoke_async() -> Any:
                     try:
@@ -454,12 +454,14 @@ class SecurityGuard:
                     asyncio.to_thread(_invoke_sync),
                     timeout=timeout_sec,
                 )
-                if inspect.iscoroutine(raw_res):
+                if is_awaitable_or_coroutine(raw_res):
                     raw_res = await asyncio.wait_for(raw_res, timeout=timeout_sec)
 
             duration_ms = (time.perf_counter() - start_time) * 1000.0
             if isinstance(raw_res, ToolResult):
                 tool_res = raw_res
+                if is_awaitable_or_coroutine(tool_res.output):
+                    tool_res.output = await asyncio.wait_for(tool_res.output, timeout=timeout_sec)
                 if tool_res.duration_ms <= 0.0:
                     tool_res.duration_ms = duration_ms
             else:
