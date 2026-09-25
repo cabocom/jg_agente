@@ -9,7 +9,7 @@ import inspect
 import logging
 import pkgutil
 import sys
-from collections import defaultdict, deque
+from collections import deque
 from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Any, Self
@@ -240,7 +240,7 @@ class PluginManager:
     def _resolve_dependencies_and_order(self) -> list[str]:
         """Verifica dependencias requeridas y computa el orden topológico de inicialización."""
         in_degree: dict[str, int] = dict.fromkeys(self._plugins, 0)
-        adjacency: dict[str, list[str]] = defaultdict(list)
+        adjacency: dict[str, list[str]] = {name: [] for name in self._plugins}
 
         for name, plugin in self._plugins.items():
             metadata = plugin.get_plugin_metadata()
