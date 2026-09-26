@@ -227,8 +227,8 @@ async def conclude_node(
                 else:
                     response_text = candidate_text
 
-    # D. Buscar en el último AIMessage con contenido conversacional (evitando salidas crudas de tools)
-    if not response_text:
+    # D. Buscar en el último AIMessage con contenido conversacional si la ejecución no falló
+    if not response_text and not is_failed:
         for msg in reversed(messages):
             if isinstance(msg, AIMessage) and msg.content:
                 content_str = str(msg.content).strip()

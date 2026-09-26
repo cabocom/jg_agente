@@ -395,12 +395,98 @@ class DAGPlannerEngine(PlannerEngine):
                 )
             )
 
-        # Acciones de sólo lectura / auditoría -> LOW
+        # Acciones de consulta o listado de contenedores / docker / estado de servicios
+        elif any(
+            w in p_lower
+            for w in (
+                "contenedor",
+                "contenedores",
+                "container",
+                "containers",
+                "docker ps",
+                "listar",
+                "listado",
+                "cuantos",
+                "cuántos",
+                "servicios",
+            )
+        ):
+            steps.append(
+                PlanStep(
+                    step_id="step-1",
+                    tool_name="docker_list_containers",
+                    tool_args={"all": True},
+                    description=f"Listar y comprobar estado de los contenedores Docker: {prompt}",
+                    risk_level=RiskLevel.LOW,
+                    reversible=False,
+                    dependencies=[],
+                    status=StepStatus.PENDING,
+                )
+            )
+
+        # Acciones de consulta de logs
+        elif any(w in p_lower for w in ("log", "logs", "trazas", "registro")):
+            target_container = "jg_agente_conversacional"
+            known_containers = [
+                "jg_agente_conversacional",
+                "jg_agente_devops",
+                "jg_agente_datosgob",
+                "jg_dashboard",
+                "jg_agente_postgres",
+                "jg_dashboard_postgres",
+            ]
+            for c_name in known_containers:
+                if c_name in p_lower or c_name.replace("jg_", "") in p_lower:
+                    target_container = c_name
+                    break
+
+            steps.append(
+                PlanStep(
+                    step_id="step-1",
+                    tool_name="docker_logs",
+                    tool_args={"container": target_container, "tail": 50},
+                    description=f"Recuperar últimas trazas y logs del contenedor '{target_container}': {prompt}",
+                    risk_level=RiskLevel.LOW,
+                    reversible=False,
+                    dependencies=[],
+                    status=StepStatus.PENDING,
+                )
+            )
+
+        # Acciones de inspección detallada de contenedor
+        elif any(w in p_lower for w in ("inspect", "inspeccionar", "detalle", "detalles")):
+            target_container = "jg_agente_conversacional"
+            known_containers = [
+                "jg_agente_conversacional",
+                "jg_agente_devops",
+                "jg_agente_datosgob",
+                "jg_dashboard",
+                "jg_agente_postgres",
+                "jg_dashboard_postgres",
+            ]
+            for c_name in known_containers:
+                if c_name in p_lower or c_name.replace("jg_", "") in p_lower:
+                    target_container = c_name
+                    break
+
+            steps.append(
+                PlanStep(
+                    step_id="step-1",
+                    tool_name="docker_inspect_container",
+                    tool_args={"container": target_container},
+                    description=f"Inspeccionar configuración y telemetría del contenedor '{target_container}': {prompt}",
+                    risk_level=RiskLevel.LOW,
+                    reversible=False,
+                    dependencies=[],
+                    status=StepStatus.PENDING,
+                )
+            )
+
+        # Acciones de sólo lectura / auditoría general -> LOW
         elif any(
             w in p_lower
             for w in (
                 "consultar",
-                "inspeccionar",
                 "auditar",
                 "telemetria",
                 "telemetría",
@@ -414,9 +500,9 @@ class DAGPlannerEngine(PlannerEngine):
             steps.append(
                 PlanStep(
                     step_id="step-1",
-                    tool_name="inspect_resource_usage",
-                    tool_args={"instruction": prompt},
-                    description=f"Consultar telemetría e inspeccionar estado: {prompt}",
+                    tool_name="docker_list_containers",
+                    tool_args={"all": True},
+                    description=f"Consultar estado de contenedores e infraestructura: {prompt}",
                     risk_level=RiskLevel.LOW,
                     reversible=False,
                     dependencies=[],
