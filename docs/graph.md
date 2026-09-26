@@ -142,7 +142,11 @@ El nodo `reason` (`app/nodes/reason.py`) actúa como el centro de deliberación 
      - Si la IA determina `ACTION`: Genera un `IntentModel` con `action_type = "plan"`, derivando el flujo a `plan`. Esto asegura que preguntas operativas en lenguaje natural (ej. *"Dime el estado de los contenedores"*, *"¿Cuál es la memoria libre?"*) no sean silenciadas por heurísticas sintácticas.
      - Si la IA determina `GREETING`: Genera un `IntentModel` con `action_type = "conclude"`, emitiendo la respuesta directa del LLM.
    - Si no existe planificador ni herramientas invocadas: Concluye directamente con `action_type = "conclude"`.
-4. **Auditoría Estructurada:** Registra cada invocación en `audit_trail` bajo el tipo de evento `reasoning_completed`.
+4. **Deduplicación Cognitiva por Firma Exacta de Invocación (`tool_name`, `tool_args`):**
+   - **Prevención de Bucles Infinitos y Rate Limits:** Durante ciclos reflexivos iterativos procedentes de re-evaluaciones (`evaluate -> reason`), el agente analiza las herramientas propuestas (`tool_calls`). Si una llamada coincide exactamente en nombre y parámetros (`tool_name` y `tool_args`) con un paso que ya concluyó con éxito previamente (`StepStatus.COMPLETED`), se detecta como idéntica redundancia.
+   - **Preservación Integral de Paginación y Multi-Paso:** Si los argumentos difieren (e.g. avanzar rangos u offsets en lectura de ficheros, inspeccionar otro contenedor o variar parámetros de búsqueda), la llamada se clasifica como legítima y se ejecuta con normalidad.
+   - **Conclusión Reflexiva:** Si la totalidad de las llamadas propuestas resultan ser duplicados exactos de operaciones previas ya resueltas, `reason` conmuta automáticamente a `action_type = "conclude"`, previniendo llamadas redundantes de infraestructura y saturación de cuotas o límites de tasa de LLM (HTTP 429).
+5. **Auditoría Estructurada:** Registra cada invocación en `audit_trail` bajo el tipo de evento `reasoning_completed`.
 
 ---
 
@@ -246,3 +250,18 @@ El nodo `rollback` (`app/nodes/rollback.py`) restituye el estado previo del sist
 3. **Aislamiento y Resiliencia (Best-Effort):** Las excepciones en una compensación particular son capturadas y registradas con `success=False` sin abortar el rollback de los pasos restantes.
 4. **Trazas y Auditoría:** Almacena el historial de compensaciones en `state["rollback_records"]` y emite el evento `rollback_completed` con métricas de pasos revertidos y tasa de éxito.
 5. **Señalización de Fallo:** Fija `state["status"] = AgentExecutionStatus.FAILED` y añade un `ExecutionError` fatal para asegurar que `conclude` sintetice la respuesta informativa adecuada para el usuario.
+
+---
+
+## 14. Nodo de Evaluación Semántica y Capability-Awareness: `evaluate`
+
+El nodo `evaluate` (`app/nodes/evaluate.py`) evalúa semánticamente la suficiencia de la evidencia técnica obtenida tras la ejecución y sintetiza la respuesta humana final:
+
+1. **Evaluación Orientada a Objetivos:** Compara el estímulo original del usuario (`prompt`), las herramientas ejecutadas (`execution_records`) y las observaciones reales (`ToolMessage`) para determinar el estado del objetivo (`goal_status`):
+   - `SATISFIED`: La evidencia responde satisfactoriamente a la solicitud (e.g. datos, listados o logs obtenidos). Produce la síntesis final dirigida al usuario.
+   - `NEEDS_MORE_INFO`: Se requieren pasos técnicos adicionales con herramientas disponibles (e.g. avanzar en la paginación, inspeccionar un segundo recurso o leer otro bloque de líneas).
+   - `BLOCKED_MISSING_CAPABILITY`: Se identifica una necesidad técnica cuya herramienta no existe en el catálogo registrado.
+   - `FAILED`: Ocurrió un error irrecuperable.
+2. **Capability-Awareness Dinámico:** Si el evaluador sugiere una herramienta que no está registrada en `CapabilityRegistry`, conmuta automáticamente a `BLOCKED_MISSING_CAPABILITY` para evitar peticiones a herramientas inexistentes.
+3. **Control Reflexivo de Iteraciones:** El ciclo iterativo está delimitado por `max_iterations` (por defecto 3). Al combinarse con la deduplicación de firmas exactas en `reason`, garantiza que el agente no entre en bucles infinitos ni agote límites de tasa de los proveedores de LLM.
+4. **Trazabilidad:** Emite `EvaluationRecord` y registra el paso en `cognitive_steps` con la justificación del veredicto.

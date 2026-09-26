@@ -11,7 +11,7 @@
 El motor cognitivo y plano de ejecución **`jg_agente`** se distribuye bajo un esquema de **Doble Licenciamiento (Dual Licensing)**, permitiendo a individuos y organizaciones elegir el modelo legal que mejor se adapte a su entorno operativo y comercial:
 
 1. **Licencia de Código Abierto (AGPLv3):** Ideal para la comunidad de software libre, investigación, uso académico y organizaciones dispuestas a compartir sus adaptaciones bajo la misma licencia recíproca fuerte ([LICENSE](LICENSE)).
-2. **Licencia Comercial Enterprise (200 € / mes cada 3 agentes):** Diseñada para empresas, proveedores de servicios SaaS e integradores que necesitan desplegar, modificar, embeber o prestar servicios con el agente **sin la obligación de revelar su código fuente** ni sus plugins propietarios.
+2. **Licencia Comercial Enterprise (1 € / mes por agente):** Diseñada para empresas, proveedores de servicios SaaS e integradores que necesitan desplegar, modificar, embeber o prestar servicios con el agente **sin la obligación de revelar su código fuente** ni sus plugins propietarios.
 
 ---
 
@@ -35,14 +35,10 @@ La licencia AGPLv3 incluye una cláusula vinculante de copyleft de red (*Remote 
 Para organizaciones que no pueden o no desean someterse a las obligaciones copyleft de la AGPLv3, ofrecemos una **Licencia Comercial Empresarial directa del autor original**.
 
 ### 3.1 Esquema de Tarifas
-- **Cuota de Suscripción Base:** **200 € / mes** (+ IVA aplicable) **por cada bloque de hasta 3 agentes**.
-- **Sin rappel por volumen:** La tarificación es estrictamente lineal y acumulativa por número de agentes aprovisionados:
-  - De 1 a 3 agentes: **200 € / mes**
-  - De 4 a 6 agentes: **400 € / mes**
-  - De 7 a 9 agentes: **600 € / mes**
-  - *(Sin descuentos por tramos ni rappel).*
+- **Tarifa Única Universal:** **1 € / mes** (+ IVA aplicable) **por cada agente en ejecución**, sin importe mínimo ni límite superior.
+- **Sin rappel y sin límite:** La tarificación es estrictamente lineal y predecible a razón de 1 €/mes por agente activo aprovisionado (ej. 1 agente = 1 €/mes, 10 agentes = 10 €/mes, 500 agentes = 500 €/mes), sin descuentos por tramos, sin rappel y sin empaquetado en bloques mínimos.
 - **Periodicidad:** Facturación mensual o anual recurrente.
-- **Despliegues de Gran Volumen:** Si tu organización requiere un volumen superior de agentes o una licencia corporativa global (*unlimited instances* / OEM), contacta directamente a través de **[https://javiergalvez.com](https://javiergalvez.com)**.
+- **Casos Singulares y Acuerdos Especiales:** Si tu organización requiere un acuerdo corporativo muy particular (e.g. distribución OEM embebida en hardware cerrado, cláusulas de licitación pública o acuerdos singulares), contacta directamente a través de **[https://javiergalvez.com](https://javiergalvez.com)**.
 
 ### 3.2 Derechos y Ventajas Otorgados
 Al suscribir la Licencia Comercial Enterprise, tu organización adquiere:
@@ -60,8 +56,8 @@ Al suscribir la Licencia Comercial Enterprise, tu organización adquiere:
 
 | Característica / Obligación | Licencia Comunitaria (AGPLv3) | Licencia Comercial Enterprise |
 | :--- | :---: | :---: |
-| **Coste de Licencia** | Gratuito (0 €) | **200 € / mes (cada 3 agentes)** |
-| **Escalado de tarifa** | N/A | **Lineal (sin rappel)** |
+| **Coste de Licencia** | Gratuito (0 €) | **1 € / mes por agente** |
+| **Escalado de tarifa** | N/A | **Lineal (1 €/agente, sin rappel y sin límite)** |
 | **Acceso al código fuente completo** | Sí | Sí |
 | **Uso para pruebas / investigación local** | Sí | Sí |
 | **Obligación de liberar código fuente al operar en red (SaaS/API)** | **SÍ (Obligatorio por Sec. 13)** | **NO (Exento)** |
@@ -79,7 +75,7 @@ Al suscribir la Licencia Comercial Enterprise, tu organización adquiere:
 Si tu empresa utiliza el software de forma estrictamente privada y nadie fuera de la entidad jurídica interactúa con él, la ejecución interna es libre. Sin embargo, en el momento en que clientes, contratistas o usuarios externos interactúen con el agente por red (APIs, webhooks, bots), se activa la obligación de la Sección 13 de AGPLv3. Por seguridad jurídica, los departamentos de *Compliance* corporativo requieren la Licencia Comercial.
 
 #### ¿Cómo se calcula la cuota si tengo 4 agentes?
-Cada bloque cubre hasta 3 agentes sin rappel. Para 4 agentes se requieren 2 bloques (hasta 6 agentes), resultando en una tarifa de 400 € / mes.
+La tarifa es estrictamente de 1 € / mes por cada agente activo aprovisionado, sin tramos ni bloques forzados. Para 4 agentes en ejecución, el coste de suscripción es de exactamente 4 € / mes.
 
 #### ¿Cómo se cancela la suscripción comercial?
 La suscripción mensual puede cancelarse en cualquier momento con un preaviso de 30 días. Tras la cancelación, la empresa deberá cesar la explotación comercial privada o acogerse estrictamente a los términos de la AGPLv3 compartiendo el código de sus versiones modificadas.
