@@ -148,14 +148,14 @@ async def evaluate_node(
         "y generar en el campo 'explanation' la respuesta final en lenguaje natural que leerá el usuario humano.\n\n"
         f"{style_instructions}\n"
         "INSTRUCCIONES PARA 'explanation' SEGÚN 'goal_status':\n"
-        "1. 'satisfied': Si la información obtenida responde plenamente a la solicitud del usuario. "
+        "1. 'satisfied': Si la información técnica obtenida responde a la solicitud del usuario (por ejemplo, si solicitó logs, listados, métricas, estado de infraestructura o lectura de datos y las observaciones ya los contienen). "
         "En 'explanation', DEBES responder DIRECTAMENTE al usuario comunicando los datos concretos obtenidos "
-        "(ej. si preguntó por el clima, indica el clima exacto y temperatura; si preguntó por servicios, su estado real). "
+        "(ej. si preguntó por el clima, indica el clima exacto y temperatura; si preguntó por servicios o logs, entrega los datos solicitados). "
         "PROHIBIDO TERMINANTEMENTE actuar como un auditor externo o hablar de las herramientas en tercera persona "
         "(NUNCA digas: 'La respuesta del tool indica...', 'El tool devolvió...', 'Cumpliendo la solicitud del usuario', etc.). "
         "Habla de tú a tú al usuario con la información final solicitada.\n"
-        "2. 'needs_more_info': Si para cumplir el objetivo del usuario se requiere ejecutar una herramienta ADICIONAL "
-        "que SÍ está disponible en el catálogo de herramientas registradas. Explica qué dato falta y qué se ejecutará.\n"
+        "2. 'needs_more_info': ÚNICAMENTE si para cumplir el objetivo del usuario se requiere de forma indispensable ejecutar una herramienta adicional o una nueva operación con parámetros complementarios (por ejemplo, leer el siguiente bloque de líneas, inspeccionar otro contenedor distinto o paginar) "
+        "que SÍ está disponible en el catálogo de herramientas registradas. Explica qué dato concreto falta y qué se ejecutará.\n"
         "3. 'blocked_missing_capability': Si detectas un problema o si el usuario solicitó investigar algo "
         "pero la herramienta requerida NO EXISTE en el catálogo de herramientas registradas. "
         "Indica brevemente qué hallazgo real hay y qué herramienta o capacidad específica falta.\n"
@@ -268,22 +268,6 @@ async def evaluate_node(
         goal_status = GoalStatus.BLOCKED_MISSING_CAPABILITY
         if suggested_next_action not in missing_capabilities:
             missing_capabilities.append(suggested_next_action)
-
-    # Evitar bucles redundantes: si se marcó needs_more_info pero la herramienta sugerida
-    # ya se ejecutó con éxito en este ciclo, considerar el objetivo satisfecho para no saturar rate limits.
-    if goal_status == GoalStatus.NEEDS_MORE_INFO and suggested_next_action:
-        executed_tool_names = [
-            getattr(r, "tool_name", None)
-            for r in (exec_records or [])
-            if str(getattr(r, "status", "")).lower() in ("completed", "stepstatus.completed")
-        ]
-        if suggested_next_action in executed_tool_names:
-            logger.info(
-                "[evaluate_node] Herramienta '%s' ya ejecutada con éxito previamente. "
-                "Cerrando ciclo como SATISFIED para evitar bucle.",
-                suggested_next_action,
-            )
-            goal_status = GoalStatus.SATISFIED
 
     duration_ms = max(0.0, round((time.perf_counter() - start_time) * 1000.0, 2))
 

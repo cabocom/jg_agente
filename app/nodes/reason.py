@@ -208,30 +208,69 @@ async def reason_node(
     planner_engine = registry.get_planner()
 
     if has_tool_calls:
-        tool_names = [tc.get("name") for tc in ai_message.tool_calls]
-        tools_str = ", ".join(t for t in tool_names if t)
-        logger.info(
-            "[reason_node] El modelo generó %d tool call(s): %s",
-            len(ai_message.tool_calls),
-            tools_str,
-        )
-        intent = IntentModel(
-            goal=prompt or "Ejecución de herramientas operativas",
-            action_type="act",
-            parameters={"tool_calls": ai_message.tool_calls},
-            confidence=1.0,
-            reasoning=str(ai_message.content)
-            if ai_message.content
-            else f"Invocación requerida para: {tools_str}",
-        )
-        audit_details = {
-            "action_type": "act",
-            "tool_calls_count": len(ai_message.tool_calls),
-            "tools": tool_names,
-        }
-        step_title = "Razonamiento e Interpretación Cognitiva"
-        step_action = f"Selección de Herramienta(s): {tools_str}"
-        step_description = f"El agente interpretó la solicitud y determinó la ejecución de las herramientas: {tools_str}."
+        # Detectar llamadas con argumentos idénticos a pasos ya ejecutados con éxito en la sesión
+        past_executions = [
+            (
+                getattr(r, "tool_name", None),
+                getattr(r, "tool_args", {}) or {},
+            )
+            for r in (state.get("execution_records") or [])
+            if str(getattr(r, "status", "")).lower() in ("completed", "stepstatus.completed")
+        ]
+
+        def _is_identical_duplicate(tc: dict[str, Any]) -> bool:
+            tc_name = tc.get("name")
+            tc_args = tc.get("args") or {}
+            for p_name, p_args in past_executions:
+                if p_name == tc_name and p_args == tc_args:
+                    return True
+            return False
+
+        active_tool_calls = [tc for tc in ai_message.tool_calls if not _is_identical_duplicate(tc)]
+
+        if not active_tool_calls and ai_message.tool_calls:
+            logger.info(
+                "[reason_node] Todas las herramientas invocadas ya fueron ejecutadas con argumentos idénticos. Concluyendo con la información disponible."
+            )
+            intent = IntentModel(
+                goal=prompt or "Resolución con evidencia existente",
+                action_type="conclude",
+                parameters={"response": ai_message.content or "Operaciones completadas con la evidencia recopilada."},
+                confidence=1.0,
+                reasoning="Las herramientas invocadas ya fueron ejecutadas previamente con idénticos parámetros.",
+            )
+            audit_details = {
+                "action_type": "conclude",
+                "deduplicated_calls": len(ai_message.tool_calls),
+            }
+            step_title = "Razonamiento y Conclusión Reflexiva"
+            step_action = "Resolución sin duplicación de acciones"
+            step_description = "El agente detectó que las herramientas propuestas ya se ejecutaron con idénticos parámetros, evitando llamadas redundantes."
+        else:
+            tool_names = [tc.get("name") for tc in active_tool_calls]
+            tools_str = ", ".join(t for t in tool_names if t)
+            logger.info(
+                "[reason_node] El modelo generó %d tool call(s) activas: %s",
+                len(active_tool_calls),
+                tools_str,
+            )
+            intent = IntentModel(
+                goal=prompt or "Ejecución de herramientas operativas",
+                action_type="act",
+                parameters={"tool_calls": active_tool_calls},
+                confidence=1.0,
+                reasoning=str(ai_message.content)
+                if ai_message.content
+                else f"Invocación requerida para: {tools_str}",
+            )
+            audit_details = {
+                "action_type": "act",
+                "tool_calls_count": len(active_tool_calls),
+                "tools": tool_names,
+            }
+            step_title = "Razonamiento e Interpretación Cognitiva"
+            step_action = f"Selección de Herramienta(s): {tools_str}"
+            step_description = f"El agente interpretó la solicitud y determinó la ejecución de las herramientas: {tools_str}."
     elif planner_engine is not None and not await _is_simple_greeting_or_chat_llm(model, prompt):
         logger.info(
             "[reason_node] Solicitud operativa detectada con planificador disponible ('%s')",
