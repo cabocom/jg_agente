@@ -269,6 +269,22 @@ async def evaluate_node(
         if suggested_next_action not in missing_capabilities:
             missing_capabilities.append(suggested_next_action)
 
+    # Evitar bucles redundantes: si se marcó needs_more_info pero la herramienta sugerida
+    # ya se ejecutó con éxito en este ciclo, considerar el objetivo satisfecho para no saturar rate limits.
+    if goal_status == GoalStatus.NEEDS_MORE_INFO and suggested_next_action:
+        executed_tool_names = [
+            getattr(r, "tool_name", None)
+            for r in (exec_records or [])
+            if str(getattr(r, "status", "")).lower() in ("completed", "stepstatus.completed")
+        ]
+        if suggested_next_action in executed_tool_names:
+            logger.info(
+                "[evaluate_node] Herramienta '%s' ya ejecutada con éxito previamente. "
+                "Cerrando ciclo como SATISFIED para evitar bucle.",
+                suggested_next_action,
+            )
+            goal_status = GoalStatus.SATISFIED
+
     duration_ms = max(0.0, round((time.perf_counter() - start_time) * 1000.0, 2))
 
     # 5. Construir registros estructurados
