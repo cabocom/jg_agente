@@ -17,6 +17,7 @@ from langchain_core.messages import (
     BaseMessage,
     HumanMessage,
     SystemMessage,
+    ToolCall,
 )
 from langchain_core.runnables import Runnable
 
@@ -218,7 +219,7 @@ async def reason_node(
             if str(getattr(r, "status", "")).lower() in ("completed", "stepstatus.completed")
         ]
 
-        def _is_identical_duplicate(tc: dict[str, Any]) -> bool:
+        def _is_identical_duplicate(tc: ToolCall) -> bool:
             tc_name = tc.get("name")
             tc_args = tc.get("args") or {}
             for p_name, p_args in past_executions:
