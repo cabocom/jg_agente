@@ -235,7 +235,10 @@ async def reason_node(
             intent = IntentModel(
                 goal=prompt or "Resolución con evidencia existente",
                 action_type="conclude",
-                parameters={"response": ai_message.content or "Operaciones completadas con la evidencia recopilada."},
+                parameters={
+                    "response": ai_message.content
+                    or "Operaciones completadas con la evidencia recopilada."
+                },
                 confidence=1.0,
                 reasoning="Las herramientas invocadas ya fueron ejecutadas previamente con idénticos parámetros.",
             )
