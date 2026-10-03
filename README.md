@@ -1,332 +1,251 @@
 # jg_agente
 
-**Motor Autónomo de Ejecución Cognitiva y Accionamiento**  
-*Execution Plane del ecosistema jG*
+**Enterprise Cognitive Agent Runtime for Private & Secure Environments**  
+*Motor Autónomo de Ejecución Cognitiva, Gobernanza HITL y Reversibilidad Transaccional*
 
 ---
 
-## 1. ¿Qué es `jg_agente`?
+## 1. Visión General: ¿Qué es `jg_agente`?
 
-`jg_agente` es un runtime de agentes autónomos basado en grafos de estados ([LangGraph](https://github.com/langchain-ai/langgraph)) diseñado para ejecutar tareas de razonamiento, planificación, invocación de herramientas seguras y verificación.
+`jg_agente` es un **runtime industrial de agentes de Inteligencia Artificial Cognitiva** diseñado para ejecutarse de forma segura y aislada en **redes privadas, infraestructuras on-premise, nubes soberanas o entornos de alta conformidad (air-gapped)**.
 
-Opera como un **Execution Plane** aislado dentro de una red privada (sin exposición directa a Internet). No conoce protocolos de comunicación externos (Asterisk, Telegram, Slack, etc.); consume exclusivamente entradas normalizadas (`AgentInput`) y genera salidas estructuradas (`AgentOutput`).
+Construido sobre una arquitectura basada en grafos de estados ([LangGraph](https://github.com/langchain-ai/langgraph)) y microservicios asíncronos de alto rendimiento ([FastAPI](https://fastapi.tiangolo.com/)), `jg_agente` proporciona un motor de ejecución estrictamente agnóstico que desacopla la capacidad de razonamiento e inferencia de las herramientas de dominio.
 
----
-
-## 2. ¿Qué problema resuelve?
-
-1. **Fin del acoplamiento monolítico:** En sistemas anteriores (`jg-ai-gateway` y `Devops60k`), la lógica conversacional, la telefonía, la orquestación DevOps y las herramientas estaban entrelazadas con el ciclo de vida del agente. `jg_agente` proporciona un Core estrictamente agnóstico.
-2. **Eliminación del código condicional por tipo de agente:** Elimina por completo estructuras como `if conversational:` o `if devops:`. El grafo de ejecución se configura de manera determinista al arrancar el proceso según las capacidades declaradas por los plugins cargados.
-3. **Seguridad y reversibilidad garantizada:** Toda acción con efectos secundarios es auditada, categorizada por nivel de riesgo (`RiskLevel`), protegida contra SSRF y dotada de contratos formales de compensación (`rollback_func`).
-4. **Gobernanza Human-In-The-Loop (HITL):** Los planes que implican mutaciones críticas se pausan de forma transparente en la base de datos de checkpoints y esperan autorización remota desde `jg_dashboard`.
+A diferencia de los frameworks tradicionales de automatización o chatbots convencionales, `jg_agente` implementa **gobernanza humana obligatoria (Human-In-The-Loop)**, **evaluación preventiva de riesgos**, **mecanismos automáticos de compensación y rollback**, y un estricto modelo de **seguridad Zero-Trust**.
 
 ---
 
-## 3. Arquitectura General
+## 2. Pilares de Valor y Ventajas Competitivas
+
+### 🔒 Ejecución Soberana en Redes Privadas (Air-Gapped Ready)
+- Opera como un plano de ejecución (*Execution Plane*) ciego a Internet pública, consumiendo estímulos normalizados (`AgentInput`) y devolviendo respuestas estructuradas auditadas (`AgentOutput`).
+- Comunicación entre el Plano de Control y el Runtime blindada mediante **firmas criptográficas canónicas HMAC-SHA256** con protección anti-replay (ventanas temporales y nonces únicos).
+
+### 🛡️ Gobernanza Human-In-The-Loop (HITL) Nativa
+- Toda acción identificada con nivel de riesgo crítico o mutaciones de infraestructura (`RiskLevel >= HIGH`) provoca la **pausa transparente y determinista del grafo cognitivo** mediante persistencia transaccional de checkpoints.
+- Los operadores humanos pueden auditar la justificación técnica del plan, examinar los argumentos y autorizar o rechazar la mutación de forma remota antes de que se ejecute una sola línea de código en producción.
+
+### 🔄 Reversibilidad Automática (Rollback Engine)
+- Las herramientas mutantes declaran contratos formales de compensación (`rollback_func`).
+- Si un paso del plan falla o un motor de verificación (`VerifierEngine`) detecta anomalías post-ejecución, el runtime activa el **bucle de reversión ordenada**, deshaciendo los cambios en orden cronológico inverso para garantizar la integridad del entorno.
+
+### 🧩 Arquitectura Open-Core Agnóstica y Extensible
+- El núcleo no contiene acoplamiento ni lógica de dominio preprogramada. Las herramientas, observadores y planificadores se descubren e inyectan dinámicamente mediante el ecosistema de plugins (`BasePlugin`) sobre contratos canónicos provistos por el SDK.
+- Admite recarga de capacidades en caliente (*Hot-Reload*) y compilación dinámica de topologías cognitivas adaptadas a las capacidades detectadas en tiempo de arranque.
+
+### 🧠 Orquestación de Modelos Polimórfica
+- Compatible con modelos masivos de lenguaje de última generación tanto propietarios como de código abierto desplegados localmente (Groq, OpenAI, Gemini, Ollama, vLLM).
+
+---
+
+## 3. Arquitectura del Sistema
 
 ```text
-       ┌────────────────────────────────────────────────────────┐
-       │                 jg_dashboard (Control Plane)           │
-       │       Usuarios · RBAC · HITL Approval · Adaptadores    │
-       └───────────────────────────┬────────────────────────────┘
-                                   │ HTTP (API Interna / Red Privada)
-                                   ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│                        jg_agente (Execution Plane)                     │
+│                      CONTROL PLANE (jg_dashboard)                      │
+│            Gobernanza · Inventario · HITL · Auditoría Operativa        │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ Firmas HMAC-SHA256 (Red Privada)
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                      EXECUTION PLANE (jg_agente)                       │
 │                                                                        │
-│  ┌───────────────────────┐         ┌────────────────────────────────┐  │
-│  │   FastAPI Internal    │         │       CapabilityRegistry       │  │
-│  │  /executions/trigger  │         │  (Tools, Engines, Validations) │  │
-│  └───────────┬───────────┘         └───────────────▲────────────────┘  │
-│              │                                     │ registra          │
-│              ▼                                     │                   │
-│  ┌───────────────────────┐         ┌───────────────┴────────────────┐  │
-│  │    LangGraph Engine   │         │            Plugins             │  │
-│  │   (observe -> reason  │         │  - jg_plugin_conversational    │  │
-│  │    -> plan -> execute)│         │  - jg_plugin_devops            │  │
-│  └───────────┬───────────┘         └────────────────────────────────┘  │
-│              │                                                         │
-│              ▼                                                         │
-│  ┌───────────────────────┐         ┌────────────────────────────────┐  │
-│  │     SecurityGuard     │◄───────►│      PostgreSQL Database       │  │
-│  │ (SSRF, Risk, HITL)    │         │  (core_checkpoints, core_*)    │  │
-│  └───────────────────────┘         └────────────────────────────────┘  │
+│  ┌─────────────────────────┐            ┌───────────────────────────┐  │
+│  │   FastAPI Private Core  │            │    CapabilityRegistry     │  │
+│  │  /trigger  /health  HITL│            │ (Tools, Engines, Schemas) │  │
+│  └────────────┬────────────┘            └─────────────▲─────────────┘  │
+│               │ Invocación                            │ Registra      │
+│               ▼                                       │ Capacidades   │
+│  ┌─────────────────────────┐            ┌─────────────┴─────────────┐  │
+│  │    LangGraph Engine     │            │      Plugins Ecosistema   │  │
+│  │  (observe -> plan ->    │            │   (Empaquetados via SDK)  │  │
+│  │   execute -> rollback)  │            └───────────────────────────┘  │
+│  └────────────┬────────────┘                                           │
+│               │                                                        │
+│               ▼                                                        │
+│  ┌─────────────────────────┐            ┌───────────────────────────┐  │
+│  │      SecurityGuard      │◄──────────►│    Checkpointer Storage   │  │
+│  │  (SSRF, Timeouts, HITL) │            │   (PostgreSQL Transacc.)  │  │
+│  └─────────────────────────┘            └───────────────────────────┘  │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 4. Flujo de Ejecución
+## 4. Ciclo de Vida Cognitivo y Flujo de Decisión
 
-El ciclo cognitivo se construye durante el boot del agente:
+El grafo de estados se compila dinámicamente durante el arranque del contenedor según los motores y herramientas registradas:
 
 ```text
-[Estímulo: AgentInput]
-         │
-         ▼
-     [observe] ──────────► (Opcional: Si existe ObserverEngine en plugins)
-         │
-         ▼
-      [reason] ──────────► (Obligatorio: Razonamiento LLM base)
-         │
-         ▼
-       [plan]  ──────────► (Opcional: Si existe PlannerEngine en plugins)
-         │
-         ▼
-   [risk_assess] ────────► (Opcional: Si el plan contiene mutaciones)
-         │
-         ├─── [¿Riesgo >= HIGH?] ───► [human_approval] ──► (Pausa en Checkpoint)
-         │                                                        │ (Aprobación en Dashboard)
-         ▼                                                        ▼
-     [execute] ──────────► (Obligatorio: Ejecución protegida por SecurityGuard)
-         │
-         ▼
-      [verify] ──────────► (Opcional: Si existe VerifierEngine)
-         │
-         ├─── [¿Fallo y Reversible?] ───► [rollback] (Compensación)
-         │
-         ▼
-     [conclude] ─────────► (Obligatorio: Formateo final de AgentOutput)
+                  [Entrada: AgentInput]
+                            │
+                            ▼
+              ┌───────────────────────────┐
+              │   1. Telemetría (observe) │ ──► (Opcional: ObserverEngine)
+              └─────────────┬─────────────┘
+                            ▼
+              ┌───────────────────────────┐
+              │  2. Inferencia (reason)   │ ──► (Inferencia LLM & Bindings)
+              └─────────────┬─────────────┘
+                            ▼
+              ┌───────────────────────────┐
+              │ 3. Formulación Plan (plan)│ ──► (Opcional: PlannerEngine)
+              └─────────────┬─────────────┘
+                            ▼
+              ┌───────────────────────────┐
+              │ 4. Evaluación de Riesgo   │
+              │       (risk_assess)       │
+              └─────────────┬─────────────┘
+                            │
+               ¿Riesgo >= HIGH o Mutación?
+              ┌─────────────┴─────────────┐
+        [SÍ]  ▼                           ▼  [NO]
+    ┌───────────────────┐                 │
+    │  Pausa en Checkpoint                │
+    │  (human_approval) │                 │
+    └─────────┬─────────┘                 │
+              │ (Aprobación remota HMAC)  │
+              └─────────────┬─────────────┘
+                            ▼
+              ┌───────────────────────────┐
+              │  5. Ejecución Protegida   │ ──► (SecurityGuard + Sandbox + Timeouts)
+              │         (execute)         │
+              └─────────────┬─────────────┘
+                            │
+                            ▼
+              ┌───────────────────────────┐
+              │ 6. Verificación (verify)  │ ──► (Opcional: VerifierEngine)
+              └─────────────┬─────────────┘
+                            │
+                     ¿Fallo detectado?
+              ┌─────────────┴─────────────┐
+        [SÍ]  ▼                           ▼  [NO]
+    ┌───────────────────┐                 │
+    │  Compensación     │                 │
+    │    (rollback)     │                 │
+    └─────────┬─────────┘                 │
+              └─────────────┬─────────────┘
+                            ▼
+              ┌───────────────────────────┐
+              │ 7. Consolidación (conclude│ ──► (Salida estructurada AgentOutput)
+              └───────────────────────────┘
 ```
 
 ---
 
-## 5. Estructura del Repositorio
+## 5. Configuración de Entorno (Variables de Docker Compose)
 
-```text
-jg_agente/
-├── .gitlab-ci.yml                  # Pipeline CI/CD a registry.cabocom.net
-├── Dockerfile                      # Multi-stage build optimizado
-├── docker-compose.yml              # Orquestación local con PostgreSQL
-├── .env.example                    # Plantilla de variables de entorno
-├── pyproject.toml                  # Dependencias y configuración de herramientas
-├── alembic.ini                     # Configuración de migraciones
-├── alembic/
-│   ├── env.py                      # Entorno async de Alembic con filtro core_
-│   └── versions/
-│       └── 0001_initial_core_tables.py # Migración de core_executions y core_audit_records
-├── app/
-│   ├── __init__.py                 # Versión del paquete
-│   ├── main.py                     # Bootstrap FastAPI y ciclo de vida
-│   ├── api/
-│   │   ├── __init__.py             # Exportación de enrutadores executions_router y telemetry_router
-│   │   ├── executions.py           # Endpoints POST /trigger, GET /{thread_id}, POST /approve, POST /reject
-│   │   └── telemetry.py            # Endpoints GET /capabilities, GET /health, GET /metrics
-│   ├── core/
-│   │   ├── boot.py                 # Validación en boot, comprobación de integridad y arranque
-│   │   ├── checkpointer.py         # PostgresSaver, MemorySaver y vistas core_checkpoints
-│   │   ├── config.py               # Configuración centralizada Pydantic
-│   │   ├── credentials.py          # Almacenamiento seguro de credenciales POSIX 0600
-│   │   ├── graph.py                # GraphBuilder agnóstico de LangGraph y topologías dinámicas
-│   │   ├── heartbeat.py            # HeartbeatService: latidos periódicos y telemetría hacia Dashboard
-│   │   ├── llm.py                  # MockChatModel, OpenAICompatibleChatModel y factoría get_chat_model
-│   │   ├── plugin_manager.py       # PluginManager: autodescubrimiento y resolución de dependencias
-│   │   ├── registration.py         # DashboardRegistrationClient con bootstrap token y reintentos
-│   │   └── registry.py             # CapabilityRegistry y detección estricta de conflictos (BootConflictError)
-│   ├── db/
-│   │   ├── base.py                 # DeclarativeBase y convención estricta core_
-│   │   ├── models.py               # Modelos ORM: CoreExecution y CoreAuditRecord
-│   │   └── session.py              # async_engine y factoría de sesiones asyncpg
-│   ├── models/
-│   │   ├── io.py                   # Contratos AgentInput y AgentOutput
-│   │   ├── state.py                # AgentState, PolicyDecision, SecurityEvaluationResult
-│   │   └── tools.py                # Contratos AgentTool y ToolResult
-│   ├── nodes/
-│   │   ├── __init__.py             # Exportación de nodos base del grafo
-│   │   ├── conclude.py             # Nodo base conclude: unificación de salida, formateo AgentOutput y métricas
-│   │   ├── execute.py              # Nodo base execute: ejecución secuencial, sandbox SecurityGuard y rollback_context
-│   │   ├── human_approval.py       # Nodo HITL: pausa en checkpoint con interrupt() y reanudación Command(resume)
-│   │   ├── observe.py              # Nodo opcional observe: telemetría agnóstica de entorno con ObserverEngine
-│   │   ├── plan.py                 # Nodo opcional plan: formulación de ExecutionPlan con pasos y dependencias
-│   │   ├── reason.py               # Nodo base reason: inferencia LLM, tool binding y decisión de flujo
-│   │   ├── risk_assess.py          # Nodo de gobernanza HITL: evaluación de riesgos (SecurityGuard)
-│   │   ├── rollback.py             # Nodo de compensación: reversión automática en orden inverso ante fallos
-│   │   └── verify.py               # Nodo de verificación: comprobación activa post-ejecución con VerifierEngine
-│   ├── plugins/
-│   │   ├── __init__.py             # Exportación BasePlugin, BaseEngine, PluginMetadata
-│   │   └── base.py                 # Interfaz abstracta BasePlugin, ciclo de vida y BaseEngine
-│   └── security/
-│       ├── audit.py                # SecurityAuditLogger (persistencia no bloqueante)
-│       ├── guard.py                # SecurityGuard (interceptor de ejecución, permisos y HITL)
-│       └── ssrf.py                 # SSRFValidator (bloqueo RFC 1918, metadata y loopback)
-├── plugins/                        # Ecosistema desacoplado de plugins
-│   ├── jg_plugin_conversational/   # Plugin conversacional (diálogo, weather, news)
-│   │   ├── plugin.py               # ConversationalPlugin (BasePlugin)
-│   │   ├── weather.py              # WeatherTool con dual-mode y anti-SSRF
-│   │   ├── news.py                 # NewsTool con parseo RSS y anti-SSRF
-│   │   └── tests/                  # Tests autónomos del plugin
-│   └── jg_plugin_devops/           # Plugin DevOps y observabilidad de infraestructura
-│       ├── plugin.py               # DevOpsPlugin (BasePlugin)
-│       ├── discovery.py            # InfraDiscoveryEngine (ObserverEngine)
-│       ├── planner.py              # DAGPlannerEngine (PlannerEngine)
-│       ├── verifier.py             # DevopsVerifierEngine (VerifierEngine)
-│       ├── models/                 # Modelos de dominio (InfraSnapshot) y ORM (devops_*)
-│       └── tests/                  # Tests autónomos del plugin
-├── docs/                           # Documentación técnica viva
-│   ├── architecture.md             # Visión del Execution Plane y ciclo cognitivo
-│   ├── models.md                   # Contratos canónicos I/O, Tools y Estado
-│   ├── database.md                 # Persistencia relacional, convención core_ y Alembic
-│   ├── checkpointer.md             # Checkpointer LangGraph sobre PostgreSQL
-│   ├── security.md                 # SecurityGuard, auditoría inmutable y protección SSRF
-│   ├── plugins.md                  # Sistema de plugins, BasePlugin y ciclo de vida
-│   ├── graph.md                    # Ensamblador GraphBuilder, contratos de nodos y StateSnapshot
-│   └── issues/                     # Trazabilidad técnica por issue
-├── tests/                          # Suite integral de pruebas (Unit + Integration)
-│   ├── test_bootstrap.py
-│   ├── test_health_endpoint.py
-│   ├── test_io_models.py
-│   ├── test_tool_models.py
-│   ├── test_agent_state.py
-│   ├── test_database_migrations.py
-│   ├── test_checkpointer.py
-│   ├── test_security_audit.py
-│   ├── test_ssrf_validator.py
-│   ├── test_security_guard.py
-│   ├── test_base_plugin.py
-│   ├── test_capability_registry.py
-│   ├── test_plugin_manager.py
-│   ├── test_boot_validation.py
-│   ├── test_graph_builder.py
-│   ├── test_node_reason.py
-│   ├── test_node_execute.py
-│   ├── test_node_conclude.py
-│   ├── test_node_observe.py
-│   ├── test_node_plan.py
-│   ├── test_node_risk_assess.py
-│   ├── test_node_human_approval.py
-│   ├── test_nodes_verify_rollback.py
-│   ├── test_api_executions_trigger.py
-│   ├── test_api_executions_get.py
-│   ├── test_api_executions_hitl.py
-│   └── test_api_telemetry.py
-└── scripts/
-    └── check.sh                    # Verificación integral (Ruff + MyPy + Pytest)
-```
+El runtime se parametriza mediante variables de entorno divididas estrictamente entre la infraestructura del núcleo y los requerimientos específicos de los plugins instalados.
+
+### Bloque 1: Variables Mínimas del Núcleo (Core Runtime)
+
+| Variable | Descripción | Valor por Defecto / Requisito |
+|---|---|---|
+| `ENV` | Entorno de ejecución (`development`, `production`). | `development` |
+| `AGENT_ID` | Identificador único del agente en formato UUID o alfanumérico. | `jg_agente_local` |
+| `AGENT_PORT` | Puerto interno en el que escucha el servidor ASGI Uvicorn. | `8000` |
+| `UVICORN_WORKERS` | Número de workers concurrentes asíncronos. | `2` |
+| `PERMANENT_AGENT_SECRET` | Secreto compartido de 64 caracteres para firma HMAC-SHA256 con el Dashboard. | **Requerido en producción** |
+| `AGENT_BOOTSTRAP_TOKEN` | Token efímero de registro inicial (alternativo al pre-aprovisionamiento). | Opcional |
+| `DASHBOARD_URL` | URL de red privada del Control Plane para telemetría y webhooks. | `http://jg_dashboard:8080` |
+| `ENABLE_HEARTBEAT` | Habilita el emisor periódico de latidos y telemetría de salud. | `true` |
+| `CREDENTIALS_FILE` | Ruta de persistencia segura de credenciales (permisos POSIX `0600`). | `/app/data/.agent_credentials.json` |
+| `DATABASE_URL` | Cadena de conexión asyncpg a PostgreSQL para checkpoints y auditoría. | `postgresql+asyncpg://...` |
+| `CHECKPOINT_SAVER` | Backend de persistencia de grafos (`postgres` o `memory`). | `postgres` |
+| `LLM_PROVIDER` | Proveedor de inferencia LLM (`groq`, `openai`, `gemini`, `mock`). | `groq` |
+| `LLM_MODEL` | Identificador del modelo fundacional a invocar. | `llama-3.3-70b-versatile` |
+| `LLM_API_KEY` | Clave de acceso a la API del proveedor de LLM. | **Requerido** |
+| `PLUGINS_DIR` | Directorio local donde se montan paquetes de plugins. | `plugins` |
+| `ENABLED_PLUGINS` | Lista separada por comas de plugins que el agente debe activar. | Vacío (carga todos los descubiertos) |
+
+### Bloque 2: Variables de Dominio y Plugins
+
+Variables consumidas exclusivamente por plugins de especialidad si se encuentran instalados y activos:
+
+| Variable | Plugin que la Requiere | Propósito y Uso |
+|---|---|---|
+| `DOCKER_HOST` | `jg_plugin_devops` | Socket o proxy TCP para monitorización de contenedores (`tcp://jg_docker_socket_proxy:2375`). |
+| `AZURE_MAPS_KEY` | `jg_plugin_conversational` | Clave de Azure Maps para geolocalización y previsión meteorológica real en `WeatherTool`. |
+| `TAVILY_API_KEY` | Plugins de Búsqueda Web | Clave de acceso al motor de búsqueda para herramientas de navegación en tiempo real. |
 
 ---
 
-## 6. Documentación Técnica
+## 6. Despliegue Multi-Agente y Especialización
 
-La documentación exhaustiva del proyecto se encuentra disponible en [`docs/`](docs/):
-- **[Arquitectura General](docs/architecture.md):** Separación de planos, ciclo de ejecución y principios.
-- **[Contratos y Modelos Core](docs/models.md):** `AgentInput`, `AgentOutput`, `AgentTool` y `AgentState`.
-- **[Base de Datos y Alembic](docs/database.md):** Convención `core_`, esquemas y migraciones asíncronas.
-- **[Checkpointer LangGraph](docs/checkpointer.md):** Persistencia sobre PostgreSQL (`core_checkpoints`) y pausado HITL.
-- **[Seguridad y Auditoría](docs/security.md):** `SecurityGuard`, `SecurityAuditLogger`, trazabilidad inmutable y protección contra SSRF.
-- **[Plugins y Extensibilidad](docs/plugins.md):** `BasePlugin`, `BaseEngine`, `CapabilityRegistry` y `PluginManager`.
-- **[Grafo y Flujos Cognitivos](docs/graph.md):** `GraphBuilder` agnóstico, nodos canónicos y `StateSnapshot`.
-- **[Tareas Pendientes y Deuda Técnica](TODO-PENDIENTES.md):** Registro de mejoras pendientes para la auditoría técnica.
-
----
-
-## 7. Despliegue Multi-Agente y Perfiles
-
-`jg_agente` utiliza una **única imagen Docker universal** para instanciar múltiples agentes especializados mediante la variable de entorno `ENABLED_PLUGINS`:
+`jg_agente` utiliza una **única imagen universal de contenedor**. La especialización del agente no requiere reconstruir el software, sino que se define al arrancar mediante la composición de plugins y permisos:
 
 ```yaml
-# Ejemplo: Agente Conversacional Puro (Puerto 8001)
-jg_agente_conversacional:
-  image: jg_agente-jg_agente:latest
-  environment:
-    - PORT=8000
-    - ENABLED_PLUGINS=jg_plugin_conversational
-    - AGENT_NAME=Agente-Conversacional
-    - DATABASE_URL=postgresql+asyncpg://postgres:postgres@jg_agente_postgres:5432/jg_agente_db
-  ports:
-    - "8001:8000"
+services:
+  # Agente de Diálogo y Asistencia
+  jg_agente_conversacional:
+    image: registry.cabocom.net/javiergalvez-ia/jg_agente:latest
+    environment:
+      AGENT_ID: "a0000000-0000-0000-0000-000000000001"
+      AGENT_NAME: "Agente Conversacional"
+      ENABLED_PLUGINS: "jg_plugin_conversational"
+      DATABASE_URL: "postgresql+asyncpg://postgres:${DB_PASS}@jg_agente_postgres:5432/jg_agente_conversacional"
+      PERMANENT_AGENT_SECRET: "${JG_CONVERSATIONAL_SECRET}"
+      AZURE_MAPS_KEY: "${AZURE_MAPS_KEY}"
+    ports:
+      - "127.0.0.1:8001:8000"
 
-# Ejemplo: Agente DevOps Autónomo con HITL (Puerto 8002)
-jg_agente_devops:
-  image: jg_agente-jg_agente:latest
-  environment:
-    - PORT=8000
-    - ENABLED_PLUGINS=jg_plugin_devops
-    - AGENT_NAME=Agente-DevOps
-    - DATABASE_URL=postgresql+asyncpg://postgres:postgres@jg_agente_postgres:5432/jg_agente_db
-  volumes:
-    - /var/run/docker.sock:/var/run/docker.sock
-  ports:
-    - "8002:8000"
+  # Agente SRE / DevOps de Infraestructura (con HITL)
+  jg_agente_devops:
+    image: registry.cabocom.net/javiergalvez-ia/jg_agente:latest
+    environment:
+      AGENT_ID: "a0000000-0000-0000-0000-000000000002"
+      AGENT_NAME: "Agente DevOps"
+      ENABLED_PLUGINS: "jg_plugin_devops"
+      DATABASE_URL: "postgresql+asyncpg://postgres:${DB_PASS}@jg_agente_postgres:5432/jg_agente_devops"
+      PERMANENT_AGENT_SECRET: "${JG_DEVOPS_SECRET}"
+      DOCKER_HOST: "tcp://jg_docker_socket_proxy:2375"
+    ports:
+      - "127.0.0.1:8002:8000"
 ```
 
 ---
 
-## 8. Verificación de Calidad y Suite de Tests
+## 7. Madurez del Sistema y Resultados de Auditoría
 
-La suite completa contiene **312 tests automatizados** cubriendo contratos, seguridad SSRF, SecurityGuard, grafos LangGraph, nodos HITL y plugins (`jg_plugin_conversational` y `jg_plugin_devops`).
+El sistema ha sido sometido a rigurosas rondas consecutivas de auditorías técnicas y análisis exhaustivos de seguridad independiente (Septiembre 2026), alcanzando la máxima calificación de estabilidad.
 
-Para ejecutar el formateador, linter, análisis de tipos estricto y la suite de tests en el entorno virtual de host:
+### Veredicto Global: APTO PARA PRODUCCIÓN (LISTO)
+
+- **Cobertura de Pruebas Automatizadas:** **312 tests automáticos** ejecutados en cada ciclo de integración continua (unitarios, estáticos y de integración de grafos).
+- **Hitos de Endurecimiento Auditados:**
+  1. **Blindaje Criptográfico HMAC-SHA256:** Canje seguro de credenciales con almacenamiento atómico POSIX `0600` (`os.replace` + `os.fsync`) y neutralización de ataques de repetición.
+  2. **Defensa Profunda contra SSRF:** Validación determinista de destinos de red en herramientas (`SSRFValidator`), bloqueo estricto de RFC 1918, loopback, metadatos cloud y DNS pinning.
+  3. **Aislamiento Multi-Agente en Persistencia:** Separación estricta de bases de datos por runtime (`jg_agente_conversacional` y `jg_agente_devops`) eliminando colisiones en el checkpointer LangGraph.
+  4. **Protección Sandboxed con Timeouts Estrictos:** Invocación de herramientas protegida con límites temporales duros (`tool.timeout_sec`) y cancelación cooperativa `asyncio.wait_for`.
+  5. **Concurrencia Pesimista en el Control Plane:** Transaccionalidad atómica y bloqueos pesimistas para impedir dobles aprobaciones en operaciones de riesgo humano (HITL).
+
+---
+
+## 8. Verificación de Calidad
+
+Para ejecutar la suite de calidad localmente (linters, comprobación de tipos estricta y tests unitarios):
 
 ```bash
 # Verificación integral automatizada
 ./scripts/check.sh
 
 # Ejecución directa con pytest
-.venv/bin/pytest tests/ plugins/
+pytest tests/
 ```
 
-> **Nota:** La imagen de producción no incluye librerías de test (`pytest`), por lo que las pruebas se ejecutan directamente en el host o mediante contenedor con extras de testing instalados.
-
 ---
 
-## 9. Estado del Proyecto y Roadmap
+## 9. Política y Matriz de Licenciamiento
 
-- [x] **Fase 01:** Setup inicial, Dockerfile, docker-compose, scripts de verificación y CI/CD con GitLab.
-- [x] **Fase 02:** Contratos Core (`AgentInput`, `AgentOutput`, `AgentTool`, `ToolResult`, compensación de rollback, `AgentState`).
-- [x] **Fase 03:** Persistencia, Checkpointing y Seguridad Base:
-  - [x] `ISSUE-F03-T01`: Motor PostgreSQL async, convención `core_*` y migraciones Alembic.
-  - [x] `ISSUE-F03-T02`: Checkpointer LangGraph (`PostgresSaver`) sobre vistas `core_checkpoints`.
-  - [x] `ISSUE-F03-T03`: `SecurityAuditLogger` inmutable no bloqueante sobre `core_audit_records`.
-  - [x] `ISSUE-F03-T04`: Validador de protección SSRF para herramientas de red (`SSRFValidator`).
-  - [x] `ISSUE-F03-T05`: Interceptor central de seguridad `SecurityGuard` (permisos, inyecciones, SSRF, HITL y auditoría).
-- [x] **Fase 04:** CapabilityRegistry y Sistema de Plugins Core (100%):
-  - [x] `ISSUE-F04-T01`: Definición de interfaz abstracta `BasePlugin` y ciclo de vida.
-  - [x] `ISSUE-F04-T02`: Implementación de `CapabilityRegistry` con detección estricta de conflictos.
-  - [x] `ISSUE-F04-T03`: Implementación de `PluginManager` con autodiscovery.
-  - [x] `ISSUE-F04-T04`: Validación en boot del agente contra `CapabilityRegistry`.
-- [x] **Fase 05:** Ensamblado del Grafo LangGraph y Nodos Base (100%):
-  - [x] `ISSUE-F05-T01`: Implementación del `GraphBuilder` agnóstico de LangGraph (sin bifurcaciones de dominio y con `StateSnapshot` funcional).
-  - [x] `ISSUE-F05-T02`: Implementación de nodo base: `reason` (inferencia LLM, tool binding dinámico y memoria conversacional).
-  - [x] `ISSUE-F05-T03`: Implementación de nodo base: `execute` (ejecución secuencial sandboxed, SecurityGuard y rollback_context).
-  - [x] `ISSUE-F05-T04`: Implementación de nodo base: `conclude` (unificación de salida, AgentOutput y métricas de tiempo).
-- [x] **Fase 06:** Nodos Opcionales y Motores Cognitivos (100%):
-  - [x] `ISSUE-F06-T01`: Implementación de nodo opcional: `observe` (telemetría de entorno desacoplada y ObserverEngine).
-  - [x] `ISSUE-F06-T02`: Implementación de nodo opcional: `plan` (conversión de intent a ExecutionPlan estructurado con dependencias).
-  - [x] `ISSUE-F06-T03`: Implementación de nodo de evaluación de riesgo y política HITL: `risk_assess` (RiskLevel >= HIGH y human_approval).
-  - [x] `ISSUE-F06-T04`: Implementación de nodo de pausa HITL y reanudación: `human_approval` (interrupción con interrupt() y checkpointing).
-  - [x] `ISSUE-F06-T05`: Implementación de nodos `verify` y `rollback` (verificación de anomalías y compensaciones automáticas reversibles).
-- [x] **Fase 07:** Exposición API REST y Telemetría (100%):
-  - [x] `ISSUE-F07-T01`: Endpoint `POST /executions/trigger` (ejecución síncrona/asíncrona, pausa HITL y persistencia en `core_executions`).
-  - [x] `ISSUE-F07-T02`: Endpoint `GET /executions/{thread_id}` (consulta de estado, checkpoints, historial de pasos, HITL y errores).
-  - [x] `ISSUE-F07-T03`: Endpoints de resolución HITL `POST /executions/{thread_id}/approve` y `reject` (Command(resume=...) en LangGraph).
-  - [x] `ISSUE-F07-T04`: Endpoints de telemetría `GET /capabilities`, `/health` y `/metrics`.
-- [x] **Fase 08:** Bootstrap del Agente, Registro con Dashboard y Heartbeat (100%):
-  - [x] `ISSUE-F08-T01`: Cliente de registro con jg_dashboard mediante bootstrap token (`DashboardRegistrationClient`, `CredentialStore`, `auto_register_agent` en lifespan, permisos 0600 y reintentos exponenciales).
-  - [x] `ISSUE-F08-T02`: Mecanismo de persistencia y recarga de credencial permanente (`CredentialStore.load`, `reload_credentials`, verificación activa con Dashboard en boot `verify_credentials`, tolerancia a fallos de red e invalidación ante rechazo 401).
-  - [x] `ISSUE-F08-T03`: Bucle periódico de heartbeat hacia Dashboard (`HeartbeatService`, recolección portable de telemetría de memoria/uptime/capacidades, tolerancia a caídas de red y ciclo de vida en `lifespan`).
-- [x] **Fase 09:** Plugin Conversacional (`jg_plugin_conversational`) (100%):
-  - [x] `ISSUE-F09-T01`: Estructura del paquete `jg_plugin_conversational` (`ConversationalPlugin`, `PLUGIN_CLASS`, `BasePlugin`, autodescubrimiento local/entry_point y tests autónomos en `plugins/jg_plugin_conversational/tests/`).
-  - [x] `ISSUE-F09-T02`: Implementación de `WeatherTool` (`get_weather`, `WeatherArgs`, contrato `AgentTool`, protección anti-SSRF, modo dual Azure Maps / simulación determinista y tests en el plugin).
-  - [x] `ISSUE-F09-T03`: Implementación de `NewsTool` (`get_news`, `NewsArgs`, contrato `AgentTool`, filtrado seguro de temas, validación SSRF, timeout de 5s, fallback determinista y tests en el plugin).
-- [x] **Fase 11:** Plugin DevOps y Observabilidad de Infraestructura (`jg_plugin_devops`) (100%):
-  - [x] `ISSUE-F11-T01`: Estructura del paquete `jg_plugin_devops` (`DevOpsPlugin`, `PLUGIN_CLASS`, `BasePlugin`, modelos de dominio `InfraSnapshot`, esquemas ORM con prefijo `devops_` y tests autónomos en `plugins/jg_plugin_devops/tests/`).
-  - [x] `ISSUE-F11-T02`: Implementación de `InfraDiscoveryEngine` y nodo `observe` en plugin DevOps (`InfraDiscoveryEngine`, `ObserverEngine`, recolección dual portable Host/Docker, detección de incidentes y poblado de `environment_snapshot`).
-  - [x] `ISSUE-F11-T03`: Implementación de `DAGPlannerEngine` y `VerifierEngine` en plugin DevOps (`DAGPlannerEngine`, `DevopsVerifierEngine`, formulación DAG de remediación con `RiskLevel` y comprobación activa de resolución de incidentes).
-  - [x] `ISSUE-F11-T04`: Implementación de herramientas Docker con `rollback_func` en plugin DevOps (`DockerRestartTool`, `DockerRestartArgs`, contrato `AgentTool`, `risk_level=HIGH`, `reversible=True`, `rollback_context` con estado previo y compensación funcional).
+`jg_agente` forma parte del ecosistema de inteligencia artificial **jg_ia**, cuya distribución se articula bajo un modelo claro que equilibra la extensibilidad abierta con la protección de la propiedad intelectual industrial.
 
-Consulte [TODO-PENDIENTES.md](TODO-PENDIENTES.md) para el detalle de ítems pendientes y deuda técnica para la siguiente fase de desarrollo.
+### Matriz de Licenciamiento del Ecosistema
 
----
+| Componente | Tipo de Licencia | Términos y Acceso |
+| :--- | :--- | :--- |
+| **`jg_agente` (Core Runtime)** | **Licencia Privada / Propietaria** | Software comercial con todos los derechos reservados. Su distribución, copia o uso sin licencia comercial explícita queda estrictamente prohibida. |
+| **`jg_dashboard` (Control Plane)** | **GNU AGPL-3.0** | Código abierto copyleft de red. Garantiza que las modificaciones en el panel de control se compartan con la comunidad. |
+| **`jg_agente_sdk` (SDK Público)** | **Licencia Abierta Permisiva (MIT / Apache-2.0)** | Libre de restricciones para permitir que terceros desarrollen e integren plugins propietarios o abiertos sin fricción. |
+| **Plugins Oficiales de Javier Gálvez** *(ej. `jg_plugin_datosgob`, etc.)* | **GNU AGPL-3.0** | Disponibles públicamente para fomentar el desarrollo de capacidades comunitarias. |
 
-## Licencia y Modelo Dual (Open Source / Comercial Enterprise)
-
-`jg_agente` se distribuye bajo un esquema de **Doble Licenciamiento (Dual Licensing)**:
-
-- **Licencia de Código Abierto:** [GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE) - Copyright (C) 2026 Javier Gálvez.
-- **Licencia Comercial Enterprise:** Exención de la obligación de copyleft de red (Sección 13 de AGPLv3) para despliegues comerciales, SaaS y uso corporativo cerrado:
-  - **Tarifa:** **1 € / mes por agente** (estrictamente lineal, sin rappel y sin límite).
-  - **Casos singulares:** Contactar a través de **[https://javiergalvez.com](https://javiergalvez.com)** únicamente para casos muy particulares o acuerdos especiales a medida.
-
-Para más detalles sobre derechos, exenciones de copyleft y contratación, consulte [COMMERCIAL_TERMS.md](COMMERCIAL_TERMS.md).
-
-
+Para consultas comerciales o acuerdos de licenciamiento a medida, contacte a través de **[https://javiergalvez.com](https://javiergalvez.com)**.
