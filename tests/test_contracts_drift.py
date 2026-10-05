@@ -18,6 +18,9 @@ try:
         AgentTool as SDKAgentTool,
     )
     from jg_sdk.contracts import (
+        ExecutionStatus as SDKExecutionStatus,
+    )
+    from jg_sdk.contracts import (
         RiskLevel as SDKRiskLevel,
     )
     from jg_sdk.contracts import (
@@ -31,9 +34,6 @@ try:
     )
     from jg_sdk.models import (
         AgentOutput as SDKAgentOutput,
-    )
-    from jg_sdk.models import (
-        ExecutionStatus as SDKExecutionStatus,
     )
     from jg_sdk.models import (
         UserContext as SDKUserContext,
