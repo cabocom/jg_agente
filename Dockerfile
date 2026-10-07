@@ -32,7 +32,7 @@ FROM python:3.12.6-slim AS code-obfuscator
 WORKDIR /stage
 
 COPY app/ ./app
-COPY plugins/ ./plugins
+RUN mkdir -p ./plugins
 COPY alembic/ ./alembic
 COPY alembic.ini ./alembic.ini
 COPY docker/compile_cython.py ./compile_cython.py
