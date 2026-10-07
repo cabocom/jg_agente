@@ -366,15 +366,15 @@ class OpenAICompatibleChatModel(BaseChatModel):
         for tc in choice.get("tool_calls", []):
             fn = tc.get("function", {})
             raw_args = fn.get("arguments", {})
+            parsed_args: dict[str, Any] = {}
             if isinstance(raw_args, str):
                 try:
-                    parsed_args = json.loads(raw_args)
+                    val = json.loads(raw_args)
+                    parsed_args = val if isinstance(val, dict) else {"input": val}
                 except Exception:
                     parsed_args = {"input": raw_args}
             elif isinstance(raw_args, dict):
                 parsed_args = raw_args
-            else:
-                parsed_args = {}
 
             tool_calls.append(
                 {
