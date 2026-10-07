@@ -40,3 +40,8 @@ credentials.json
 *.log
 data/
 storage/
+
+# Plugins externos enlazados dinámicamente en desarrollo (jg plugin link)
+plugins/jg_plugin_conversational
+plugins/jg_plugin_datosgob
+plugins/symlink_*
