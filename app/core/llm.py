@@ -24,6 +24,7 @@ from langchain_core.messages import (
     BaseMessage,
     HumanMessage,
     SystemMessage,
+    ToolMessage,
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable
@@ -257,13 +258,13 @@ class OpenAICompatibleChatModel(BaseChatModel):
         formatted: list[dict[str, Any]] = []
         for msg in messages:
             if isinstance(msg, SystemMessage):
-                formatted.append({"role": "system", "content": msg.content})
+                formatted.append({"role": "system", "content": str(msg.content)})
             elif isinstance(msg, HumanMessage):
-                formatted.append({"role": "user", "content": msg.content})
+                formatted.append({"role": "user", "content": str(msg.content)})
             elif isinstance(msg, AIMessage):
                 entry: dict[str, Any] = {
                     "role": "assistant",
-                    "content": msg.content or "",
+                    "content": str(msg.content) if msg.content is not None else "",
                 }
                 if msg.tool_calls:
                     entry["tool_calls"] = [
@@ -274,12 +275,21 @@ class OpenAICompatibleChatModel(BaseChatModel):
                                 "name": tc.get("name"),
                                 "arguments": tc.get("args")
                                 if isinstance(tc.get("args"), str)
-                                else str(tc.get("args")),
+                                else json.dumps(tc.get("args") or {}),
                             },
                         }
                         for tc in msg.tool_calls
                     ]
                 formatted.append(entry)
+            elif isinstance(msg, ToolMessage):
+                formatted.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": getattr(msg, "tool_call_id", None)
+                        or f"call_{uuid.uuid4().hex[:8]}",
+                        "content": str(msg.content),
+                    }
+                )
             else:
                 formatted.append({"role": "user", "content": str(msg.content)})
         return formatted
@@ -337,6 +347,14 @@ class OpenAICompatibleChatModel(BaseChatModel):
                     )
                     await asyncio.sleep(wait_seconds)
                     continue
+                if resp.status_code >= 400:
+                    logger.error(
+                        "[LLM] Error %d de %s: %s | Payload: %s",
+                        resp.status_code,
+                        self.base_url,
+                        resp.text,
+                        json.dumps(payload),
+                    )
                 resp.raise_for_status()
                 data = resp.json()
                 break
