@@ -430,7 +430,6 @@ def test_docker_logs_fn_with_mock_client() -> None:
 def test_get_docker_client_with_docker_host(monkeypatch: pytest.MonkeyPatch) -> None:
     """Valida que get_docker_client utilice DOCKER_HOST cuando está configurado en el entorno."""
     import docker
-
     from jg_plugin_devops.docker_tools import get_docker_client, set_docker_client
 
     set_docker_client(None)

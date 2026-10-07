@@ -33,8 +33,9 @@ PROTECTED_INFRASTRUCTURE_CONTAINERS: frozenset[str] = frozenset(
 
 docker: Any
 try:
-    import docker
     from docker.errors import DockerException, NotFound
+
+    import docker
 except ImportError:
     docker = None
     DockerException = Exception  # type: ignore[misc,assignment]

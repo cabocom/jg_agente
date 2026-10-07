@@ -70,7 +70,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["app", "jg_plugin_conversational", "jg_plugin_devops"]
+known-first-party = ["app", "jg_plugin_devops"]
 
 [tool.mypy]
 python_version = "3.11"
@@ -90,7 +90,7 @@ ignore_missing_imports = true
 minversion = "8.0"
 addopts = "-ra -q"
 testpaths = ["tests", "plugins"]
-pythonpath = [".", "plugins", "plugins/jg_plugin_conversational", "plugins/jg_plugin_devops"]
+pythonpath = [".", "plugins", "plugins/jg_plugin_devops"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [
