@@ -45,4 +45,5 @@ storage/
 plugins/jg_plugin_conversational
 plugins/jg_plugin_devops
 plugins/jg_plugin_datosgob
+plugins/jg_plugin_filmmaker
 plugins/symlink_*
