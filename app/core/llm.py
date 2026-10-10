@@ -395,9 +395,21 @@ class OpenAICompatibleChatModel(BaseChatModel):
         run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
-        raise NotImplementedError(
-            "OpenAICompatibleChatModel debe invocarse de forma asíncrona mediante ainvoke()."
-        )
+        """Invocación síncrona delegando en _agenerate de forma segura."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                return executor.submit(
+                    asyncio.run, self._agenerate(messages, stop=stop, **kwargs)
+                ).result()
+
+        return asyncio.run(self._agenerate(messages, stop=stop, **kwargs))
 
     @property
     def _llm_type(self) -> str:
