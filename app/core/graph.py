@@ -265,8 +265,22 @@ def route_after_human_approval(state: AgentState) -> str:
     return "conclude"
 
 
-def route_after_execute(state: AgentState, has_verifier: bool) -> str:
-    """Enruta tras 'execute' hacia verificación o evaluación semántica."""
+def route_after_execute(
+    state: AgentState,
+    has_verifier: bool,
+    has_rollback: bool = False,
+) -> str:
+    """Enruta tras 'execute' hacia compensación, verificación o evaluación semántica.
+
+    Si un paso crítico falló y existen pasos reversibles completados (requires_rollback),
+    la compensación es obligatoria y se ejecuta antes de cualquier otra transición.
+    """
+    if has_rollback and state.get("requires_rollback"):
+        records = state.get("execution_records") or []
+        if any(
+            r.status == StepStatus.COMPLETED and r.rollback_context is not None for r in records
+        ):
+            return "rollback"
     if has_verifier:
         return "verify"
     return "evaluate"
@@ -437,6 +451,9 @@ class GraphBuilder:
         topology = self.get_topology()
         self._topology_info = topology
 
+        # Modo degradado: el checkpointer cayó a MemorySaver por fallo de PostgreSQL (Fail-Closed)
+        checkpoint_degraded = bool(getattr(checkpointer, "is_degraded", False))
+
         # LangGraph StateGraph agnóstico
         builder = StateGraph(AgentState)
         has_tools = len(self.registry.list_tools()) > 0
@@ -486,6 +503,8 @@ class GraphBuilder:
             else:
 
                 async def _risk_assess_node(s: AgentState) -> dict[str, Any]:
+                    if checkpoint_degraded:
+                        s = cast(AgentState, {**s, "checkpoint_degraded": True})
                     return await default_risk_assess_node(s, self.registry, self.security_guard)
 
                 builder.add_node("risk_assess", cast(Any, _risk_assess_node))
@@ -509,6 +528,8 @@ class GraphBuilder:
         else:
 
             async def _execute_node(s: AgentState) -> dict[str, Any]:
+                if checkpoint_degraded:
+                    s = cast(AgentState, {**s, "checkpoint_degraded": True})
                 return await default_execute_node(s, self.registry, self.security_guard)
 
             builder.add_node("execute", cast(Any, _execute_node))
@@ -628,10 +649,18 @@ class GraphBuilder:
             )
 
         # Conexión desde Execute
-        if topology.has_verifier:
-            builder.add_edge("execute", "verify")
-        else:
-            builder.add_edge("execute", "evaluate")
+        execute_destinations = ["verify" if topology.has_verifier else "evaluate"]
+        if topology.has_rollback:
+            execute_destinations.append("rollback")
+        builder.add_conditional_edges(
+            "execute",
+            lambda s: route_after_execute(
+                s,
+                has_verifier=topology.has_verifier,
+                has_rollback=topology.has_rollback,
+            ),
+            path_map=execute_destinations,
+        )
 
         # Conexión desde Verify (si existe)
         if topology.has_verifier:

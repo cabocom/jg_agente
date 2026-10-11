@@ -16,13 +16,18 @@ import threading
 import time
 import urllib.parse
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 from app.core.async_compat import is_awaitable_or_coroutine, is_coroutine_callable
+from app.core.config import settings
 from app.models.state import PolicyDecision, SecurityEvaluationResult
 from app.models.tools import AgentTool, RiskLevel, ToolResult
 
 logger = logging.getLogger("jg_agente.security.guard")
+
+# Motivo canónico de denegación Fail-Closed cuando el checkpointer opera en modo degradado
+DEGRADED_CHECKPOINT_DENY_REASON = "Degraded checkpoint mode rejects non-durable high-risk mutations"
 
 # Metacaracteres y secuencias sospechosas de inyección de comandos shell
 SHELL_INJECTION_PATTERN = re.compile(r"[;&$`\n\r><|\\'\"]")
@@ -121,6 +126,38 @@ def _check_directory_traversal_or_protected_path(arg_val: str) -> tuple[bool, st
     return False, ""
 
 
+def _check_workspace_escape(arg_val: str, workspace_base: str) -> tuple[bool, str]:
+    """Comprueba si un argumento tipo ruta escapa del Workspace Jail configurado.
+
+    Resuelve la ruta (symlinks incluidos) relativa al workspace y verifica
+    `resolved.is_relative_to(base)`. Devuelve (escapa, ruta_resuelta).
+    """
+    if not isinstance(arg_val, str) or not arg_val.strip():
+        return False, ""
+
+    val = arg_val.strip()
+    if val.startswith(("http://", "https://")):
+        return False, ""
+
+    clean_val = urllib.parse.unquote(val).replace("\\", "/")
+    is_path_like = "/" in clean_val or ".." in clean_val or clean_val.startswith("~")
+    if not is_path_like:
+        return False, ""
+
+    base = Path(os.path.realpath(workspace_base))
+    if clean_val.startswith("~"):
+        candidate = Path(os.path.expanduser(clean_val))
+    elif clean_val.startswith("/"):
+        candidate = Path(clean_val)
+    else:
+        candidate = base / clean_val
+
+    resolved = Path(os.path.realpath(candidate))
+    if resolved.is_relative_to(base):
+        return False, ""
+    return True, str(resolved)
+
+
 def _extract_string_arguments(args: Any, parent_key: str = "") -> list[tuple[str, str]]:
     """Extrae recursivamente todas las tuplas (clave_completa, valor_str) de los argumentos."""
     result: list[tuple[str, str]] = []
@@ -182,6 +219,8 @@ class SecurityGuard:
         caller_permissions: Sequence[str] | None = None,
         is_reversible: bool = False,
         execution_id: str | None = None,
+        workspace_dir: str | None = None,
+        checkpoint_degraded: bool = False,
     ) -> SecurityEvaluationResult:
         """Evalúa las políticas de seguridad de una operación previa a su ejecución física.
 
@@ -246,8 +285,54 @@ class SecurityGuard:
                     self.audit_logger.record(eval_res, execution_id=execution_id)
                     return eval_res
 
+        # Fail-Closed: con checkpointer degradado (sin persistencia durable) no puede garantizarse
+        # ni la reanudación HITL ni la reversibilidad: se deniegan mutaciones de riesgo alto.
+        if checkpoint_degraded and effective_risk in (RiskLevel.HIGH, RiskLevel.CRITICAL):
+            reason = DEGRADED_CHECKPOINT_DENY_REASON
+            logger.error("SecurityGuard DENY en '%s': %s", tool_name, reason)
+            eval_res = SecurityEvaluationResult(
+                decision=PolicyDecision.DENY,
+                operation=tool_name,
+                target_resource=target_resource,
+                risk_level=effective_risk,
+                reason=reason,
+                required_permissions=effective_perms,
+                is_reversible=effective_reversible,
+                can_cause_data_loss=(effective_risk == RiskLevel.CRITICAL),
+            )
+            self.audit_logger.record(eval_res, execution_id=execution_id)
+            return eval_res
+
+        # Workspace Jail: confinamiento opcional (parámetro > atributo de la tool > settings)
+        jail_base: str | None = (
+            workspace_dir
+            or (getattr(tool, "workspace_dir", None) if isinstance(tool, AgentTool) else None)
+            or getattr(settings, "WORKSPACE_DIR", None)
+        )
+
         # 2. Comprobación Universal de Inyección de Comandos Shell y Directory Traversal
         for arg_key, arg_val in _extract_string_arguments(tool_args):
+            if jail_base:
+                escapes, resolved_path = _check_workspace_escape(arg_val, jail_base)
+                if escapes:
+                    reason = (
+                        f"Violación de seguridad: Workspace Jail. La ruta '{arg_val}' "
+                        f"(resuelta a '{resolved_path}') escapa del workspace confinado "
+                        f"en argumento '{arg_key}'"
+                    )
+                    logger.error("SecurityGuard DENY en '%s': %s", tool_name, reason)
+                    eval_res = SecurityEvaluationResult(
+                        decision=PolicyDecision.DENY,
+                        operation=tool_name,
+                        target_resource=target_resource,
+                        risk_level=RiskLevel.HIGH,
+                        reason=reason,
+                        required_permissions=effective_perms,
+                        is_reversible=False,
+                        can_cause_data_loss=True,
+                    )
+                    self.audit_logger.record(eval_res, execution_id=execution_id)
+                    return eval_res
             # Comprobación de Directory Traversal y Acceso a Rutas de Sistema Protegidas
             is_blocked_path, matched_path = _check_directory_traversal_or_protected_path(arg_val)
             if is_blocked_path:
@@ -360,6 +445,7 @@ class SecurityGuard:
         step_id: str | None = None,
         approved_step_ids: Sequence[str] | None = None,
         approved_tool_names: Sequence[str] | None = None,
+        checkpoint_degraded: bool = False,
     ) -> ToolResult:
         """Interpola validación de seguridad, sanitización, timeout y auditoría antes de invocar la tool.
 
@@ -394,6 +480,7 @@ class SecurityGuard:
             tool_args=tool_args,
             caller_permissions=caller_perms,
             execution_id=execution_id,
+            checkpoint_degraded=checkpoint_degraded,
         )
 
         if eval_res.decision == PolicyDecision.DENY:

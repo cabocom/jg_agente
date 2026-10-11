@@ -295,3 +295,43 @@ async def test_valid_request_passes_authentication() -> None:
         data = resp.json()
         assert data["execution_id"] == "exec-auth-test-01"
         assert data["thread_id"] == "thread-auth-test-01"
+
+
+@pytest.mark.asyncio
+async def test_nonce_replay_is_rejected_with_401() -> None:
+    """Gap 6: una petición con el mismo X-Nonce reutilizado dentro de la ventana recibe 401."""
+    from app.security.auth import get_nonce_cache
+
+    get_nonce_cache().clear()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        payload = {
+            "execution_id": "exec-nonce-01",
+            "thread_id": "thread-nonce-01",
+            "prompt": "test",
+        }
+        body_str = json.dumps(payload)
+        now_ts = int(time.time())
+        nonce = "test-uuid-nonce-12345678"
+
+        canonical = compute_canonical_string(
+            "POST", "/executions/trigger", now_ts, body_str.encode("utf-8"), nonce=nonce
+        )
+        sig = compute_hmac_signature(TEST_SECRET, canonical)
+
+        headers = {
+            "X-Signature": sig,
+            "X-Timestamp": str(now_ts),
+            "X-Agent-ID": TEST_AGENT_ID,
+            "X-Nonce": nonce,
+            "Content-Type": "application/json",
+        }
+
+        # 1. Primera petición: 200 OK
+        resp1 = await ac.post("/executions/trigger", content=body_str, headers=headers)
+        assert resp1.status_code == 200
+
+        # 2. Petición repetida exactamente igual (replay attack con mismo nonce y timestamp): 401
+        resp2 = await ac.post("/executions/trigger", content=body_str, headers=headers)
+        assert resp2.status_code == 401
+        assert "nonce replayed" in resp2.json()["detail"].lower()

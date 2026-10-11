@@ -5,6 +5,7 @@ import time
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
 from pydantic import BaseModel, Field
 
 from app.models.state import PolicyDecision
@@ -623,3 +624,172 @@ def test_singleton_guard_factory() -> None:
     g2 = get_security_guard()
     assert g1 is g2
     assert isinstance(g1, SecurityGuard)
+
+
+class TestSecurityGuardWorkspaceJail:
+    """Gap 3: confinamiento de rutas al workspace, más allá de la denylist de sistema."""
+
+    def _tool(self) -> AgentTool:
+        return AgentTool(
+            name="file_reader",
+            description="Read file",
+            category="filesystem",
+            args_schema=DummyArgs,
+            func=mock_tool_func,
+            risk_level=RiskLevel.LOW,
+        )
+
+    def test_blocks_relative_escape_outside_system_paths(self, tmp_path: Any) -> None:
+        """'../' que sale del workspace se bloquea aunque el destino no sea /etc ni similar."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        guard = SecurityGuard(audit_logger=SecurityAuditLogger(auto_persist=False))
+
+        for payload in ["../secret.txt", "data/../../other_project/file.txt", "%2e%2e/%2e%2e/x"]:
+            res = guard.evaluate(
+                tool=self._tool(), tool_args={"path": payload}, workspace_dir=str(workspace)
+            )
+            assert res.decision == PolicyDecision.DENY, payload
+            assert "workspace jail" in res.reason.lower()
+
+    def test_blocks_absolute_path_outside_workspace(self, tmp_path: Any) -> None:
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        outside = tmp_path / "outside.txt"
+        outside.write_text("x")
+        guard = SecurityGuard(audit_logger=SecurityAuditLogger(auto_persist=False))
+
+        res = guard.evaluate(
+            tool=self._tool(), tool_args={"path": str(outside)}, workspace_dir=str(workspace)
+        )
+        assert res.decision == PolicyDecision.DENY
+
+    def test_blocks_symlink_escaping_workspace(self, tmp_path: Any) -> None:
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        target = tmp_path / "private"
+        target.mkdir()
+        (workspace / "link").symlink_to(target)
+        guard = SecurityGuard(audit_logger=SecurityAuditLogger(auto_persist=False))
+
+        res = guard.evaluate(
+            tool=self._tool(), tool_args={"path": "link/data.txt"}, workspace_dir=str(workspace)
+        )
+        assert res.decision == PolicyDecision.DENY
+
+    def test_allows_paths_inside_workspace(self, tmp_path: Any) -> None:
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        guard = SecurityGuard(audit_logger=SecurityAuditLogger(auto_persist=False))
+
+        for payload in ["report.md", "data/results.csv", str(workspace / "a" / "b.txt"), "a/../b"]:
+            res = guard.evaluate(
+                tool=self._tool(), tool_args={"path": payload}, workspace_dir=str(workspace)
+            )
+            assert res.decision == PolicyDecision.ALLOW, payload
+
+    def test_jail_from_settings_and_tool_attribute(self, tmp_path: Any, monkeypatch: Any) -> None:
+        from app.core.config import settings
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        guard = SecurityGuard(audit_logger=SecurityAuditLogger(auto_persist=False))
+
+        monkeypatch.setattr(settings, "WORKSPACE_DIR", str(workspace))
+        res = guard.evaluate(tool=self._tool(), tool_args={"path": "../escape.txt"})
+        assert res.decision == PolicyDecision.DENY
+
+        monkeypatch.setattr(settings, "WORKSPACE_DIR", None)
+        assert (
+            guard.evaluate(tool=self._tool(), tool_args={"path": "../escape.txt"}).decision
+            == PolicyDecision.ALLOW
+        )
+        tool = self._tool()
+        tool.workspace_dir = str(workspace)  # type: ignore[attr-defined]
+        assert (
+            guard.evaluate(tool=tool, tool_args={"path": "../escape.txt"}).decision
+            == PolicyDecision.DENY
+        )
+
+
+class TestSecurityGuardDegradedCheckpointFailClosed:
+    """Gap 5: modo degradado del checkpointer deniega mutaciones HIGH/CRITICAL."""
+
+    def _tool(self, risk: RiskLevel) -> AgentTool:
+        return AgentTool(
+            name=f"tool_{risk.value}",
+            description="Tool",
+            category="ops",
+            args_schema=DummyArgs,
+            func=mock_tool_func,
+            risk_level=risk,
+        )
+
+    def test_high_and_critical_denied_when_degraded(self) -> None:
+        guard = SecurityGuard(audit_logger=SecurityAuditLogger(auto_persist=False))
+        for risk in (RiskLevel.HIGH, RiskLevel.CRITICAL):
+            res = guard.evaluate(tool=self._tool(risk), tool_args={}, checkpoint_degraded=True)
+            assert res.decision == PolicyDecision.DENY
+            assert res.reason == "Degraded checkpoint mode rejects non-durable high-risk mutations"
+
+    def test_low_and_medium_still_allowed_when_degraded(self) -> None:
+        guard = SecurityGuard(audit_logger=SecurityAuditLogger(auto_persist=False))
+        for risk in (RiskLevel.LOW, RiskLevel.MEDIUM):
+            res = guard.evaluate(tool=self._tool(risk), tool_args={}, checkpoint_degraded=True)
+            assert res.decision == PolicyDecision.ALLOW
+
+    def test_high_risk_not_denied_when_durable(self) -> None:
+        guard = SecurityGuard(audit_logger=SecurityAuditLogger(auto_persist=False))
+        res = guard.evaluate(tool=self._tool(RiskLevel.HIGH), tool_args={})
+        assert res.decision == PolicyDecision.REQUIRE_HUMAN_APPROVAL
+
+    @pytest.mark.asyncio
+    async def test_execute_tool_rejects_even_with_bypass_when_degraded(self) -> None:
+        guard = SecurityGuard(audit_logger=SecurityAuditLogger(auto_persist=False))
+        res = await guard.execute_tool(
+            tool=self._tool(RiskLevel.CRITICAL),
+            tool_args={},
+            bypass_approval=True,
+            checkpoint_degraded=True,
+        )
+        assert res.success is False
+        assert "Degraded checkpoint mode" in (res.error or "")
+
+
+async def test_risk_assess_node_denies_high_risk_in_degraded_checkpoint_mode() -> None:
+    """Gap 5: el estado global propaga checkpoint_degraded y risk_assess aplica Fail-Closed."""
+    from langgraph.checkpoint.memory import MemorySaver
+
+    from app.core.graph import GraphBuilder
+    from app.core.registry import CapabilityRegistry
+    from app.nodes.risk_assess import risk_assess_node
+
+    registry = CapabilityRegistry()
+    tool = AgentTool(
+        name="drop_cluster",
+        description="Drop",
+        category="database",
+        args_schema=DummyArgs,
+        func=mock_tool_func,
+        risk_level=RiskLevel.CRITICAL,
+    )
+    registry.register_tool(tool)
+    guard = SecurityGuard(audit_logger=SecurityAuditLogger(auto_persist=False))
+
+    state: Any = {
+        "checkpoint_degraded": True,
+        "intent": {
+            "parameters": {"tool_calls": [{"id": "c1", "name": "drop_cluster", "args": {}}]}
+        },
+        "audit_trail": [],
+    }
+    result = await risk_assess_node(state, registry=registry, security_guard=guard)
+
+    assert result["checkpoint_degraded"] is True
+    assert result["circuit_breaker_active"] is True
+    assert "Degraded checkpoint mode" in str(result["risk_assessment"])
+
+    # El flag se deriva automáticamente de un checkpointer marcado is_degraded
+    degraded_saver = MemorySaver()
+    degraded_saver.is_degraded = True  # type: ignore[attr-defined]
+    assert GraphBuilder(registry=registry).build(checkpointer=degraded_saver) is not None

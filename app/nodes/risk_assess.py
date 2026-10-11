@@ -57,6 +57,7 @@ async def risk_assess_node(
     """
     start_time = time.perf_counter()
     guard = security_guard or get_security_guard()
+    checkpoint_degraded = bool(state.get("checkpoint_degraded", False))
 
     # 1. Extraer identificador de ejecución para trazabilidad en auditoría
     req = state.get("request")
@@ -133,6 +134,7 @@ async def risk_assess_node(
                 caller_permissions=caller_perms,
                 is_reversible=tool.reversible if tool else step.reversible,
                 execution_id=execution_id,
+                checkpoint_degraded=checkpoint_degraded,
             )
 
             if eval_res.decision == PolicyDecision.DENY:
@@ -214,6 +216,7 @@ async def risk_assess_node(
         "requires_approval": requires_approval,
         "human_intervention_required": requires_approval,
         "circuit_breaker_active": decision == PolicyDecision.DENY,
+        "checkpoint_degraded": checkpoint_degraded,
         "cognitive_steps": [cognitive_step],
         "audit_trail": [
             AuditRecord(

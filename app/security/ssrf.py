@@ -129,7 +129,18 @@ class SSRFValidator:
         self,
         ip: ipaddress.IPv4Address | ipaddress.IPv6Address,
     ) -> tuple[bool, str | None]:
-        """Verifica si una IP está en rangos no autorizados (loopback, metadata, RFC 1918)."""
+        """Verifica si una IP está en rangos no autorizados (loopback, metadata, RFC 1918).
+
+        Las direcciones IPv4 mapeadas en IPv6 (::ffff:a.b.c.d) se normalizan a su IPv4
+        subyacente, evitando bypass de la blocklist (p. ej. ::ffff:169.254.169.254).
+        """
+        mapped = getattr(ip, "ipv4_mapped", None)
+        if mapped is not None:
+            blocked, reason = self.is_ip_blocked(mapped)
+            if blocked:
+                return True, f"{reason} (IPv4 mapeada en IPv6: {ip})"
+            return False, None
+
         if self.is_ip_allowed_explicitly(ip):
             return False, None
 

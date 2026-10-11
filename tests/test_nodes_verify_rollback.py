@@ -517,3 +517,83 @@ async def test_langgraph_flow_with_verification_fail_triggers_rollback() -> None
     output = result.get("output")
     assert output is not None
     assert "rollback" in output.response.lower()
+
+
+# ==========================================================
+# 4. Saga: fallo de una tool B tras una tool A reversible -> compensación automática de A
+# ==========================================================
+
+
+@pytest.mark.asyncio
+async def test_langgraph_saga_failure_after_reversible_step_triggers_rollback() -> None:
+    """Gap 4: execute (A ok reversible, B falla) -> rollback automático de A -> conclude."""
+    from app.models.state import ExecutionPlan, PlanStep
+    from app.models.tools import RiskLevel
+    from app.plugins.base import PlannerEngine
+
+    call_order: list[str] = []
+
+    def tool_a(**kwargs: Any) -> ToolResult:
+        call_order.append("A")
+        return ToolResult(success=True, output="A ok", rollback_context={"resource": "res-A"})
+
+    def rollback_a(ctx: dict[str, Any]) -> ToolResult:
+        call_order.append(f"rollback_A:{ctx.get('resource')}")
+        return ToolResult(success=True, output="A compensado")
+
+    def tool_b(**kwargs: Any) -> ToolResult:
+        call_order.append("B")
+        return ToolResult(success=False, output="", error="B falló irrecuperablemente")
+
+    class TwoStepPlanner(PlannerEngine):
+        @property
+        def name(self) -> str:
+            return "two_step_planner"
+
+        async def create_plan(self, state: AgentState) -> ExecutionPlan:
+            return ExecutionPlan(
+                plan_id="plan-saga-01",
+                goal="Saga A luego B",
+                steps=[
+                    PlanStep(step_id="s1", tool_name="tool_a", risk_level=RiskLevel.LOW),
+                    PlanStep(step_id="s2", tool_name="tool_b", risk_level=RiskLevel.LOW),
+                ],
+                estimated_risk=RiskLevel.LOW,
+            )
+
+    registry = CapabilityRegistry()
+    registry.register_tool(
+        AgentTool(
+            name="tool_a",
+            description="A reversible",
+            category="ops",
+            func=tool_a,
+            rollback_func=rollback_a,
+            reversible=True,
+        )
+    )
+    registry.register_tool(
+        AgentTool(name="tool_b", description="B falla", category="ops", func=tool_b)
+    )
+    registry.register_engine(TwoStepPlanner())
+
+    graph = GraphBuilder(registry=registry).build(checkpointer=MemorySaver())
+    thread_id = "test-saga-01"
+    run_config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+    result = await graph.ainvoke(
+        {
+            "messages": [HumanMessage(content="Ejecutar saga")],
+            "request": AgentInput(prompt="Ejecutar saga", thread_id=thread_id, execution_id="e-1"),
+            "audit_trail": [],
+        },
+        run_config,
+    )
+
+    # A se ejecuta, B falla y A se compensa automáticamente antes de concluir
+    assert call_order == ["A", "B", "rollback_A:res-A"]
+    assert result.get("status") == AgentExecutionStatus.FAILED
+    traces = result.get("rollback_records", [])
+    assert len(traces) == 1
+    assert traces[0]["tool_name"] == "tool_a"
+    assert traces[0]["success"] is True
+    assert any(a.event_type == "rollback_completed" for a in result.get("audit_trail", []))

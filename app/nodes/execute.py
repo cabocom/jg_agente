@@ -252,6 +252,7 @@ async def execute_node(
                     step_id=step.step_id,
                     approved_step_ids=list(approved_step_ids) if approved_step_ids else None,
                     approved_tool_names=list(approved_tool_names) if approved_tool_names else None,
+                    checkpoint_degraded=bool(state.get("checkpoint_degraded", False)),
                 ),
                 timeout=timeout_sec,
             )
@@ -395,8 +396,15 @@ async def execute_node(
     success_count = sum(1 for r in records if r.status == StepStatus.COMPLETED)
     failed_count = sum(1 for r in records if r.status == StepStatus.FAILED)
 
+    # Saga: un fallo fatal con pasos reversibles ya completados exige compensación obligatoria
+    has_fatal_failure = any(e.fatal for e in errors)
+    has_compensable_steps = any(
+        r.status == StepStatus.COMPLETED and r.rollback_context is not None for r in records
+    )
+
     mutations: dict[str, Any] = {
         "status": AgentExecutionStatus.EXECUTING,
+        "requires_rollback": bool(has_fatal_failure and has_compensable_steps),
         "caller_permissions": caller_perms,
         "execution_records": records,
         "cognitive_steps": cognitive_steps,

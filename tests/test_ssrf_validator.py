@@ -302,3 +302,56 @@ class TestSSRFAsyncAndDNSPinning:
         assert isinstance(client, httpx.AsyncClient)
         assert isinstance(client._transport, SSRFSafeAsyncTransport)
         await client.aclose()
+
+
+class TestSSRFIPv4MappedIPv6:
+    """Gap 1: IPv4 mapeadas en IPv6 (::ffff:a.b.c.d) no deben eludir la blocklist."""
+
+    @pytest.mark.parametrize(
+        "ip",
+        [
+            "::ffff:127.0.0.1",
+            "::ffff:169.254.169.254",
+            "::ffff:10.0.0.5",
+            "::ffff:192.168.1.1",
+            "::ffff:7f00:1",
+        ],
+    )
+    def test_validate_ip_blocks_mapped_addresses(self, ip: str) -> None:
+        validator = SSRFValidator(enforce=True, allow_private_networks=False)
+        is_valid, reason = validator.validate_ip(ip)
+        assert not is_valid
+        assert reason is not None
+        assert "IPv4 mapeada" in reason
+
+    def test_mapped_public_ip_is_allowed(self) -> None:
+        validator = SSRFValidator(enforce=True, allow_private_networks=False)
+        is_valid, _ = validator.validate_ip("::ffff:8.8.8.8")
+        assert is_valid
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://[::ffff:127.0.0.1]/admin",
+            "http://[::ffff:169.254.169.254]/latest/meta-data/",
+        ],
+    )
+    def test_urls_with_mapped_literals_raise(self, url: str) -> None:
+        validator = SSRFValidator(enforce=True, allow_private_networks=False)
+        with pytest.raises(SSRFValidationError):
+            validator.assert_safe_url(url)
+
+    def test_tcp_backend_blocks_mapped_connection(self) -> None:
+        backend = SSRFSafeSyncBackend(
+            dns_pin_map={"evil.com": "::ffff:169.254.169.254"},
+            validator=SSRFValidator(enforce=True, allow_private_networks=False),
+        )
+        with pytest.raises(SSRFValidationError):
+            backend.connect_tcp("evil.com", 80)
+
+    def test_mapped_respects_explicit_allowlist(self) -> None:
+        validator = SSRFValidator(
+            allowed_networks=["127.0.0.0/8"], enforce=True, allow_private_networks=False
+        )
+        is_valid, _ = validator.validate_ip("::ffff:127.0.0.1")
+        assert is_valid

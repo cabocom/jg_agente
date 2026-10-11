@@ -132,6 +132,20 @@ class Settings(BaseSettings):
         default=False,
         description="Habilita el acceso a redes privadas si se autoriza explícitamente por configuración",
     )
+    HMAC_REQUIRE_NONCE: bool = Field(
+        default=False,
+        description=(
+            "Si es True, las peticiones HMAC sin cabecera X-Nonce se rechazan (401). Activar tras "
+            "migrar todos los firmantes; con nonce presente este es de un solo uso y va firmado"
+        ),
+    )
+    WORKSPACE_DIR: str | None = Field(
+        default=None,
+        description=(
+            "Directorio base del Workspace Jail (ej. './data/workspace'). Si se define, cualquier "
+            "argumento tipo ruta que resuelva fuera de este directorio es denegado por SecurityGuard"
+        ),
+    )
     AUDIT_LOG_MAX_HISTORY: int = Field(
         default=1000,
         ge=10,

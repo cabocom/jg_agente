@@ -290,6 +290,9 @@ async def execute_graph_pipeline(
         "current_step": 0,
         "retry_count": 0,
         "circuit_breaker_active": False,
+        "checkpoint_degraded": bool(
+            getattr(getattr(graph, "checkpointer", None), "is_degraded", False)
+        ),
         "human_intervention_required": False,
         "requires_approval": False,
         "is_resolved": False,

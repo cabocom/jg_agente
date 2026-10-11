@@ -368,6 +368,7 @@ class AgentState(TypedDict, total=False):
     current_step: int
     retry_count: int
     circuit_breaker_active: bool
+    checkpoint_degraded: bool
     human_intervention_required: bool
     is_resolved: bool
     stop_reason: str | None
