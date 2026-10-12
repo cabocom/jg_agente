@@ -323,10 +323,9 @@ pytest tests/
 
 ## 10. Política de Licenciamiento
 
-| Componente | Licencia | Términos |
-| :--- | :--- | :--- |
-| **`jg_agente` (Core Runtime)** | **Privada / Propietaria** | Software industrial con todos los derechos reservados. Su distribución o copia sin licencia explícita queda estrictamente prohibida. |
-| **`jg_agente_sdk` (SDK)** | **Permisiva (MIT / Apache-2.0)** | Libre desarrollo de plugins abiertos y comerciales sin restricciones. |
-| **`jg_dashboard` (Control Plane)** | **GNU AGPL-3.0 / Dual** | Código abierto copyleft de red con opción de licencia comercial cerrada. |
+Este proyecto está disponible bajo un modelo de Doble Licenciamiento (Dual Licensing):
 
-Contacto comercial y soporte: **[https://javiergalvez.com](https://javiergalvez.com)**.
+1. **Código Abierto (GNU AGPL-3.0):** Libre para evaluación, desarrollo personal y proyectos comunitarios bajo la [GNU Affero General Public License v3.0](LICENSE). Si interactúas con este software o derivados a través de una red, debes mantener y compartir el código fuente bajo los mismos términos.
+2. **Licencia Comercial Enterprise:** Diseñada para organizaciones que requieren desplegar `jg_agente` en entornos propietarios, integrarlo con soluciones cerradas o que no pueden asumir los requisitos copyleft de red de la AGPL-3.0.
+
+Para consultas sobre licencias comerciales: contacto@javiergalvez.com o visita [https://javiergalvez.com](https://javiergalvez.com).
