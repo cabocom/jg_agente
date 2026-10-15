@@ -1,3 +1,10 @@
+# ==============================================================================
+# Part of the javiergalvez-ia ecosystem.
+# Author: Javier Gálvez <contacto@javiergalvez.com>
+# License: GNU AGPLv3 (or Commercial Enterprise License where applicable)
+# Project URL: https://javiergalvez.com | https://gitlab.com/javiergalvez-ia/jg_agente
+# ==============================================================================
+
 """Tests exhaustivos de autenticación HMAC, anti-replay e integridad de petición (GLOBAL-001 / ISSUE-AGENT-001)."""
 
 import hashlib

@@ -1,3 +1,10 @@
+# ==============================================================================
+# Part of the javiergalvez-ia ecosystem.
+# Author: Javier Gálvez <contacto@javiergalvez.com>
+# License: GNU AGPLv3 (or Commercial Enterprise License where applicable)
+# Project URL: https://javiergalvez.com | https://gitlab.com/javiergalvez-ia/jg_agente
+# ==============================================================================
+
 """Tests unitarios y de integración para la base de datos async, modelos y migraciones Alembic."""
 
 from pathlib import Path

@@ -1,3 +1,10 @@
+# ==============================================================================
+# Part of the javiergalvez-ia ecosystem.
+# Author: Javier Gálvez <contacto@javiergalvez.com>
+# License: GNU AGPLv3 (or Commercial Enterprise License where applicable)
+# Project URL: https://javiergalvez.com | https://gitlab.com/javiergalvez-ia/jg_agente
+# ==============================================================================
+
 """Pruebas para los endpoints base de FastAPI y verificación de salud."""
 
 import pytest

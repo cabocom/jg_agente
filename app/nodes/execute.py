@@ -1,3 +1,10 @@
+# ==============================================================================
+# Part of the javiergalvez-ia ecosystem.
+# Author: Javier Gálvez <contacto@javiergalvez.com>
+# License: GNU AGPLv3 (or Commercial Enterprise License where applicable)
+# Project URL: https://javiergalvez.com | https://gitlab.com/javiergalvez-ia/jg_agente
+# ==============================================================================
+
 """Nodo ejecutor de herramientas (execute) para jg_agente.
 
 Ejecuta de forma secuencial las herramientas autorizadas, bien procedan de un plan

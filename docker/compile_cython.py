@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# ==============================================================================
+# Part of the javiergalvez-ia ecosystem.
+# Author: Javier Gálvez <contacto@javiergalvez.com>
+# License: GNU AGPLv3 (or Commercial Enterprise License where applicable)
+# Project URL: https://javiergalvez.com | https://gitlab.com/javiergalvez-ia/jg_agente
+# ==============================================================================
+
 """Script de compilación nativa Cython para jg_agente.
 
 Convierte los módulos de lógica de negocio (.py) en bibliotecas dinámicas C nativas (.so)

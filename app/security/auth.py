@@ -1,3 +1,10 @@
+# ==============================================================================
+# Part of the javiergalvez-ia ecosystem.
+# Author: Javier Gálvez <contacto@javiergalvez.com>
+# License: GNU AGPLv3 (or Commercial Enterprise License where applicable)
+# Project URL: https://javiergalvez.com | https://gitlab.com/javiergalvez-ia/jg_agente
+# ==============================================================================
+
 """Módulo de autenticación y verificación de firmas criptográficas HMAC para jg_agente.
 
 Implementa el contrato criptográfico canónico compartido con jg_dashboard (GLOBAL-001 / ISSUE-AGENT-001):

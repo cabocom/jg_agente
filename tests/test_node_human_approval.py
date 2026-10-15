@@ -1,3 +1,10 @@
+# ==============================================================================
+# Part of the javiergalvez-ia ecosystem.
+# Author: Javier Gálvez <contacto@javiergalvez.com>
+# License: GNU AGPLv3 (or Commercial Enterprise License where applicable)
+# Project URL: https://javiergalvez.com | https://gitlab.com/javiergalvez-ia/jg_agente
+# ==============================================================================
+
 """Pruebas unitarias e integradas para el nodo de pausa HITL y reanudación (human_approval_node).
 
 Verifica la suspensión en checkpoint nativo mediante interrupt(), la recuperación sin

@@ -1,3 +1,10 @@
+# ==============================================================================
+# Part of the javiergalvez-ia ecosystem.
+# Author: Javier Gálvez <contacto@javiergalvez.com>
+# License: GNU AGPLv3 (or Commercial Enterprise License where applicable)
+# Project URL: https://javiergalvez.com | https://gitlab.com/javiergalvez-ia/jg_agente
+# ==============================================================================
+
 """Nodo cognitivo de evaluación semántica y Capability-Awareness (evaluate) para jg_agente.
 
 Evalúa si la evidencia recopilada tras la ejecución de herramientas responde de forma
