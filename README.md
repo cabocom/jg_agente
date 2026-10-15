@@ -328,4 +328,4 @@ Este proyecto está disponible bajo un modelo de Doble Licenciamiento (Dual Lice
 1. **Código Abierto (GNU AGPL-3.0):** Libre para evaluación, desarrollo personal y proyectos comunitarios bajo la [GNU Affero General Public License v3.0](LICENSE). Si interactúas con este software o derivados a través de una red, debes mantener y compartir el código fuente bajo los mismos términos.
 2. **Licencia Comercial Enterprise:** Diseñada para organizaciones que requieren desplegar `jg_agente` en entornos propietarios, integrarlo con soluciones cerradas o que no pueden asumir los requisitos copyleft de red de la AGPL-3.0.
 
-Para consultas sobre licencias comerciales: contacto@javiergalvez.com o visita [https://javiergalvez.com](https://javiergalvez.com).
+Para consultas sobre licencias comerciales: visita [https://javiergalvez.com](https://javiergalvez.com).
