@@ -18,6 +18,7 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from fastapi.encoders import jsonable_encoder
 from langchain_core.messages import HumanMessage
 from langgraph.errors import GraphInterrupt
 from sqlalchemy import select
@@ -674,6 +675,7 @@ async def notify_execution_completion(
             else datetime.now(UTC).isoformat()
         ),
     }
+    payload = jsonable_encoder(payload)
 
     timeout = getattr(settings, "EXECUTION_CALLBACK_TIMEOUT_SECONDS", 5.0)
     max_retries = getattr(settings, "EXECUTION_CALLBACK_MAX_RETRIES", 3)
