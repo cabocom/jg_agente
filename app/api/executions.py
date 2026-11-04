@@ -1034,11 +1034,19 @@ async def get_execution_by_thread_id(
     cog_steps_list: list[dict[str, Any]] = []
     for rec in raw_cog_steps:
         if hasattr(rec, "model_dump"):
-            cog_steps_list.append(rec.model_dump(mode="json"))
+            item_dict = rec.model_dump(mode="json")
         elif isinstance(rec, dict):
-            cog_steps_list.append(rec)
+            item_dict = dict(rec)
         else:
-            cog_steps_list.append({"raw": str(rec)})
+            item_dict = {"raw": str(rec)}
+        if (
+            status_val != ExecutionStatus.WAITING_APPROVAL.value
+            and item_dict.get("status") == "waiting_approval"
+        ):
+            item_dict["status"] = (
+                "failed" if status_val == ExecutionStatus.CANCELLED.value else "completed"
+            )
+        cog_steps_list.append(item_dict)
 
     raw_exec_records = (
         vals.get("execution_records")
@@ -1266,9 +1274,12 @@ async def _resolve_hitl_execution(
     if agent_output.data is None:
         agent_output.data = {}
     cog_steps = final_state.get("cognitive_steps") or []
-    formatted_steps = [
-        s.model_dump(mode="json") if hasattr(s, "model_dump") else s for s in cog_steps
-    ]
+    formatted_steps: list[dict[str, Any]] = []
+    for s in cog_steps:
+        s_dict = s.model_dump(mode="json") if hasattr(s, "model_dump") else dict(s)
+        if s_dict.get("status") == "waiting_approval":
+            s_dict["status"] = "completed" if approved else "failed"
+        formatted_steps.append(s_dict)
     agent_output.data["cognitive_steps"] = formatted_steps
     agent_output.data["steps"] = formatted_steps
 

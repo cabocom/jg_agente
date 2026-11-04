@@ -59,12 +59,27 @@ async def human_approval_node(
     elif isinstance(raw_approval, dict):
         approval_rec = ApprovalRecord(**raw_approval)
 
-    # 2. Si ya está aprobada, continuar sin pausar
-    if approval_rec is not None and approval_rec.status in (
-        ApprovalStatus.APPROVED,
-        ApprovalStatus.APPROVED.value,
-        ApprovalStatus.AUTO_APPROVED,
-        ApprovalStatus.AUTO_APPROVED.value,
+    # 2. Si ya está aprobada para estos mismos pasos, continuar sin pausar
+    current_required_steps = list(state.get("approved_step_ids") or [])
+    is_step_subset_approved = True
+    if (
+        approval_rec is not None
+        and approval_rec.approved_step_ids
+        and current_required_steps
+        and not set(current_required_steps).issubset(set(approval_rec.approved_step_ids))
+    ):
+        is_step_subset_approved = False
+
+    if (
+        approval_rec is not None
+        and is_step_subset_approved
+        and approval_rec.status
+        in (
+            ApprovalStatus.APPROVED,
+            ApprovalStatus.APPROVED.value,
+            ApprovalStatus.AUTO_APPROVED,
+            ApprovalStatus.AUTO_APPROVED.value,
+        )
     ):
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
         cog_approved = CognitiveStepRecord(
@@ -165,10 +180,51 @@ async def human_approval_node(
     req = state.get("request")
     execution_id = getattr(req, "execution_id", None) if req else None
     thread_id = getattr(req, "thread_id", None) if req else None
+    prompt_val = getattr(req, "prompt", None) if req else None
 
     plan = state.get("plan")
-    plan_info = plan.model_dump() if isinstance(plan, ExecutionPlan) else plan
+    plan_info: dict[str, Any] | None = (
+        plan.model_dump(mode="json")
+        if isinstance(plan, ExecutionPlan)
+        else (dict(plan) if isinstance(plan, dict) else None)
+    )
     risk_info = state.get("risk_assessment") or {}
+    evaluated_steps: list[dict[str, Any]] = (
+        list(risk_info.get("plan_steps") or []) if isinstance(risk_info, dict) else []
+    )
+
+    if plan_info is None:
+        plan_info = {
+            "goal": prompt_val or "Plan de acción propuesto",
+            "estimated_risk": (
+                str(risk_info.get("risk_level", "HIGH")).upper()
+                if isinstance(risk_info, dict)
+                else "HIGH"
+            ),
+            "steps": evaluated_steps,
+        }
+    elif evaluated_steps:
+        plan_info["steps"] = evaluated_steps
+
+    steps_in_plan = plan_info.get("steps") or []
+    mutative_count = sum(
+        1
+        for s in steps_in_plan
+        if isinstance(s, dict)
+        and (
+            s.get("mutative") is True
+            or s.get("read_only") is False
+            or str(s.get("risk_level", "")).upper() in ("HIGH", "CRITICAL", "MEDIUM")
+        )
+    )
+    total_count = len(steps_in_plan)
+    plan_info["mutative_steps_count"] = mutative_count
+    plan_info["total_steps_count"] = total_count
+    plan_info["warning_message"] = (
+        f"AVISO DE GOBERNANZA HITL: Con esta aprobación se autoriza la ejecución del plan de acción completo "
+        f"({total_count} etapa(s) en total, de las cuales {mutative_count} son ETAPAS MUTATIVAS marcadas en rojo). "
+        f"Revisa todas las etapas antes de conceder la autorización."
+    )
 
     interrupt_payload: dict[str, Any] = {
         "action": "human_approval_required",
@@ -176,7 +232,7 @@ async def human_approval_node(
         "thread_id": thread_id,
         "risk_assessment": risk_info,
         "plan": plan_info,
-        "message": "Operación de alto riesgo detectada. Se requiere autorización humana en Dashboard.",
+        "message": plan_info["warning_message"],
     }
 
     # 5. Invocar interrupt() de LangGraph

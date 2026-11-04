@@ -47,31 +47,66 @@ async def rollback_node(
 
     records = list(state.get("execution_records") or [])
     rollback_traces: list[dict[str, Any]] = []
+    cog_steps: list[CognitiveStepRecord] = []
 
-    # 1. Revertir en orden cronológico inverso los pasos completados
+    # 1. Revertir en orden cronológico inverso (LIFO) los pasos completados
+    lifo_idx = 0
     for rec in reversed(records):
         if rec.status == StepStatus.COMPLETED and rec.rollback_context is not None:
             tool = registry.get_tool(rec.tool_name) if registry else None
             if tool is not None and tool.reversible:
+                lifo_idx += 1
+                rb_ctx = rec.rollback_context if isinstance(rec.rollback_context, dict) else {}
+                comp_cmd = (
+                    rb_ctx.get("command")
+                    or rb_ctx.get("compensatory_command")
+                    or rb_ctx.get("description")
+                    or f"rollback({rec.tool_name})"
+                )
+                orig_cmd = (
+                    rb_ctx.get("original_command")
+                    or (rec.tool_args.get("command") if isinstance(rec.tool_args, dict) else None)
+                    or rec.tool_name
+                )
                 logger.warning(
-                    "[rollback_node] Compensando paso '%s' con herramienta '%s'...",
+                    "[rollback_node] Compensando paso LIFO #%d '%s' con herramienta '%s' (%s)...",
+                    lifo_idx,
                     rec.step_id,
                     rec.tool_name,
+                    comp_cmd,
                 )
                 try:
                     res = tool.rollback(rec.rollback_context)
                     tool_res = await ensure_awaited(res)
-
-                    rollback_traces.append(
-                        {
-                            "step_id": rec.step_id,
-                            "tool_name": rec.tool_name,
-                            "success": tool_res.success,
-                            "output": tool_res.output,
-                            "error": tool_res.error,
-                            "duration_ms": getattr(tool_res, "duration_ms", 0.0),
-                            "timestamp": datetime.now(UTC).isoformat(),
-                        }
+                    step_dur = float(getattr(tool_res, "duration_ms", 0.0) or 0.0)
+                    trace_item = {
+                        "lifo_order": lifo_idx,
+                        "step_id": rec.step_id,
+                        "tool_name": rec.tool_name,
+                        "original_command": orig_cmd,
+                        "compensatory_command": comp_cmd,
+                        "success": tool_res.success,
+                        "output": tool_res.output,
+                        "error": tool_res.error,
+                        "duration_ms": step_dur,
+                        "timestamp": datetime.now(UTC).isoformat(),
+                    }
+                    rollback_traces.append(trace_item)
+                    cog_steps.append(
+                        CognitiveStepRecord(
+                            step_id=f"cog_rollback_step_{lifo_idx}_{rec.step_id}",
+                            node="rollback",
+                            title=f"Compensación Saga [LIFO #{lifo_idx}]: {comp_cmd}",
+                            action=f"Revertir '{orig_cmd}' → '{comp_cmd}'",
+                            description=(
+                                f"Paso compensatorio #{lifo_idx} (LIFO) para revertir '{orig_cmd}': "
+                                f"{tool_res.output if tool_res.success else (tool_res.error or 'Fallo en compensación')}"
+                            ),
+                            status="completed" if tool_res.success else "failed",
+                            details=trace_item,
+                            duration_ms=step_dur,
+                            timestamp=datetime.now(UTC),
+                        )
                     )
                 except Exception as exc:
                     logger.exception(
@@ -79,16 +114,31 @@ async def rollback_node(
                         rec.tool_name,
                         exc,
                     )
-                    rollback_traces.append(
-                        {
-                            "step_id": rec.step_id,
-                            "tool_name": rec.tool_name,
-                            "success": False,
-                            "output": "",
-                            "error": f"Excepción durante rollback: {exc}",
-                            "duration_ms": 0.0,
-                            "timestamp": datetime.now(UTC).isoformat(),
-                        }
+                    trace_item = {
+                        "lifo_order": lifo_idx,
+                        "step_id": rec.step_id,
+                        "tool_name": rec.tool_name,
+                        "original_command": orig_cmd,
+                        "compensatory_command": comp_cmd,
+                        "success": False,
+                        "output": "",
+                        "error": f"Excepción durante rollback: {exc}",
+                        "duration_ms": 0.0,
+                        "timestamp": datetime.now(UTC).isoformat(),
+                    }
+                    rollback_traces.append(trace_item)
+                    cog_steps.append(
+                        CognitiveStepRecord(
+                            step_id=f"cog_rollback_step_{lifo_idx}_{rec.step_id}",
+                            node="rollback",
+                            title=f"Compensación Saga [LIFO #{lifo_idx}]: {comp_cmd}",
+                            action=f"Fallo al revertir '{orig_cmd}'",
+                            description=f"Excepción ejecutando compensador '{comp_cmd}': {exc}",
+                            status="failed",
+                            details=trace_item,
+                            duration_ms=0.0,
+                            timestamp=datetime.now(UTC),
+                        )
                     )
             elif tool is not None and not tool.reversible:
                 logger.info(
@@ -128,10 +178,10 @@ async def rollback_node(
     cog_rollback = CognitiveStepRecord(
         step_id=f"cog_rollback_{int(time.time() * 1000)}",
         node="rollback",
-        title="Compensación Automática (Rollback)",
+        title="Compensación Automática (Rollback Saga LIFO)",
         action=f"Reversión de {len(rollback_traces)} operaciones",
         description=(
-            f"Se ejecutó compensación automática de {len(rollback_traces)} pasos reversibles "
+            f"Se ejecutó compensación automática en orden inverso (LIFO) de {len(rollback_traces)} pasos reversibles "
             f"({succeeded_count} revertidos exitosamente, {failed_count} fallidos)."
         ),
         status="completed" if failed_count == 0 else "failed",
@@ -144,11 +194,12 @@ async def rollback_node(
         duration_ms=duration_ms,
         timestamp=datetime.now(UTC),
     )
+    cog_steps.append(cog_rollback)
 
     return {
         "status": AgentExecutionStatus.FAILED,
         "rollback_records": rollback_traces,
-        "cognitive_steps": [cog_rollback],
+        "cognitive_steps": cog_steps,
         "errors": [rollback_error],
         "audit_trail": [audit],
     }

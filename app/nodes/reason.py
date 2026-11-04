@@ -13,6 +13,7 @@ capacidades externas, genera tool_calls estructurados; en caso contrario, formul
 respuesta directa para resolver la solicitud.
 """
 
+import json
 import logging
 import time
 from datetime import UTC, datetime
@@ -38,8 +39,216 @@ from app.models.state import (
     CognitiveStepRecord,
     IntentModel,
 )
+from app.models.tools import RiskLevel
 
 logger = logging.getLogger("jg_agente.nodes.reason")
+
+
+async def _expand_full_action_plan_with_llm(
+    model: BaseChatModel,
+    prompt: str,
+    initial_tool_calls: list[ToolCall],
+    registry: CapabilityRegistry,
+    past_executions: list[tuple[Any, dict[str, Any]]] | None = None,
+) -> tuple[list[ToolCall], list[dict[str, Any]]]:
+    """Expande mediante el LLM la secuencia completa de etapas del plan antes de pausar en HITL.
+
+    Garantiza que cuando una solicitud involucre acciones mutativas (sujetas a HITL),
+    el agente formule el plan completo de principio a fin (etapas de lectura y etapas mutativas)
+    para mostrarlo íntegro al operador humano sin esconder mutaciones en iteraciones posteriores.
+    """
+    if not prompt or not initial_tool_calls:
+        return initial_tool_calls, []
+
+    registered_tools = {t.name: t for t in registry.list_tools()}
+    registry_has_mutative = any(
+        not getattr(t, "read_only", True) or t.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL)
+        for t in registered_tools.values()
+    )
+    if not registry_has_mutative:
+        return initial_tool_calls, []
+
+    has_mutative = False
+    for tc in initial_tool_calls:
+        t_def = registered_tools.get(str(tc.get("name") or ""))
+        if t_def and (
+            not getattr(t_def, "read_only", True)
+            or t_def.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL)
+        ):
+            has_mutative = True
+            break
+
+    if not has_mutative:
+        p_low = prompt.lower()
+        mutative_keywords = (
+            "crea",
+            "crear",
+            "despliega",
+            "desplegar",
+            "lanza",
+            "lanzar",
+            "reinicia",
+            "reiniciar",
+            "elimina",
+            "eliminar",
+            "borra",
+            "borrar",
+            "detén",
+            "detener",
+            "para",
+            "parar",
+            "modifica",
+            "modificar",
+            "actualiza",
+            "actualizar",
+            "create",
+            "deploy",
+            "run",
+            "restart",
+            "stop",
+            "remove",
+            "delete",
+        )
+        if not any(kw in p_low for kw in mutative_keywords):
+            return initial_tool_calls, []
+
+    tools_spec_lines: list[str] = []
+    for t in registry.list_tools():
+        is_mut = not getattr(t, "read_only", True) or t.risk_level in (
+            RiskLevel.HIGH,
+            RiskLevel.CRITICAL,
+        )
+        tools_spec_lines.append(
+            f"- {t.name} [tipo={'MUTATIVA (Riesgo ' + t.risk_level.value.upper() + ')' if is_mut else 'SOLO LECTURA (Riesgo LOW)'}]: {t.description}"
+        )
+    tools_catalog_text = "\n".join(tools_spec_lines)
+    first_call = initial_tool_calls[0]
+
+    planning_messages: list[BaseMessage] = [
+        SystemMessage(
+            content=(
+                "Eres el planificador de gobernanza Human-In-The-Loop (HITL) de un agente autónomo.\n"
+                "REGLA DE SEGURIDAD INQUEBRANTABLE: Cuando una operación incluye acciones mutativas, "
+                "el operador humano DEBE ver en la pantalla de aprobación HITL el Plan de Acción COMPLETO "
+                "de principio a fin antes de autorizarlo. Está terminantemente prohibido ocultar otras acciones "
+                "mutativas detrás de una primera aprobación.\n\n"
+                f"Herramientas disponibles:\n{tools_catalog_text}\n\n"
+                "Formula la secuencia completa y ordenada de etapas necesarias para resolver íntegramente la solicitud del usuario:\n"
+                "- Incluye etapas de lectura/inspección (si aportan verificación previa o comprobación final) y TODAS las etapas mutativas necesarias.\n"
+                "- Respeta estrictamente las reglas y formatos de parámetros de cada herramienta.\n"
+                "- Responde ÚNICAMENTE con un objeto JSON válido (sin bloques markdown ```) con esta estructura:\n"
+                '{"steps": [{"tool_name": "...", "tool_args": {"command": "...", "request_id": "step_1"}, "description": "Descripción clara en español de la etapa"}]}'
+            )
+        ),
+        HumanMessage(
+            content=(
+                f"Solicitud del usuario: {prompt}\n"
+                f"Primera llamada detectada: {json.dumps({'name': first_call.get('name'), 'args': first_call.get('args')}, ensure_ascii=False)}\n"
+                "Devuelve el JSON con la lista completa de etapas ('steps') del plan de acción:"
+            )
+        ),
+    ]
+
+    try:
+        try:
+            res = await model.ainvoke(planning_messages)
+        except NotImplementedError:
+            res = model.invoke(planning_messages)
+
+        raw_text = str(getattr(res, "content", res)).strip()
+        if "```" in raw_text:
+            for part in raw_text.split("```"):
+                part_clean = part.strip()
+                if part_clean.startswith("json"):
+                    part_clean = part_clean[4:].strip()
+                if part_clean.startswith("{") and part_clean.endswith("}"):
+                    raw_text = part_clean
+                    break
+
+        start_idx = raw_text.find("{")
+        end_idx = raw_text.rfind("}")
+        if start_idx == -1 or end_idx == -1 or end_idx <= start_idx:
+            return initial_tool_calls, []
+
+        parsed = json.loads(raw_text[start_idx : end_idx + 1])
+        raw_steps = parsed.get("steps")
+        if not isinstance(raw_steps, list) or not raw_steps:
+            return initial_tool_calls, []
+
+        expanded_calls: list[ToolCall] = []
+        steps_meta: list[dict[str, Any]] = []
+        for idx, item in enumerate(raw_steps, start=1):
+            if not isinstance(item, dict):
+                continue
+            t_name = str(item.get("tool_name") or item.get("name") or "").strip()
+            if t_name not in registered_tools:
+                continue
+            t_args = item.get("tool_args") or item.get("args") or {}
+            if not isinstance(t_args, dict):
+                continue
+            if "request_id" not in t_args:
+                t_args["request_id"] = f"step_{idx}"
+            call_id = f"step_{idx}"
+            desc = str(
+                item.get("description") or item.get("action") or f"Ejecutar {t_name}"
+            ).strip()
+            t_def = registered_tools[t_name]
+            is_mut = not getattr(t_def, "read_only", True) or t_def.risk_level in (
+                RiskLevel.HIGH,
+                RiskLevel.CRITICAL,
+            )
+            expanded_calls.append(
+                ToolCall(
+                    name=t_name,
+                    args=t_args,
+                    id=call_id,
+                    type="tool_call",
+                )
+            )
+            steps_meta.append(
+                {
+                    "index": idx,
+                    "step_id": call_id,
+                    "tool_name": t_name,
+                    "tool": t_name,
+                    "command": t_args.get("command")
+                    or t_args.get("target_url")
+                    or t_args.get("url")
+                    or t_args.get("target")
+                    or "",
+                    "action": desc,
+                    "description": desc,
+                    "risk_level": t_def.risk_level.value.upper(),
+                    "mutative": is_mut,
+                    "read_only": not is_mut,
+                    "reversible": bool(t_def.reversible),
+                }
+            )
+
+        if expanded_calls and any(m.get("mutative") for m in steps_meta):
+            if past_executions:
+                filtered_calls: list[ToolCall] = []
+                filtered_meta: list[dict[str, Any]] = []
+                for tc_item, meta_item in zip(expanded_calls, steps_meta, strict=False):
+                    tc_norm = {
+                        k: v for k, v in (tc_item.get("args") or {}).items() if k != "request_id"
+                    }
+                    already_ran = any(
+                        p_name == tc_item.get("name")
+                        and {k: v for k, v in p_args.items() if k != "request_id"} == tc_norm
+                        for p_name, p_args in past_executions
+                    )
+                    if not already_ran:
+                        filtered_calls.append(tc_item)
+                        meta_item["index"] = len(filtered_meta) + 1
+                        filtered_meta.append(meta_item)
+                if filtered_calls:
+                    return filtered_calls, filtered_meta
+            return expanded_calls, steps_meta
+    except Exception as exc:
+        logger.warning("No se pudo expandir el plan completo con el LLM: %s", exc)
+
+    return initial_tool_calls, []
 
 
 async def _is_simple_greeting_or_chat_llm(model: BaseChatModel, prompt: str) -> bool:
@@ -182,9 +391,19 @@ async def reason_node(
     # Si venimos de un ciclo iterativo, inyectar el veredicto del evaluador como contexto guía
     if eval_records:
         last_eval = eval_records[-1]
+        executed_summary = [
+            f"{getattr(r, 'tool_name', '')}({(getattr(r, 'tool_args', {}) or {}).get('command') or getattr(r, 'tool_args', {})})"
+            for r in (state.get("execution_records") or [])
+        ]
+        already_done_note = (
+            f"\nOperaciones ya ejecutadas (NO repetir): {', '.join(executed_summary)}"
+            if executed_summary
+            else ""
+        )
         guidance_text = (
             f"[Evaluación Semántica Previa (Iteración {current_iteration - 1})]: {last_eval.explanation}\n"
-            f"Acción requerida: {last_eval.suggested_next_action or 'Continuar con el objetivo original utilizando las herramientas disponibles.'}"
+            f"Acción requerida: {last_eval.suggested_next_action or 'Continuar con el objetivo original utilizando las herramientas disponibles con nuevos parámetros.'}"
+            f"{already_done_note}"
         )
         messages_to_send.append(HumanMessage(content=guidance_text))
 
@@ -226,11 +445,14 @@ async def reason_node(
             if str(getattr(r, "status", "")).lower() in ("completed", "stepstatus.completed")
         ]
 
+        def _normalize_args(d: dict[str, Any]) -> dict[str, Any]:
+            return {k: v for k, v in d.items() if k != "request_id"}
+
         def _is_identical_duplicate(tc: ToolCall) -> bool:
             tc_name = tc.get("name")
-            tc_args = tc.get("args") or {}
+            tc_args = _normalize_args(tc.get("args") or {})
             for p_name, p_args in past_executions:
-                if p_name == tc_name and p_args == tc_args:
+                if p_name == tc_name and _normalize_args(p_args) == tc_args:
                     return True
             return False
 
@@ -258,21 +480,61 @@ async def reason_node(
             step_action = "Resolución sin duplicación de acciones"
             step_description = "El agente detectó que las herramientas propuestas ya se ejecutaron con idénticos parámetros, evitando llamadas redundantes."
         else:
+            plan_steps_meta: list[dict[str, Any]] = []
+            model_cls_name = model.__class__.__name__.lower()
+            is_real_llm = (
+                "mock" not in model_cls_name
+                and "fake" not in model_cls_name
+                and settings.LLM_PROVIDER != "mock"
+            )
+            if is_real_llm and state.get("approval") is None and len(active_tool_calls) == 1:
+                expanded_calls, expanded_meta = await _expand_full_action_plan_with_llm(
+                    model=model,
+                    prompt=prompt,
+                    initial_tool_calls=active_tool_calls,
+                    registry=registry,
+                    past_executions=past_executions,
+                )
+                if len(expanded_calls) >= 1 and expanded_meta:
+                    active_tool_calls = expanded_calls
+                    plan_steps_meta = expanded_meta
+                    ai_message.tool_calls = active_tool_calls
+
             tool_names = [tc.get("name") for tc in active_tool_calls]
-            tools_str = ", ".join(t for t in tool_names if t)
+
+            def _format_tc_summary(tc: Any) -> str:
+                name = str(tc.get("name") or "tool")
+                args = tc.get("args") or {}
+                if isinstance(args, dict):
+                    cmd = (
+                        args.get("command")
+                        or args.get("target_url")
+                        or args.get("url")
+                        or args.get("target")
+                        or args.get("query")
+                    )
+                    if cmd:
+                        return f"{name} → '{cmd}'"
+                return name
+
+            calls_summary = ", ".join(_format_tc_summary(tc) for tc in active_tool_calls)
             logger.info(
                 "[reason_node] El modelo generó %d tool call(s) activas: %s",
                 len(active_tool_calls),
-                tools_str,
+                calls_summary,
             )
+            intent_params: dict[str, Any] = {"tool_calls": active_tool_calls}
+            if plan_steps_meta:
+                intent_params["plan_steps_metadata"] = plan_steps_meta
+
             intent = IntentModel(
                 goal=prompt or "Ejecución de herramientas operativas",
                 action_type="act",
-                parameters={"tool_calls": active_tool_calls},
+                parameters=intent_params,
                 confidence=1.0,
                 reasoning=str(ai_message.content)
                 if ai_message.content
-                else f"Invocación requerida para: {tools_str}",
+                else f"Invocación requerida para: {calls_summary}",
             )
             audit_details = {
                 "action_type": "act",
@@ -280,8 +542,16 @@ async def reason_node(
                 "tools": tool_names,
             }
             step_title = "Razonamiento e Interpretación Cognitiva"
-            step_action = f"Selección de Herramienta(s): {tools_str}"
-            step_description = f"El agente interpretó la solicitud y determinó la ejecución de las herramientas: {tools_str}."
+            step_action = (
+                f"Plan de Acción ({len(active_tool_calls)} etapas): {calls_summary}"
+                if len(active_tool_calls) > 1
+                else f"Selección de Acción: {calls_summary}"
+            )
+            step_description = (
+                f"El agente formuló un plan de acción de {len(active_tool_calls)} etapas: {calls_summary}."
+                if len(active_tool_calls) > 1
+                else f"El agente interpretó la solicitud y determinó ejecutar: {calls_summary}."
+            )
     elif planner_engine is not None and not await _is_simple_greeting_or_chat_llm(model, prompt):
         logger.info(
             "[reason_node] Solicitud operativa detectada con planificador disponible ('%s')",

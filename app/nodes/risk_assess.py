@@ -82,6 +82,17 @@ async def risk_assess_node(
         ]
 
     # Si no hay plan estructurado, buscar tool_calls directas en intent o mensajes
+    plan_steps_meta_by_id: dict[str, dict[str, Any]] = {}
+    intent_obj = state.get("intent")
+    if isinstance(intent_obj, IntentModel):
+        for m in intent_obj.parameters.get("plan_steps_metadata") or []:
+            if isinstance(m, dict) and m.get("step_id"):
+                plan_steps_meta_by_id[str(m["step_id"])] = m
+    elif isinstance(intent_obj, dict):
+        for m in (intent_obj.get("parameters") or {}).get("plan_steps_metadata") or []:
+            if isinstance(m, dict) and m.get("step_id"):
+                plan_steps_meta_by_id[str(m["step_id"])] = m
+
     if not steps_to_evaluate:
         tcs: list[dict[str, Any]] = []
         intent = state.get("intent")
@@ -97,15 +108,17 @@ async def risk_assess_node(
                 last_msg = messages[-1]
                 tcs = getattr(last_msg, "tool_calls", None) or []
 
-        for idx, tc in enumerate(tcs):
-            tc_id = tc.get("id") or f"tool-call-{idx}"
+        for idx, tc in enumerate(tcs, start=1):
+            tc_id = tc.get("id") or f"call_{idx}"
             tc_name = tc.get("name") or tc.get("tool_name", f"tool-{idx}")
             tc_args = tc.get("args") or tc.get("tool_args", {})
+            meta_desc = (plan_steps_meta_by_id.get(tc_id) or {}).get("description")
             steps_to_evaluate.append(
                 PlanStep(
                     step_id=tc_id,
                     tool_name=tc_name,
                     tool_args=tc_args,
+                    description=str(meta_desc) if meta_desc else f"Ejecutar {tc_name}",
                     risk_level=RiskLevel.LOW,
                 )
             )
@@ -118,6 +131,7 @@ async def risk_assess_node(
     approval_reasons: list[str] = []
     steps_requiring_approval: list[str] = []
     tools_requiring_approval: list[str] = []
+    evaluated_plan_steps: list[dict[str, Any]] = []
 
     caller_perms = resolve_caller_permissions(state)
 
@@ -125,7 +139,7 @@ async def risk_assess_node(
         decision = PolicyDecision.ALLOW
         reason = "No se detectaron operaciones que requieran evaluación de riesgo."
     else:
-        for step in steps_to_evaluate:
+        for idx, step in enumerate(steps_to_evaluate, start=1):
             tool = registry.get_tool(step.tool_name) if registry else None
             effective_risk = tool.risk_level if tool else step.risk_level
 
@@ -142,6 +156,45 @@ async def risk_assess_node(
                 is_reversible=tool.reversible if tool else step.reversible,
                 execution_id=execution_id,
                 checkpoint_degraded=checkpoint_degraded,
+            )
+
+            is_step_mutative = (
+                (not getattr(tool, "read_only", True))
+                if tool is not None
+                else effective_risk in (RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.CRITICAL)
+            ) or effective_risk in (RiskLevel.HIGH, RiskLevel.CRITICAL)
+
+            args_dict = step.tool_args if isinstance(step.tool_args, dict) else {}
+            cmd_val = (
+                args_dict.get("command")
+                or args_dict.get("target_url")
+                or args_dict.get("url")
+                or args_dict.get("target")
+                or args_dict.get("container")
+                or args_dict.get("query")
+                or ""
+            )
+            step_desc = step.description or ""
+            if not step_desc or step_desc == f"Ejecutar {step.tool_name}":
+                if cmd_val:
+                    step_desc = f"{'Mutación' if is_step_mutative else 'Consulta'} con {step.tool_name}: {cmd_val}"
+                else:
+                    step_desc = f"Ejecutar {step.tool_name}"
+
+            evaluated_plan_steps.append(
+                {
+                    "index": idx,
+                    "step_id": step.step_id,
+                    "tool_name": step.tool_name,
+                    "tool": step.tool_name,
+                    "command": str(cmd_val) if cmd_val else None,
+                    "action": step_desc,
+                    "description": step_desc,
+                    "risk_level": effective_risk.value.upper(),
+                    "mutative": is_step_mutative,
+                    "read_only": not is_step_mutative,
+                    "reversible": bool(tool.reversible if tool else step.reversible),
+                }
             )
 
             if eval_res.decision == PolicyDecision.DENY:
@@ -165,6 +218,18 @@ async def risk_assess_node(
                     has_data_loss = True
 
         # Resolver veredicto consolidado
+        def _step_label(s: PlanStep) -> str:
+            args = s.tool_args if isinstance(s.tool_args, dict) else {}
+            cmd = (
+                args.get("command")
+                or args.get("target_url")
+                or args.get("url")
+                or args.get("target")
+                or args.get("query")
+            )
+            return f"{s.tool_name} ('{cmd}')" if cmd else s.tool_name
+
+        evaluated_labels = ", ".join(_step_label(s) for s in steps_to_evaluate)
         if denied_reasons:
             decision = PolicyDecision.DENY
             reason = " ; ".join(denied_reasons)
@@ -173,7 +238,10 @@ async def risk_assess_node(
             reason = " ; ".join(approval_reasons)
         else:
             decision = PolicyDecision.ALLOW
-            reason = "Operaciones con nivel de riesgo operativo aceptable para ejecución autónoma."
+            reason = (
+                f"Operación [{evaluated_labels}] con nivel de riesgo operativo aceptable "
+                f"({max_risk.value.upper()}) para ejecución autónoma."
+            )
 
     # 4. Construir resultado formal de seguridad
     eval_result = SecurityEvaluationResult(
@@ -217,9 +285,15 @@ async def risk_assess_node(
     )
 
     # 6. Generar mutaciones de estado para LangGraph
+    risk_assessment_payload = eval_result.model_dump()
+    mutative_count = sum(1 for s in evaluated_plan_steps if s.get("mutative"))
+    risk_assessment_payload["plan_steps"] = evaluated_plan_steps
+    risk_assessment_payload["mutative_steps_count"] = mutative_count
+    risk_assessment_payload["total_steps_count"] = len(evaluated_plan_steps)
+
     update_state: dict[str, Any] = {
         "caller_permissions": caller_perms,
-        "risk_assessment": eval_result.model_dump(),
+        "risk_assessment": risk_assessment_payload,
         "requires_approval": requires_approval,
         "human_intervention_required": requires_approval,
         "circuit_breaker_active": decision == PolicyDecision.DENY,
@@ -245,20 +319,33 @@ async def risk_assess_node(
         update_state["approved_step_ids"] = steps_requiring_approval
         update_state["approved_tool_names"] = tools_requiring_approval
 
-        # Preservar registro si ya estuviera aprobado previamente (reanudación HITL)
+        # Preservar registro únicamente si ya estuviera aprobado previamente para estos mismos pasos
         current_approval = state.get("approval")
         current_status = None
+        existing_approved_steps: list[str] = []
         if isinstance(current_approval, ApprovalRecord):
             current_status = current_approval.status
+            existing_approved_steps = list(current_approval.approved_step_ids or [])
         elif isinstance(current_approval, dict):
             current_status = current_approval.get("status")
+            existing_approved_steps = list(current_approval.get("approved_step_ids") or [])
 
-        if current_status not in (
+        is_already_approved = current_status in (
             ApprovalStatus.APPROVED,
             ApprovalStatus.APPROVED.value,
             ApprovalStatus.AUTO_APPROVED,
             ApprovalStatus.AUTO_APPROVED.value,
+        )
+        # Si existen pasos aprobados específicos, exigir que las nuevas acciones mutativas estén dentro del conjunto aprobado
+        if (
+            is_already_approved
+            and existing_approved_steps
+            and steps_requiring_approval
+            and not set(steps_requiring_approval).issubset(set(existing_approved_steps))
         ):
+            is_already_approved = False
+
+        if not is_already_approved:
             update_state["approval"] = ApprovalRecord(
                 status=ApprovalStatus.PENDING,
                 notes=reason,

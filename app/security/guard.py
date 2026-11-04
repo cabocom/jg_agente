@@ -234,16 +234,18 @@ class SecurityGuard:
         Determina si la operación es ALLOW, DENY o REQUIRE_HUMAN_APPROVAL y
         registra la decisión en la auditoría inmutable.
         """
-        if isinstance(tool, AgentTool):
-            tool_name = tool.name
-            effective_risk = risk_level or tool.risk_level
+        if not isinstance(tool, str) and hasattr(tool, "name"):
+            tool_name = str(tool.name)
+            effective_risk = risk_level or getattr(tool, "risk_level", RiskLevel.LOW)
             effective_perms = (
                 list(required_permissions)
                 if required_permissions is not None
-                else list(tool.required_permissions)
+                else list(getattr(tool, "required_permissions", []) or [])
             )
-            effective_http = makes_http_requests or tool.makes_http_requests
-            effective_reversible = is_reversible or tool.reversible
+            effective_http = makes_http_requests or bool(
+                getattr(tool, "makes_http_requests", False)
+            )
+            effective_reversible = is_reversible or bool(getattr(tool, "reversible", False))
         else:
             tool_name = str(tool)
             effective_risk = risk_level or RiskLevel.LOW
@@ -251,9 +253,10 @@ class SecurityGuard:
             effective_http = makes_http_requests
             effective_reversible = is_reversible
 
-        # Determinar el recurso objetivo
+        # Determinar el recurso u operación específica objetivo
         target_resource = str(
-            tool_args.get("target_url")
+            tool_args.get("command")
+            or tool_args.get("target_url")
             or tool_args.get("url")
             or tool_args.get("target")
             or tool_name
@@ -407,9 +410,14 @@ class SecurityGuard:
                 return eval_res
 
         # 4. Evaluación de Niveles de Riesgo y Puerta Human-In-The-Loop (HITL)
+        action_detail = (
+            f"'{tool_name}' ({target_resource})"
+            if target_resource and target_resource != tool_name
+            else f"'{tool_name}'"
+        )
         if effective_risk in (RiskLevel.HIGH, RiskLevel.CRITICAL):
             reason = (
-                f"Operación de riesgo {effective_risk.value.upper()} '{tool_name}' "
+                f"Operación de riesgo {effective_risk.value.upper()} {action_detail} "
                 f"requiere autorización humana previa (HITL)."
             )
             logger.warning("SecurityGuard REQUIRE_HUMAN_APPROVAL en '%s': %s", tool_name, reason)
@@ -427,7 +435,7 @@ class SecurityGuard:
             return eval_res
 
         # 5. Operación Autorizada (ALLOW)
-        reason = f"Operación '{tool_name}' (riesgo {effective_risk.value}) autorizada para ejecución autónoma."
+        reason = f"Operación {action_detail} (riesgo {effective_risk.value}) autorizada para ejecución autónoma."
         eval_res = SecurityEvaluationResult(
             decision=PolicyDecision.ALLOW,
             operation=tool_name,
@@ -479,7 +487,7 @@ class SecurityGuard:
                 effective_bypass = match_step or match_tool
 
         caller_perms = list(caller_permissions or [])
-        if effective_bypass and isinstance(tool, AgentTool):
+        if effective_bypass and not isinstance(tool, str) and hasattr(tool, "required_permissions"):
             caller_perms.extend(tool.required_permissions)
 
         eval_res = self.evaluate(

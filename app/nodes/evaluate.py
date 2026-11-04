@@ -105,12 +105,16 @@ async def evaluate_node(
     # Evidencia técnica de herramientas ejecutadas
     exec_records = state.get("execution_records") or []
     tool_messages: list[str] = []
+    max_obs_chars = 8000
+    half_obs = max_obs_chars // 2
     for msg in state.get("messages") or []:
         if isinstance(msg, ToolMessage):
             raw_c = str(msg.content or "")
             capped_c = (
-                raw_c[:2500] + "\n... [observación truncada a 2500 chars para evaluación]"
-                if len(raw_c) > 2500
+                raw_c[:half_obs]
+                + f"\n... [observación central omitida ({len(raw_c)} chars totales)] ...\n"
+                + raw_c[-half_obs:]
+                if len(raw_c) > max_obs_chars
                 else raw_c
             )
             tool_messages.append(f"[{msg.name or 'Tool'}]: {capped_c}")
@@ -161,8 +165,8 @@ async def evaluate_node(
         "PROHIBIDO TERMINANTEMENTE actuar como un auditor externo o hablar de las herramientas en tercera persona "
         "(NUNCA digas: 'La respuesta del tool indica...', 'El tool devolvió...', 'Cumpliendo la solicitud del usuario', etc.). "
         "Habla de tú a tú al usuario con la información final solicitada.\n"
-        "2. 'needs_more_info': ÚNICAMENTE si para cumplir el objetivo del usuario se requiere de forma indispensable ejecutar una herramienta adicional o una nueva operación con parámetros complementarios (por ejemplo, leer el siguiente bloque de líneas, inspeccionar otro contenedor distinto o paginar) "
-        "que SÍ está disponible en el catálogo de herramientas registradas. Explica qué dato concreto falta y qué se ejecutará.\n"
+        "2. 'needs_more_info': ÚNICAMENTE si para cumplir el objetivo del usuario se requiere de forma indispensable ejecutar una herramienta adicional o una nueva operación con parámetros complementarios DISTINTOS a los ya ejecutados (por ejemplo, leer el siguiente bloque de líneas, inspeccionar otro contenedor/red distinto o filtrar por red) "
+        "que SÍ está disponible en el catálogo de herramientas registradas. Explica qué dato concreto falta y qué comando/parámetros específicos se deben ejecutar a continuación (NO repitas un comando que ya esté en 'executed_steps').\n"
         "3. 'blocked_missing_capability': Si detectas un problema o si el usuario solicitó investigar algo "
         "pero la herramienta requerida NO EXISTE en el catálogo de herramientas registradas. "
         "Indica brevemente qué hallazgo real hay y qué herramienta o capacidad específica falta.\n"
@@ -176,6 +180,12 @@ async def evaluate_node(
         "}"
     )
 
+    def _preview_output(raw_out: Any) -> str:
+        s = str(raw_out or "")
+        if len(s) <= 1500:
+            return s
+        return s[:750] + "\n... [preview truncado] ...\n" + s[-750:]
+
     user_payload = {
         "user_goal": prompt,
         "iteration": iteration,
@@ -183,8 +193,9 @@ async def evaluate_node(
         "executed_steps": [
             {
                 "tool": r.tool_name,
+                "args": getattr(r, "tool_args", {}),
                 "status": r.status,
-                "output_preview": str(getattr(r, "output", ""))[:500],
+                "output_preview": _preview_output(getattr(r, "output", "")),
                 "error": getattr(r, "error", None),
             }
             for r in exec_records
@@ -262,10 +273,16 @@ async def evaluate_node(
     # 4. Validar consistencia de capability-awareness
     # Si se marcó needs_more_info pero la herramienta sugerida no existe en available_tools,
     # corregir automáticamente a BLOCKED_MISSING_CAPABILITY
+    suggested_base = (
+        str(suggested_next_action).strip().split()[0].rstrip(":,(")
+        if suggested_next_action
+        else ""
+    )
     if (
         goal_status == GoalStatus.NEEDS_MORE_INFO
         and suggested_next_action
         and suggested_next_action not in tool_names_available
+        and suggested_base not in tool_names_available
     ):
         logger.info(
             "[evaluate_node] La herramienta sugerida '%s' no está disponible en el catálogo. "

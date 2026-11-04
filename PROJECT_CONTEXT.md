@@ -5,7 +5,11 @@
 **Componente:** Execution Plane (Motor Autónomo de Ejecución)  
 **Estado:** Fases 01 a 11 completadas (100%). Integración con `jg_agente_sdk` consolidada.  
 - Integración Canónica con `jg_agente_sdk` (REFACTOR-SDK-001): Establecimiento del SDK como Fuente Única de Verdad (SSOT) para contratos de herramientas (`AgentTool`, `ToolResult`, `RiskLevel`, `ToolType`) y plugins (`BasePlugin`, `BaseEngine`). `app.models.tools.AgentTool` hereda directamente de `jg_sdk.contracts.AgentTool` añadiendo únicamente el adaptador de LangChain (`as_langchain_tool`). Eliminada la duplicidad de 240 líneas de código.
-- Razonamiento Iterativo Proactivo (LOOPING): Soporte de re-evaluación semántica en grafo cognitivo con `GoalStatus` (`satisfied`, `needs_more_info`), contador de iteraciones `iteration`/`max_iterations`, y nodo `conclude` enriquecido con mensajes amigables y transparentes al alcanzar el tope de ciclos.
+- Razonamiento Iterativo Proactivo y Gobernanza HITL Multi-Paso:
+  * Soporte de re-evaluación semántica en grafo cognitivo con `GoalStatus` (`satisfied`, `needs_more_info`), contador de iteraciones `iteration`/`max_iterations`, y deduplicación semántica (`_normalize_args`) que ignora metadatos artificiales (`request_id`) para evitar bucles ciegos sobre el mismo comando.
+  * Planificación y Desglose HITL Transparente (`_expand_full_action_plan_with_llm`): En solicitudes operativas mutativas, el LLM formula de antemano el plan completo de etapas con metadatos de riesgo y acción, impidiendo ocultar mutaciones posteriores tras una primera aprobación.
+  * Ejecución Multi-Paso Pre-Aprobada: En `execute_node`, el bypass de HITL autoriza todos los `step_id` del plan validado por el operador.
+  * Trazabilidad Saga LIFO Detallada (`rollback_node`): Emite un `CognitiveStepRecord` por cada acción compensatoria ejecutada en orden inverso, permitiendo auditoría granular en el Dashboard.
 - Fase 08 completada: Cliente de registro Zero-Trust, bootstrap tokens, CredentialStore (permisos POSIX 0600) y heartbeat periódico.  
 - Fase 11 completada: Extracción e integración de plugins especializados (`jg_plugin_conversational`, `jg_plugin_devops` y `jg_plugin_datosgob`).  
 - Despliegue Multi-Agente Unificado: Soporte de múltiples perfiles desde la misma imagen Docker mediante `ENABLED_PLUGINS` (`jg_agente_conversacional` en :8001, `jg_agente_devops` en :8002 y `jg_agente_datosgob` en :8881).  

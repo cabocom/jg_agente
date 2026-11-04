@@ -210,7 +210,8 @@ async def execute_node(
         )
 
         # Autorización granular por paso [AGENTE-SEC-05]:
-        # bypass_approval solo es True para los pasos o herramientas explícitamente aprobados
+        # bypass_approval solo es True para los pasos o herramientas explícitamente aprobados,
+        # o para todos los pasos del plan cuando fue aprobado globalmente sin restricción de subconjunto.
         step_bypass_approval = False
         if is_plan_approved:
             if approved_step_ids or approved_tool_names:
@@ -218,12 +219,23 @@ async def execute_node(
                     step.step_id in approved_step_ids or step.tool_name in approved_tool_names
                 )
             else:
-                # Si se aprobó el plan globalmente sin lista y solo hay un paso, se aprueba dicho paso
-                step_bypass_approval = len(steps_to_run) == 1
+                step_bypass_approval = True
+
+        arg_summary = ""
+        if isinstance(step.tool_args, dict):
+            arg_summary = str(
+                step.tool_args.get("command")
+                or step.tool_args.get("target_url")
+                or step.tool_args.get("url")
+                or step.tool_args.get("target")
+                or step.tool_args.get("query")
+                or ""
+            ).strip()
+        op_label = f"{tool.name} ('{arg_summary}')" if arg_summary else tool.name
 
         # Salto cognitivo: Evaluación de Políticas de Seguridad (SecurityGuard)
         sec_description = (
-            f"Operación '{tool.name}' evaluada con riesgo {tool.risk_level.value.upper()}. "
+            f"Operación '{op_label}' evaluada con riesgo {tool.risk_level.value.upper()}. "
             f"{'Autorizada previamente vía HITL.' if step_bypass_approval else 'Política: Ejecución autónoma autorizada (ALLOW).'}"
         )
         cognitive_steps.append(
@@ -231,11 +243,12 @@ async def execute_node(
                 step_id=f"cog_sec_{step.step_id}",
                 node="security_eval",
                 title="Evaluación de Seguridad y Gobernanza (SecurityGuard)",
-                action=f"Auditoría de Políticas: {tool.name}",
+                action=f"Auditoría de Políticas: {op_label}",
                 description=sec_description,
                 status="completed",
                 details={
                     "tool": tool.name,
+                    "command": arg_summary or None,
                     "risk_level": tool.risk_level.value,
                     "decision": "allow",
                     "bypass_approval": step_bypass_approval,
@@ -322,15 +335,17 @@ async def execute_node(
 
         # Salto cognitivo: Ejecución técnica de la acción
         exec_description = (
-            f"Herramienta '{tool.name}' ejecutada {'con éxito' if tool_result.success else 'con fallo'} "
+            f"Operación '{op_label}' ejecutada {'con éxito' if tool_result.success else 'con fallo'} "
             f"en {tool_result.duration_ms:.2f}ms."
         )
+        if not tool_result.success and tool_result.error:
+            exec_description += f" Detalle: {tool_result.error}"
         cognitive_steps.append(
             CognitiveStepRecord(
                 step_id=f"cog_exec_{step.step_id}",
                 node="execute",
-                title=f"Ejecución de Acción: {tool.name}",
-                action=f"Invocación de {tool.name}",
+                title=f"Ejecución de Acción: {op_label}",
+                action=f"Invocación de {op_label}",
                 description=exec_description,
                 status="completed" if tool_result.success else "failed",
                 details={
@@ -339,6 +354,7 @@ async def execute_node(
                     "output": tool_result.output,
                     "error": tool_result.error,
                     "duration_ms": tool_result.duration_ms,
+                    "rollback_context": tool_result.rollback_context,
                 },
                 duration_ms=tool_result.duration_ms,
                 timestamp=datetime.now(UTC),
@@ -405,8 +421,10 @@ async def execute_node(
 
     # Saga: un fallo fatal con pasos reversibles ya completados exige compensación obligatoria
     has_fatal_failure = any(e.fatal for e in errors)
+    all_session_records = list(state.get("execution_records") or []) + records
     has_compensable_steps = any(
-        r.status == StepStatus.COMPLETED and r.rollback_context is not None for r in records
+        r.status == StepStatus.COMPLETED and r.rollback_context is not None
+        for r in all_session_records
     )
 
     mutations: dict[str, Any] = {
