@@ -136,8 +136,17 @@ Implementado en [app/nodes/rollback.py](../app/nodes/rollback.py), revierte de f
    tool_res = await ensure_awaited(res)
    ```
 
-3. **Dualidad Asíncrona:**
-   Soporta tanto funciones de compensación síncronas como corutinas asíncronas (`ensure_awaited`), registrando los resultados individuales en `rollback_records` y emitiendo un evento inmutable `rollback_completed` o `rollback_failed` en la auditoría.
+3. **Dualidad Asíncrona y Trazabilidad Granular en Dashboard:**
+   Soporta tanto funciones de compensación síncronas como corutinas asíncronas (`ensure_awaited`). Además, `rollback_node` emite un `CognitiveStepRecord` individualizado por cada acción compensatoria LIFO ejecutada, reflejando el comando específico (`docker volume rm ...`, `docker network rm ...`) y su estado, permitiendo que la consola web de `jg_dashboard` dibuje visualmente la secuencia completa de reversión paso a paso.
+
+---
+
+## 4.1. Planificación HITL Completa y Deduplicación Semántica (`reason_node`)
+
+Para asegurar la máxima gobernanza y evitar el agotamiento de ciclos en bucles ciegos:
+1. **Expansión Anticipada del Plan (`_expand_full_action_plan_with_llm`):** Si una solicitud operativa contiene intenciones mutativas (`crea`, `despliega`, `reinicia`, `elimina`), el nodo `reason` expande con el LLM la secuencia completa de etapas (lecturas previas, mutaciones y verificaciones) antes de pausar en HITL. Esto garantiza que el operador humano vea en el Dashboard el plan completo con todas las acciones mutativas marcadas en rojo antes de otorgar su autorización.
+2. **Deduplicación Semántica (`_normalize_args`):** El filtro de duplicados ignora metadatos volátiles como `request_id`, comparando los argumentos sustanciales de las herramientas. Esto previene que el agente repita llamadas idénticas ya ejecutadas cuando cambian únicamente identificadores temporales.
+3. **Bypass Multi-Paso Pre-Aprobado (`execute_node`):** Cuando el operador aprueba una solicitud en HITL, todos los identificadores de etapa autorizados (`approved_step_ids`) se propagan al estado para que las mutaciones subsiguientes no vuelvan a bloquearse innecesariamente.
 
 ---
 

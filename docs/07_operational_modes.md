@@ -51,28 +51,32 @@ Para cubrir todas estas necesidades de gobernanza sin obligar a cada organizaci�
 
 `jg_agente` soporta cuatro modos de operación principales adaptados a diferentes niveles de infraestructura:
 
-```mermaid
-graph TD
-    subgraph Modo 1: Standalone Directo
-        T[Telegram / WhatsApp / API Gateway] -->|HTTP + HMAC| A1[jg_agente Independiente]
-        A1 --> DB1[(PostgreSQL Checkpoints)]
-    end
-
-    subgraph Modo 2: Clúster Gestionado
-        D[jg_dashboard] -->|Heartbeat / Bootstrap / HITL| A2[jg_agente Enrolado]
-        U[Operador Humano] -->|Aprobación Web| D
-        A2 --> DB2[(PostgreSQL Checkpoints)]
-    end
-
-    subgraph Modo 3: Local / Desconectado
-        DEV[Desarrollador / CI/CD] -->|HTTP Local| A3[jg_agente Local]
-        A3 --> MEM[(MemorySaver / Mock LLM)]
-    end
-
-    subgraph Modo 4: Edge / Worker Asíncrono
-        Q[Cola de Tareas / Webhook Client] -->|POST /trigger?sync=false| A4[jg_agente Worker]
-        A4 -.->|Callback HTTP Asíncrono| W[Endpoint Receptor Webhook]
-    end
+```text
++---------------------------------------------------------------------------------+
+| MODO 1: STANDALONE DIRECTO                                                      |
+|   Telegram / WhatsApp / API Gateway ──[HTTP + HMAC]──► jg_agente Independiente  |
+|                                                               │                 |
+|                                                               ▼                 |
+|                                                  [(PostgreSQL Checkpoints)]     |
++---------------------------------------------------------------------------------+
+| MODO 2: CLÚSTER GESTIONADO                                                      |
+|   Operador Humano ──► jg_dashboard ──[Heartbeat/HITL]──► jg_agente Enrolado     |
+|                                                               │                 |
+|                                                               ▼                 |
+|                                                  [(PostgreSQL Checkpoints)]     |
++---------------------------------------------------------------------------------+
+| MODO 3: LOCAL / DESCONECTADO (CI/CD)                                            |
+|   Desarrollador / CI/CD ──────────[HTTP Local]─────────► jg_agente Local        |
+|                                                               │                 |
+|                                                               ▼                 |
+|                                                  [(MemorySaver / Mock LLM)]     |
++---------------------------------------------------------------------------------+
+| MODO 4: EDGE / WORKER ASÍNCRONO                                                 |
+|   Cola de Tareas ───────[POST /trigger?sync=false]─────► jg_agente Worker       |
+|                                                               │                 |
+|                                                               ▼                 |
+|   Endpoint Webhook ◄──────────[Callback Asíncrono]────────────┘                 |
++---------------------------------------------------------------------------------+
 ```
 
 ---
