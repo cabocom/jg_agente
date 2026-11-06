@@ -1,0 +1,3 @@
+Demande de l'utilisateur : {prompt}
+Premier appel détecté : {first_call_json}
+Renvoyez le JSON contenant la liste complète des étapes ('steps') du plan d'action :

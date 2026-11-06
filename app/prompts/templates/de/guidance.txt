@@ -1,0 +1,2 @@
+[Vorherige Semantische Bewertung (Iteration {iteration})]: {explanation}
+Erforderliche Aktion: {suggested_next_action}{already_done_note}

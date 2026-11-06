@@ -1,0 +1,3 @@
+Benutzeranfrage: {prompt}
+Erster erkannter Aufruf: {first_call_json}
+Geben Sie das JSON mit der vollständigen Liste der Aktionsstufen ('steps') zurück:

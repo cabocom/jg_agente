@@ -1,9 +1,10 @@
 # CONTEXTO DE PROYECTO: jg_agente
 
-**Versión del documento:** 2.38.0  
-**Fecha de consolidación:** 24 de septiembre de 2026  
+**Versión del documento:** 2.39.0  
+**Fecha de consolidación:** 6 de noviembre de 2026  
 **Componente:** Execution Plane (Motor Autónomo de Ejecución)  
 **Estado:** Fases 01 a 11 completadas (100%). Integración con `jg_agente_sdk` consolidada.  
+- Soporte i18n y Externalización de Prompts (jg_agente#80): Desacoplamiento y externalización de plantillas de prompts de `reason.py` hacia `app/prompts/templates/{es,en,fr,de,it}/` gestionadas por `PromptManager`. Soporte multilingüe en 5 idiomas (Español, Inglés, Francés, Alemán, Italiano), resolución jerárquica de locales (`request.locale -> plugin.default_locale -> settings.DEFAULT_LOCALE -> 'es'`), directivas cognitivas localizadas y trazabilidad de idioma en `CognitiveStepRecord`.
 - Integración Canónica con `jg_agente_sdk` (REFACTOR-SDK-001): Establecimiento del SDK como Fuente Única de Verdad (SSOT) para contratos de herramientas (`AgentTool`, `ToolResult`, `RiskLevel`, `ToolType`) y plugins (`BasePlugin`, `BaseEngine`). `app.models.tools.AgentTool` hereda directamente de `jg_sdk.contracts.AgentTool` añadiendo únicamente el adaptador de LangChain (`as_langchain_tool`). Eliminada la duplicidad de 240 líneas de código.
 - Razonamiento Iterativo Proactivo y Gobernanza HITL Multi-Paso:
   * Soporte de re-evaluación semántica en grafo cognitivo con `GoalStatus` (`satisfied`, `needs_more_info`), contador de iteraciones `iteration`/`max_iterations`, y deduplicación semántica (`_normalize_args`) que ignora metadatos artificiales (`request_id`) para evitar bucles ciegos sobre el mismo comando.
@@ -99,6 +100,9 @@ class AgentInput(BaseModel):
     )
     user_context: Optional[Dict[str, Any]] = Field(
         default=None, description="Contexto del usuario autenticado en el Dashboard"
+    )
+    locale: str = Field(
+        default="es", description="Código ISO 639-1 del idioma de interacción ('es', 'en', 'fr', 'de', 'it')"
     )
 
 
@@ -284,7 +288,38 @@ El ciclo de confianza y aprovisionamiento entre `jg_agente` y `jg_dashboard` sig
 
 ---
 
-## 8. Criterios de Éxito del MVP
+## 8. Subsistema de Internacionalización y Prompts (i18n)
+
+A partir de la versión 2.39.0 (`jg_agente#80`), el nodo cognitivo `reason` y los subsistemas de prompt engineering están completamente desacoplados y localizados:
+
+- **Catálogo de Plantillas (`app/prompts/templates/<locale>/`):**
+  - Idiomas soportados: Español (`es`), Inglés (`en`), Francés (`fr`), Alemán (`de`), Italiano (`it`).
+  - Plantillas externalizadas en texto plano:
+    * `system.txt`: Instrucción canónica del rol y directivas de comportamiento.
+    * `hitl_planning.txt`: Desglose estructurado de planes de acción multi-etapa para aprobación HITL.
+    * `hitl_human.txt`: Directiva del operador humano con advertencias de riesgo.
+    * `intent_classifier.txt`: Clasificación de intenciones y saludos/despedidas triviales.
+    * `guidance.txt`: Realimentación cognitiva ante iteraciones sucesivas (`needs_more_info`).
+
+- **Gestor Centralizado (`PromptManager` en `app/prompts/manager.py`):**
+  - Jerarquía estricta de resolución de locale:
+    ```text
+    1. request.locale (parámetro de entrada AgentInput)
+           ↓ (si es None o vacío)
+    2. plugin.default_locale (metadato del plugin activo)
+           ↓ (si es None o vacío)
+    3. settings.DEFAULT_LOCALE (variable de entorno DEFAULT_LOCALE)
+           ↓ (si es None o vacío)
+    4. "es" (fallback canónico de seguridad)
+    ```
+  - Caching LRU en memoria para lectura ultrarrápida de plantillas sin penalización de I/O en runtime.
+  - Directivas de concisión y longitud de respuesta adaptadas a cada idioma.
+  - Detección de verbos imperativos mutativos y palabras clave de saludo en los 5 idiomas.
+  - Metadatos de auditoría `CognitiveStepRecord` (`title`, `action`, `details={"locale": ...}`) completamente localizados.
+
+---
+
+## 9. Criterios de Éxito del MVP
 
 El desarrollo de `jg_agente` se considerará validado únicamente cuando los dos siguientes casos de uso se ejecuten sobre el mismo Core sin ninguna modificación al código base:
 

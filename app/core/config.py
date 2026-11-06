@@ -229,6 +229,10 @@ class Settings(BaseSettings):
         gt=0,
         description="Máximo de tokens por respuesta del LLM",
     )
+    DEFAULT_LOCALE: str = Field(
+        default="es",
+        description="Idioma por defecto para directivas y prompts del agente ('es', 'en', 'fr', 'de', 'it').",
+    )
     DEFAULT_SYSTEM_PROMPT: str = Field(
         default=(
             "Eres un agente inteligente autónomo de ejecución orientado a objetivos. "

@@ -1,0 +1,3 @@
+Solicitud del usuario: {prompt}
+Primera llamada detectada: {first_call_json}
+Devuelve el JSON con la lista completa de etapas ('steps') del plan de acción:

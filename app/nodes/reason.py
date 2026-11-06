@@ -40,6 +40,7 @@ from app.models.state import (
     IntentModel,
 )
 from app.models.tools import RiskLevel
+from app.prompts import get_prompt_manager
 
 logger = logging.getLogger("jg_agente.nodes.reason")
 
@@ -50,6 +51,7 @@ async def _expand_full_action_plan_with_llm(
     initial_tool_calls: list[ToolCall],
     registry: CapabilityRegistry,
     past_executions: list[tuple[Any, dict[str, Any]]] | None = None,
+    locale: str = "es",
 ) -> tuple[list[ToolCall], list[dict[str, Any]]]:
     """Expande mediante el LLM la secuencia completa de etapas del plan antes de pausar en HITL.
 
@@ -60,6 +62,7 @@ async def _expand_full_action_plan_with_llm(
     if not prompt or not initial_tool_calls:
         return initial_tool_calls, []
 
+    prompt_mgr = get_prompt_manager()
     registered_tools = {t.name: t for t in registry.list_tools()}
     registry_has_mutative = any(
         not getattr(t, "read_only", True) or t.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL)
@@ -80,35 +83,7 @@ async def _expand_full_action_plan_with_llm(
 
     if not has_mutative:
         p_low = prompt.lower()
-        mutative_keywords = (
-            "crea",
-            "crear",
-            "despliega",
-            "desplegar",
-            "lanza",
-            "lanzar",
-            "reinicia",
-            "reiniciar",
-            "elimina",
-            "eliminar",
-            "borra",
-            "borrar",
-            "detén",
-            "detener",
-            "para",
-            "parar",
-            "modifica",
-            "modificar",
-            "actualiza",
-            "actualizar",
-            "create",
-            "deploy",
-            "run",
-            "restart",
-            "stop",
-            "remove",
-            "delete",
-        )
+        mutative_keywords = prompt_mgr.get_mutative_keywords(locale)
         if not any(kw in p_low for kw in mutative_keywords):
             return initial_tool_calls, []
 
@@ -124,29 +99,23 @@ async def _expand_full_action_plan_with_llm(
     tools_catalog_text = "\n".join(tools_spec_lines)
     first_call = initial_tool_calls[0]
 
+    sys_content = prompt_mgr.render(
+        "hitl_planning",
+        locale=locale,
+        tools_catalog_text=tools_catalog_text,
+    )
+    human_content = prompt_mgr.render(
+        "hitl_human",
+        locale=locale,
+        prompt=prompt,
+        first_call_json=json.dumps(
+            {"name": first_call.get("name"), "args": first_call.get("args")}, ensure_ascii=False
+        ),
+    )
+
     planning_messages: list[BaseMessage] = [
-        SystemMessage(
-            content=(
-                "Eres el planificador de gobernanza Human-In-The-Loop (HITL) de un agente autónomo.\n"
-                "REGLA DE SEGURIDAD INQUEBRANTABLE: Cuando una operación incluye acciones mutativas, "
-                "el operador humano DEBE ver en la pantalla de aprobación HITL el Plan de Acción COMPLETO "
-                "de principio a fin antes de autorizarlo. Está terminantemente prohibido ocultar otras acciones "
-                "mutativas detrás de una primera aprobación.\n\n"
-                f"Herramientas disponibles:\n{tools_catalog_text}\n\n"
-                "Formula la secuencia completa y ordenada de etapas necesarias para resolver íntegramente la solicitud del usuario:\n"
-                "- Incluye etapas de lectura/inspección (si aportan verificación previa o comprobación final) y TODAS las etapas mutativas necesarias.\n"
-                "- Respeta estrictamente las reglas y formatos de parámetros de cada herramienta.\n"
-                "- Responde ÚNICAMENTE con un objeto JSON válido (sin bloques markdown ```) con esta estructura:\n"
-                '{"steps": [{"tool_name": "...", "tool_args": {"command": "...", "request_id": "step_1"}, "description": "Descripción clara en español de la etapa"}]}'
-            )
-        ),
-        HumanMessage(
-            content=(
-                f"Solicitud del usuario: {prompt}\n"
-                f"Primera llamada detectada: {json.dumps({'name': first_call.get('name'), 'args': first_call.get('args')}, ensure_ascii=False)}\n"
-                "Devuelve el JSON con la lista completa de etapas ('steps') del plan de acción:"
-            )
-        ),
+        SystemMessage(content=sys_content),
+        HumanMessage(content=human_content),
     ]
 
     try:
@@ -251,7 +220,9 @@ async def _expand_full_action_plan_with_llm(
     return initial_tool_calls, []
 
 
-async def _is_simple_greeting_or_chat_llm(model: BaseChatModel, prompt: str) -> bool:
+async def _is_simple_greeting_or_chat_llm(
+    model: BaseChatModel, prompt: str, locale: str = "es"
+) -> bool:
     """Determina mediante el LLM si un estímulo es un saludo/conversación casual o una petición de acción.
 
     Elimina heurísticas sintácticas fijas en el Core, delegando en la IA la clasificación semántica
@@ -259,6 +230,8 @@ async def _is_simple_greeting_or_chat_llm(model: BaseChatModel, prompt: str) -> 
     """
     if not prompt or not prompt.strip():
         return True
+
+    prompt_mgr = get_prompt_manager()
 
     # Atajo determinista para fórmulas unívocas de cortesía puras y aisladas (1-2 palabras),
     # evitando latencia innecesaria en saludos elementales evidentes.
@@ -273,32 +246,13 @@ async def _is_simple_greeting_or_chat_llm(model: BaseChatModel, prompt: str) -> 
         .replace(".", " ")
     )
     tokens = set(p_clean.split())
-    pure_greetings = {
-        "hola",
-        "saludos",
-        "buenos días",
-        "buenas tardes",
-        "buenas noches",
-        "hey",
-        "hi",
-        "hello",
-        "adiós",
-        "chao",
-        "gracias",
-    }
+    pure_greetings = prompt_mgr.get_pure_greetings(locale)
     if tokens and tokens.issubset(pure_greetings):
         return True
 
+    sys_content = prompt_mgr.render("intent_classifier", locale=locale)
     classification_messages: list[BaseMessage] = [
-        SystemMessage(
-            content=(
-                "Eres un clasificador de intenciones para un agente autónomo.\n"
-                "Determina si el siguiente mensaje del usuario es:\n"
-                "- 'GREETING': si es únicamente un saludo, despedida, agradecimiento o cortesía conversacional básica, sin ninguna solicitud de tarea, acción, comando o información técnica/operativa.\n"
-                "- 'ACTION': si contiene cualquier petición, comando, pregunta operativa, consulta de estado, diagnóstico o tarea técnica.\n\n"
-                "Responde ÚNICAMENTE con la palabra 'GREETING' o 'ACTION'."
-            )
-        ),
+        SystemMessage(content=sys_content),
         HumanMessage(content=prompt),
     ]
 
@@ -342,32 +296,41 @@ async def reason_node(
     """
     model = llm or get_chat_model()
     existing_messages = list(state.get("messages") or [])
+    prompt_mgr = get_prompt_manager()
 
-    # 1. Recuperar el estímulo textual principal
+    # 1. Recuperar el estímulo textual principal y resolver locale
     prompt = ""
     req = state.get("request")
     if req and req.prompt:
         prompt = req.prompt.strip()
+
+    req_locale = getattr(req, "locale", None) if req else None
+
+    # Si se cargó un único plugin que declara default_locale, resolverlo
+    plugin_default_locale: str | None = None
+    try:
+        loaded_plugins = registry.list_plugins()
+        if len(loaded_plugins) == 1:
+            plugin_default_locale = getattr(loaded_plugins[0], "default_locale", None)
+    except Exception:
+        pass
+
+    locale = prompt_mgr.resolve_locale(
+        requested_locale=req_locale,
+        plugin_default=plugin_default_locale,
+        system_default=getattr(settings, "DEFAULT_LOCALE", "es"),
+    )
 
     # 2. Reconstrucción y enriquecimiento de la memoria conversacional
     messages_to_send: list[BaseMessage] = []
     has_system = any(isinstance(m, SystemMessage) for m in existing_messages)
 
     if not has_system:
-        sys_content = system_prompt or settings.DEFAULT_SYSTEM_PROMPT
-        verbosity = getattr(settings, "AGENT_VERBOSITY", "concise").lower().strip()
-        if verbosity == "concise":
-            sys_content += (
-                "\n\nDIRECTIVAS DE RESPUESTA (CONCISO):\n"
-                "- Sé directo, ejecutivo y conciso. Evita introducciones o florituras innecesarias.\n"
-                "- Si respondes directamente sin herramientas, proporciona la información esencial en 1 a 3 frases claras.\n"
-                "- No hagas meta-comentarios sobre tu propio catálogo interno ni sobre las partes de la pregunta del usuario."
-            )
-        elif verbosity == "detailed":
-            sys_content += (
-                "\n\nDIRECTIVAS DE RESPUESTA (DETALLADO):\n"
-                "- Proporciona explicaciones minuciosas y detalladas con análisis exhaustivo."
-            )
+        sys_content = prompt_mgr.get_system_prompt(
+            locale=locale,
+            verbosity=getattr(settings, "AGENT_VERBOSITY", "concise"),
+            base_prompt=system_prompt,
+        )
         messages_to_send.append(SystemMessage(content=sys_content))
 
     messages_to_send.extend(existing_messages)
@@ -395,15 +358,33 @@ async def reason_node(
             f"{getattr(r, 'tool_name', '')}({(getattr(r, 'tool_args', {}) or {}).get('command') or getattr(r, 'tool_args', {})})"
             for r in (state.get("execution_records") or [])
         ]
+        already_done_prefix = {
+            "es": "\nOperaciones ya ejecutadas (NO repetir): ",
+            "en": "\nOperations already executed (DO NOT repeat): ",
+            "fr": "\nOpérations déjà exécutées (NE PAS répéter) : ",
+            "de": "\nBereits ausgeführte Operationen (NICHT wiederholen): ",
+            "it": "\nOperazioni già eseguite (NON ripetere): ",
+        }.get(locale, "\nOperaciones ya ejecutadas (NO repetir): ")
         already_done_note = (
-            f"\nOperaciones ya ejecutadas (NO repetir): {', '.join(executed_summary)}"
-            if executed_summary
-            else ""
+            f"{already_done_prefix}{', '.join(executed_summary)}" if executed_summary else ""
         )
-        guidance_text = (
-            f"[Evaluación Semántica Previa (Iteración {current_iteration - 1})]: {last_eval.explanation}\n"
-            f"Acción requerida: {last_eval.suggested_next_action or 'Continuar con el objetivo original utilizando las herramientas disponibles con nuevos parámetros.'}"
-            f"{already_done_note}"
+        default_next_action = {
+            "es": "Continuar con el objetivo original utilizando las herramientas disponibles con nuevos parámetros.",
+            "en": "Continue with original goal using available tools with new parameters.",
+            "fr": "Poursuivre l'objectif initial à l'aide des outils disponibles avec de nouveaux paramètres.",
+            "de": "Das ursprüngliche Ziel mit den verfügbaren Werkzeugen und neuen Parametern fortsetzen.",
+            "it": "Continuare con l'obiettivo originale utilizzando gli strumenti disponibili con nuovi parametri.",
+        }.get(
+            locale,
+            "Continuar con el objetivo original utilizando las herramientas disponibles con nuevos parámetros.",
+        )
+        guidance_text = prompt_mgr.render(
+            "guidance",
+            locale=locale,
+            iteration=current_iteration - 1,
+            explanation=last_eval.explanation,
+            suggested_next_action=last_eval.suggested_next_action or default_next_action,
+            already_done_note=already_done_note,
         )
         messages_to_send.append(HumanMessage(content=guidance_text))
 
@@ -476,9 +457,9 @@ async def reason_node(
                 "action_type": "conclude",
                 "deduplicated_calls": len(ai_message.tool_calls),
             }
-            step_title = "Razonamiento y Conclusión Reflexiva"
-            step_action = "Resolución sin duplicación de acciones"
-            step_description = "El agente detectó que las herramientas propuestas ya se ejecutaron con idénticos parámetros, evitando llamadas redundantes."
+            step_title, step_action, step_description = prompt_mgr.get_cognitive_meta(
+                "conclude_dedup", locale=locale
+            )
         else:
             plan_steps_meta: list[dict[str, Any]] = []
             model_cls_name = model.__class__.__name__.lower()
@@ -494,6 +475,7 @@ async def reason_node(
                     initial_tool_calls=active_tool_calls,
                     registry=registry,
                     past_executions=past_executions,
+                    locale=locale,
                 )
                 if len(expanded_calls) >= 1 and expanded_meta:
                     active_tool_calls = expanded_calls
@@ -541,18 +523,15 @@ async def reason_node(
                 "tool_calls_count": len(active_tool_calls),
                 "tools": tool_names,
             }
-            step_title = "Razonamiento e Interpretación Cognitiva"
-            step_action = (
-                f"Plan de Acción ({len(active_tool_calls)} etapas): {calls_summary}"
-                if len(active_tool_calls) > 1
-                else f"Selección de Acción: {calls_summary}"
+            step_title, step_action, step_description = prompt_mgr.get_cognitive_meta(
+                "act",
+                locale=locale,
+                count=len(active_tool_calls),
+                summary=calls_summary,
             )
-            step_description = (
-                f"El agente formuló un plan de acción de {len(active_tool_calls)} etapas: {calls_summary}."
-                if len(active_tool_calls) > 1
-                else f"El agente interpretó la solicitud y determinó ejecutar: {calls_summary}."
-            )
-    elif planner_engine is not None and not await _is_simple_greeting_or_chat_llm(model, prompt):
+    elif planner_engine is not None and not await _is_simple_greeting_or_chat_llm(
+        model, prompt, locale=locale
+    ):
         logger.info(
             "[reason_node] Solicitud operativa detectada con planificador disponible ('%s')",
             planner_engine.name,
@@ -568,11 +547,8 @@ async def reason_node(
             "action_type": "plan",
             "planner": planner_engine.name,
         }
-        step_title = "Razonamiento y Planificación Cognitiva"
-        step_action = f"Delegación a Planificador: {planner_engine.name}"
-        step_description = (
-            f"Solicitud operativa compleja detectada. El agente delega en el motor '{planner_engine.name}' "
-            f"para formular un plan de pasos secuenciales."
+        step_title, step_action, step_description = prompt_mgr.get_cognitive_meta(
+            "plan", locale=locale, planner=planner_engine.name
         )
     else:
         logger.info(
@@ -589,11 +565,8 @@ async def reason_node(
             "action_type": "conclude",
             "response_length": len(str(ai_message.content)),
         }
-        step_title = "Razonamiento y Respuesta Directa"
-        step_action = "Resolución Conversacional"
-        step_description = (
-            "El agente analizó la consulta y determinó que no requiere invocar herramientas operativas, "
-            "procediendo a responder directamente."
+        step_title, step_action, step_description = prompt_mgr.get_cognitive_meta(
+            "conclude_direct", locale=locale
         )
 
     if current_iteration > 1:
@@ -613,6 +586,7 @@ async def reason_node(
             "tool_calls": ai_message.tool_calls if has_tool_calls else [],
             "response_preview": str(ai_message.content)[:300] if ai_message.content else None,
             "iteration": current_iteration,
+            "locale": locale,
         },
         duration_ms=duration_llm_ms,
         timestamp=datetime.now(UTC),

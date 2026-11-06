@@ -1,0 +1,3 @@
+User request: {prompt}
+Initial call detected: {first_call_json}
+Return the JSON with the complete list of action plan stages ('steps'):

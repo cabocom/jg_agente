@@ -1,0 +1,2 @@
+[Évaluation Sémantique Précédente (Itération {iteration})] : {explanation}
+Action requise : {suggested_next_action}{already_done_note}
