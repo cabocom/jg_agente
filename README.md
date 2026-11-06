@@ -16,14 +16,17 @@ A diferencia de chatbots convencionales o cadenas lineales de automatización, `
 4. **Seguridad Perimetral y Zero-Trust:** Mitigación activa contra SSRF y DNS Rebinding mediante **DNS Pinning a nivel TCP**, desinfección universal contra Directory Traversal e inyecciones de comandos shell, y firmas criptográficas **HMAC-SHA256**.
 
 ### Documentación Técnica Modular
-Para profundizar en cada subsistema, consulta las guías técnicas detalladas:
-- [01. Arquitectura del Runtime](docs/01_architecture.md) — Topología de red, componentes core y aislamiento.
-- [02. Grafo Cognitivo y Máquina de Estados](docs/02_cognitive_graph.md) — Flujo reflexivo de 10 nodos y guardarraíles.
-- [03. Seguridad, Aislamiento de Red y Sandboxing](docs/03_security_sandboxing.md) — SecurityGuard, anti-SSRF y DNS Pinning.
-- [04. Persistencia, Estado y Checkpointing](docs/04_persistence_state.md) — DualPostgresSaver, esquema relacional y modo degradado.
-- [05. Ciclo de Vida y Ecosistema de Plugins](docs/05_plugin_lifecycle.md) — Descubrimiento dinámico y gestión de dependencias.
-- [06. Referencia de API REST Privada](docs/06_api_reference.md) — Especificación de endpoints, esquemas I/O y códigos HTTP.
-- [07. Modos de Funcionamiento, Topologías y Registro](docs/07_operational_modes.md) — Standalone (Telegram/WhatsApp), Clúster con Dashboard y registro Zero-Trust.
+Estructurada en múltiples idiomas bajo [`docs/`](docs/README.md):
+- 🇪🇸 **Español (SSOT):**
+  - [01. Arquitectura del Runtime](docs/es/01_architecture.md) — Topología de red, componentes core y aislamiento.
+  - [02. Grafo Cognitivo y Máquina de Estados](docs/es/02_cognitive_graph.md) — Flujo reflexivo de 10 nodos y guardarraíles.
+  - [03. Seguridad, Aislamiento de Red y Sandboxing](docs/es/03_security_sandboxing.md) — SecurityGuard, anti-SSRF y DNS Pinning.
+  - [04. Persistencia, Estado y Checkpointing](docs/es/04_persistence_state.md) — DualPostgresSaver, esquema relacional y modo degradado.
+  - [05. Ciclo de Vida y Ecosistema de Plugins](docs/es/05_plugin_lifecycle.md) — Descubrimiento dinámico y gestión de dependencias.
+  - [06. Referencia de API REST Privada](docs/es/06_api_reference.md) — Especificación de endpoints, esquemas I/O y códigos HTTP.
+  - [07. Modos de Funcionamiento, Topologías y Registro](docs/es/07_operational_modes.md) — Standalone (Telegram/WhatsApp), Clúster con Dashboard y registro Zero-Trust.
+- 🇬🇧 **English (Reference):**
+  - [01. Runtime Architecture](docs/en/01_architecture.md)
 
 ---
 
@@ -169,7 +172,7 @@ Aunque `jg_agente` puede operar de forma aislada, en infraestructuras productiva
 
 > **Panel Oficial de la Comunidad:** Para dar respuesta a estas necesidades de gobernanza sin acoplar el runtime, hemos desarrollado y puesto a disposición de la comunidad el proyecto de código abierto **`jg_dashboard`**:  
 > 👉 **Repositorio oficial en GitLab:** [https://gitlab.com/javiergalvez-ia/jg_dashboard](https://gitlab.com/javiergalvez-ia/jg_dashboard)  
-> *Para una descripción en profundidad de los flujos de despliegue, consulta la guía [07. Modos de Funcionamiento, Topologías y Registro](docs/07_operational_modes.md).*
+> *Para una descripción en profundidad de los flujos de despliegue, consulta la guía [07. Modos de Funcionamiento, Topologías y Registro](docs/es/07_operational_modes.md).*
 
 ### ¿Es el registro en un Dashboard obligatorio o bloqueante?
 **NO, por defecto NO es bloqueante (`REQUIRE_DASHBOARD_REGISTRATION=False`).**  
