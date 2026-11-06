@@ -1,7 +1,7 @@
 # jg_agente
 
 **Enterprise Cognitive Agent Runtime for Private & Secure Environments**  
-*Motor Autónomo de Ejecución Cognitiva, Gobernanza HITL y Reversibilidad Transaccional*
+*Motor Autónomo de Ejecución Cognitiva, Gobernanza HITL y Reversibilidad Transaccional*.
 
 ---
 
