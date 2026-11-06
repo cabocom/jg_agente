@@ -49,11 +49,11 @@ typecheck:mypy:
   before_script:
     - apt-get update && apt-get install -y --no-install-recommends git
     - python -m pip install --upgrade pip
-    - pip install .[dev]
-    - echo "📦 Instalando jg-agente-sdk para verificación estricta de tipos..."
+    - echo "📦 Instalando jg-agente-sdk desde git para verificación estricta de tipos..."
     - |
-      pip install --force-reinstall --no-deps "git+https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/javiergalvez-ia/jg_agente_sdk.git@main" || \
+      pip install "git+https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/javiergalvez-ia/jg_agente_sdk.git@main" || \
         echo "Advertencia: No se pudo clonar jg_agente_sdk con CI_JOB_TOKEN (se omiten tipos del SDK si no está instalado)"
+    - pip install .[dev]
   script:
     - echo "🧠 Ejecutando verificación de tipos estricta con MyPy..."
     - mypy app tests
@@ -68,11 +68,11 @@ test:pytest:
   before_script:
     - apt-get update && apt-get install -y --no-install-recommends git
     - python -m pip install --upgrade pip
-    - pip install .[dev]
-    - echo "📦 Instalando jg-agente-sdk para validar paridad de contratos..."
+    - echo "📦 Instalando jg-agente-sdk desde git para validar paridad de contratos..."
     - |
-      pip install --force-reinstall --no-deps "git+https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/javiergalvez-ia/jg_agente_sdk.git@main" || \
+      pip install "git+https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/javiergalvez-ia/jg_agente_sdk.git@main" || \
         echo "Advertencia: No se pudo clonar jg_agente_sdk con CI_JOB_TOKEN (se omite test de deriva si no está instalado)"
+    - pip install .[dev]
   script:
     - echo "🧪 Ejecutando suite de tests automatizados..."
     - pytest tests/
