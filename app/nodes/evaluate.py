@@ -274,9 +274,7 @@ async def evaluate_node(
     # Si se marcó needs_more_info pero la herramienta sugerida no existe en available_tools,
     # corregir automáticamente a BLOCKED_MISSING_CAPABILITY
     suggested_base = (
-        str(suggested_next_action).strip().split()[0].rstrip(":,(")
-        if suggested_next_action
-        else ""
+        str(suggested_next_action).strip().split()[0].rstrip(":,(") if suggested_next_action else ""
     )
     if (
         goal_status == GoalStatus.NEEDS_MORE_INFO

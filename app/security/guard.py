@@ -236,7 +236,10 @@ class SecurityGuard:
         """
         if not isinstance(tool, str) and hasattr(tool, "name"):
             tool_name = str(tool.name)
-            effective_risk = risk_level or getattr(tool, "risk_level", RiskLevel.LOW)
+            raw_risk = risk_level or getattr(tool, "risk_level", RiskLevel.LOW)
+            effective_risk: RiskLevel = (
+                raw_risk if isinstance(raw_risk, RiskLevel) else RiskLevel.LOW
+            )
             effective_perms = (
                 list(required_permissions)
                 if required_permissions is not None
@@ -248,7 +251,7 @@ class SecurityGuard:
             effective_reversible = is_reversible or bool(getattr(tool, "reversible", False))
         else:
             tool_name = str(tool)
-            effective_risk = risk_level or RiskLevel.LOW
+            effective_risk = risk_level if isinstance(risk_level, RiskLevel) else RiskLevel.LOW
             effective_perms = list(required_permissions or [])
             effective_http = makes_http_requests
             effective_reversible = is_reversible
