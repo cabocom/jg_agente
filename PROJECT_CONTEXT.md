@@ -1,9 +1,9 @@
 # CONTEXTO DE PROYECTO: jg_agente
 
-**Versión del documento:** 2.39.0  
-**Fecha de consolidación:** 6 de noviembre de 2026  
+**Versión del documento:** 2.39.1  
+**Fecha de consolidación:** 9 de noviembre de 2026  
 **Componente:** Execution Plane (Motor Autónomo de Ejecución)  
-**Estado:** Fases 01 a 11 completadas (100%). Integración con `jg_agente_sdk` consolidada.  
+**Estado:** Fases 01 a 11 completadas (100%). Integración con `jg_agente_sdk` consolidada y sincronización automática de *mirror* público hacia `https://github.com/cabocom/jg_agente` vía GitLab CI/CD (`workspace#8`).  
 - Soporte i18n y Externalización de Prompts (jg_agente#80): Desacoplamiento y externalización de plantillas de prompts de `reason.py` hacia `app/prompts/templates/{es,en,fr,de,it}/` gestionadas por `PromptManager`. Soporte multilingüe en 5 idiomas (Español, Inglés, Francés, Alemán, Italiano), resolución jerárquica de locales (`request.locale -> plugin.default_locale -> settings.DEFAULT_LOCALE -> 'es'`), directivas cognitivas localizadas y trazabilidad de idioma en `CognitiveStepRecord`.
 - Integración Canónica con `jg_agente_sdk` (REFACTOR-SDK-001): Establecimiento del SDK como Fuente Única de Verdad (SSOT) para contratos de herramientas (`AgentTool`, `ToolResult`, `RiskLevel`, `ToolType`) y plugins (`BasePlugin`, `BaseEngine`). `app.models.tools.AgentTool` hereda directamente de `jg_sdk.contracts.AgentTool` añadiendo únicamente el adaptador de LangChain (`as_langchain_tool`). Eliminada la duplicidad de 240 líneas de código.
 - Razonamiento Iterativo Proactivo y Gobernanza HITL Multi-Paso:
