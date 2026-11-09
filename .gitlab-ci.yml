@@ -1,5 +1,4 @@
 stages:
-  - mirror
   - lint
   - test
   - build
@@ -124,8 +123,7 @@ build:docker:
 # ==========================================
 
 sync_to_github:
-  stage: mirror
-  needs: []
+  stage: deploy
   image:
     name: alpine/git:latest
     entrypoint: [""]

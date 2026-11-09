@@ -1,9 +1,22 @@
 > ⚠️ **Nota:** Este repositorio es un *mirror* público sincronizado automáticamente desde [GitLab](https://gitlab.com/javiergalvez-ia). El desarrollo activo, pipelines CI/CD, *issues* y discusiones técnicas se gestionan en https://gitlab.com/javiergalvez-ia
 
-# jg_agente
+<div align="center">
 
-**Enterprise Cognitive Agent Runtime for Private & Secure Environments**  
-*Motor Autónomo de Ejecución Cognitiva, Gobernanza HITL y Reversibilidad Transaccional*.
+# 🤖 `jg_agente`
+
+### Enterprise Cognitive Agent Runtime for Private & Secure Environments
+*Motor Autónomo de Ejecución Cognitiva, Gobernanza HITL y Reversibilidad Transaccional*
+
+[![GitLab CI/CD](https://img.shields.io/badge/GitLab_CI-Pipeline_Passing-108548?style=flat-square&logo=gitlab&logoColor=white)](https://gitlab.com/javiergalvez-ia/jg_agente)
+[![Mirror to GitHub](https://img.shields.io/badge/GitHub-Mirror_Active-181717?style=flat-square&logo=github&logoColor=white)](https://github.com/cabocom/jg_agente)
+[![Python](https://img.shields.io/badge/Python-3.12%2B-blue?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/Framework-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![LangGraph](https://img.shields.io/badge/Orchestrator-LangGraph-FF4F00?style=flat-square&logo=diagram-next&logoColor=white)](https://github.com/langchain-ai/langgraph)
+[![Security Guard](https://img.shields.io/badge/Security-SSRF_%26_DNS_Pinning-crimson?style=flat-square&logo=shield&logoColor=white)](#1-visión-general-y-propósito)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json&style=flat-square)](https://github.com/astral-sh/ruff)
+[![Architecture](https://img.shields.io/badge/Architecture-Clean_%26_Hexagonal-blueviolet?style=flat-square)](#1-visión-general-y-propósito)
+
+</div>
 
 ---
 
