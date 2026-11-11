@@ -64,6 +64,16 @@
 5. **Seguridad por Diseño (Security First):**
    Toda invocación a herramientas pasa por el `SecurityGuard` del Core, que verifica permisos, niveles de riesgo (`RiskLevel`), sanitización universal recursiva contra inyección de comandos shell y directory traversal (independiente de la clave o profundidad de anidación), directivas SSRF y políticas HITL antes de la ejecución.
 
+6. **Arquitectura en Capas SOLID y Desacoplamiento de Servicios (`app/services/`):**
+   Los routers FastAPI (`app/api/`) actúan exclusivamente como adaptadores HTTP delgados (<300 LOC), delegando la lógica de negocio y persistencia a servicios especializados:
+   - `execution_orchestrator.py`: Inicialización de estado y ejecución de pipelines cognitivos en LangGraph.
+   - `hitl_resume_service.py`: Reanudación y resolución de flujos HITL (`Command(resume=...)`).
+   - `hitl_interrupt_service.py`: Captura y serialización de pasos cognitivos en pausas operacionales.
+   - `execution_persistence_service.py`: Persistencia transaccional en PostgreSQL con reintentos exponenciales y spooling de emergencia en disco local.
+   - `execution_query_service.py`: Consulta y armonización de estado entre el checkpointer de LangGraph y la BD relacional.
+   - `execution_notification_service.py`: Emisión de webhooks con autenticación de agente y trazabilidad distribuida.
+   - `background_execution_service.py`: Gestión de ejecuciones asíncronas de fondo mediante BackgroundTasks.
+
 ---
 
 ## 3. Matriz de Responsabilidades

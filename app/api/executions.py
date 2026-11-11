@@ -5,35 +5,18 @@
 # Project URL: https://javiergalvez.com | https://gitlab.com/javiergalvez-ia/jg_agente
 # ==============================================================================
 
-"""Endpoints REST para el control y disparo de ejecuciones cognitivas en jg_agente."""
+"""Controlador REST y adaptador HTTP para el ciclo de vida de ejecuciones cognitivas."""
 
-import asyncio
-import contextlib
-import json
 import logging
-import time
-from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
-import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
-from fastapi.encoders import jsonable_encoder
-from langchain_core.messages import HumanMessage
-from langgraph.errors import GraphInterrupt
-from sqlalchemy import select
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import __version__
-from app.core.checkpointer import get_checkpointer
-from app.core.config import settings
 from app.core.correlation import get_correlation_id
-from app.core.graph import GraphBuilder
-from app.core.llm import get_chat_model
-from app.core.registry import CapabilityRegistry
 from app.db.exceptions import PersistenceError
-from app.db.models import CoreExecution
-from app.db.session import async_session_factory, get_async_session
+from app.db.session import get_async_session
 from app.models.io import (
     AgentInput,
     AgentOutput,
@@ -43,21 +26,37 @@ from app.models.io import (
     PersistenceMetadata,
     PersistenceStatus,
 )
-from app.models.state import (
-    AgentExecutionStatus,
-    AgentState,
-    ApprovalStatus,
-    resolve_caller_permissions,
-)
 from app.security.auth import verify_control_plane_auth
-from app.security.guard import SecurityGuard
+from app.services.background_execution_service import (
+    run_in_background,
+)
+from app.services.execution_notification_service import (
+    get_agent_credentials as _get_agent_credentials,
+)
+from app.services.execution_notification_service import (
+    notify_execution_completion,
+)
+from app.services.execution_orchestrator import (
+    execute_graph_pipeline,
+    get_agent_graph,
+)
+from app.services.execution_persistence_service import (
+    persist_or_update_execution as _persist_or_update_execution,
+)
+from app.services.execution_persistence_service import (
+    persist_with_retry as _persist_with_retry,
+)
+from app.services.execution_persistence_service import (
+    spool_emergency_execution as _spool_emergency_execution,
+)
+from app.services.execution_query_service import (
+    get_execution_thread_detail,
+)
+from app.services.hitl_resume_service import (
+    resolve_hitl_execution as _resolve_hitl_execution,
+)
 
 logger = logging.getLogger("jg_agente.api.executions")
-
-GENERIC_EXECUTION_ERROR_MSG = (
-    "Error interno durante la ejecución del agente (ID de incidencia: {execution_id}). "
-    "Por favor, consulte los registros del sistema."
-)
 
 router = APIRouter(
     prefix="/executions",
@@ -66,773 +65,8 @@ router = APIRouter(
 )
 
 
-def get_agent_graph(request: Request) -> Any:
-    """Obtiene o ensambla el grafo compilado del agente a partir de app.state."""
-    app_state = request.app.state
-    if hasattr(app_state, "agent_graph") and app_state.agent_graph is not None:
-        return app_state.agent_graph
-
-    registry: CapabilityRegistry = getattr(app_state, "registry", None) or CapabilityRegistry()
-    checkpointer = getattr(app_state, "checkpointer", None) or get_checkpointer()
-    llm = getattr(app_state, "llm", None) or get_chat_model()
-    security_guard = getattr(app_state, "security_guard", None) or SecurityGuard()
-
-    builder = GraphBuilder(
-        registry=registry,
-        llm=llm,
-        security_guard=security_guard,
-    )
-    graph = builder.build(checkpointer=checkpointer)
-    app_state.agent_graph = graph
-    return graph
-
-
-async def _persist_or_update_execution(
-    db: AsyncSession,
-    input_data: AgentInput,
-    status_val: str = "in_progress",
-    response_text: str | None = None,
-    data_payload: dict[str, Any] | None = None,
-    execution_time_ms: float = 0.0,
-    requires_approval: bool = False,
-    pending_approval_id: str | None = None,
-    error_msg: str | None = None,
-    completed_at: datetime | None = None,
-) -> CoreExecution:
-    """Crea o actualiza el registro de la ejecución en la tabla core_executions de forma transaccional."""
-    try:
-        query = select(CoreExecution).where(CoreExecution.execution_id == input_data.execution_id)
-        result = await db.execute(query)
-        record = result.scalars().first()
-
-        user_ctx_dict = (
-            input_data.user_context.model_dump()
-            if input_data.user_context and hasattr(input_data.user_context, "model_dump")
-            else (input_data.user_context if isinstance(input_data.user_context, dict) else None)
-        )
-
-        safe_data = (
-            json.loads(json.dumps(data_payload, default=str)) if data_payload is not None else None
-        )
-        safe_params = (
-            json.loads(json.dumps(input_data.parameters, default=str))
-            if input_data.parameters is not None
-            else None
-        )
-        safe_meta = (
-            json.loads(json.dumps(input_data.metadata, default=str))
-            if input_data.metadata is not None
-            else None
-        )
-
-        if record is None:
-            record = CoreExecution(
-                execution_id=input_data.execution_id,
-                thread_id=input_data.thread_id,
-                status=status_val,
-                prompt=input_data.prompt,
-                response=response_text,
-                parameters=safe_params,
-                data=safe_data,
-                user_context=user_ctx_dict,
-                execution_time_ms=execution_time_ms,
-                requires_approval=requires_approval,
-                pending_approval_id=pending_approval_id,
-                error=error_msg,
-                metadata_=safe_meta,
-                created_at=input_data.created_at,
-                completed_at=completed_at,
-            )
-            db.add(record)
-        else:
-            record.status = status_val
-            if response_text is not None:
-                record.response = response_text
-            if data_payload is not None:
-                record.data = safe_data
-            if execution_time_ms > 0:
-                record.execution_time_ms = execution_time_ms
-            record.requires_approval = requires_approval
-            if pending_approval_id is not None:
-                record.pending_approval_id = pending_approval_id
-            if error_msg is not None:
-                record.error = error_msg
-            if completed_at is not None:
-                record.completed_at = completed_at
-
-        await db.commit()
-        await db.refresh(record)
-        return record
-    except Exception as exc:
-        with contextlib.suppress(Exception):
-            await db.rollback()
-        logger.error(
-            "Fallo crítico al persistir ejecución '%s' en core_executions: %s",
-            input_data.execution_id,
-            exc,
-            exc_info=True,
-        )
-        raise PersistenceError(
-            f"Fallo en persistencia de ejecución {input_data.execution_id}: {exc}",
-            original_error=exc,
-        ) from exc
-
-
-def _spool_emergency_execution(
-    execution_id: str,
-    payload: dict[str, Any],
-) -> Path | None:
-    """Almacena el estado/salida de la ejecución en disco local ante caída irrecuperable de PostgreSQL."""
-    try:
-        spool_dir = Path(settings.EMERGENCY_PERSISTENCE_DIR)
-        spool_dir.mkdir(parents=True, exist_ok=True)
-        target_file = spool_dir / f"{execution_id}.json"
-        target_file.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
-        logger.warning(
-            "Respaldo de emergencia escrito en '%s' para ejecución '%s'",
-            target_file,
-            execution_id,
-        )
-        return target_file
-    except Exception as spool_err:
-        logger.critical(
-            "Fallo crítico: No se pudo escribir el respaldo de emergencia en disco para '%s': %s",
-            execution_id,
-            spool_err,
-            exc_info=True,
-        )
-        return None
-
-
-async def _persist_with_retry(
-    input_data: AgentInput,
-    status_val: str = "in_progress",
-    response_text: str | None = None,
-    data_payload: dict[str, Any] | None = None,
-    execution_time_ms: float = 0.0,
-    requires_approval: bool = False,
-    pending_approval_id: str | None = None,
-    error_msg: str | None = None,
-    completed_at: datetime | None = None,
-    max_retries: int | None = None,
-    backoff_base: float | None = None,
-) -> CoreExecution:
-    """Persiste o actualiza la ejecución en core_executions aplicando reintentos exponenciales.
-
-    Cada intento utiliza una sesión asíncrona nueva obtenida de async_session_factory()
-    para prevenir contaminación de estado ante fallos de conexión o rollback.
-    """
-    retries = max_retries if max_retries is not None else settings.PERSISTENCE_MAX_RETRIES
-    backoff = (
-        backoff_base if backoff_base is not None else settings.PERSISTENCE_RETRY_BACKOFF_SECONDS
-    )
-    last_err: Exception | None = None
-
-    for attempt in range(retries):
-        try:
-            async with async_session_factory() as db:
-                return await _persist_or_update_execution(
-                    db,
-                    input_data=input_data,
-                    status_val=status_val,
-                    response_text=response_text,
-                    data_payload=data_payload,
-                    execution_time_ms=execution_time_ms,
-                    requires_approval=requires_approval,
-                    pending_approval_id=pending_approval_id,
-                    error_msg=error_msg,
-                    completed_at=completed_at,
-                )
-        except Exception as exc:
-            last_err = exc
-            if attempt < retries - 1:
-                wait_time = backoff * (2**attempt)
-                logger.warning(
-                    "Fallo transitorio al persistir ejecución '%s' en intento %d/%d: %s. Reintentando en %.2fs...",
-                    input_data.execution_id,
-                    attempt + 1,
-                    retries,
-                    exc,
-                    wait_time,
-                )
-                await asyncio.sleep(wait_time)
-            else:
-                logger.error(
-                    "Agotados los %d intentos de persistencia para ejecución '%s'. Fallo fatal: %s",
-                    retries,
-                    input_data.execution_id,
-                    exc,
-                    exc_info=True,
-                )
-
-    raise PersistenceError(
-        f"Fallo irrecuperable tras {retries} reintentos al persistir ejecución '{input_data.execution_id}': {last_err}",
-        original_error=last_err,
-    )
-
-
-async def execute_graph_pipeline(
-    graph: Any,
-    input_data: AgentInput,
-) -> AgentOutput:
-    """Ejecuta el ciclo del grafo LangGraph con captura de pausas HITL y finalización."""
-    start_time = time.perf_counter()
-    thread_id = input_data.thread_id
-    cid = (
-        input_data.correlation_id
-        or (
-            input_data.metadata.get("correlation_id")
-            if isinstance(input_data.metadata, dict)
-            else None
-        )
-        or get_correlation_id()
-    )
-    config = {"configurable": {"thread_id": thread_id, "correlation_id": cid}}
-
-    initial_state: AgentState = {
-        "request": input_data,
-        "correlation_id": cid,
-        "caller_permissions": resolve_caller_permissions({"request": input_data}),
-        "messages": [HumanMessage(content=input_data.prompt)],
-        "status": AgentExecutionStatus.OBSERVING,
-        "current_step": 0,
-        "retry_count": 0,
-        "circuit_breaker_active": False,
-        "checkpoint_degraded": bool(
-            getattr(getattr(graph, "checkpointer", None), "is_degraded", False)
-        ),
-        "human_intervention_required": False,
-        "requires_approval": False,
-        "is_resolved": False,
-        "stop_reason": None,
-        "errors": [],
-        "execution_records": [],
-        "cognitive_steps": [],
-        "audit_trail": [],
-        "verification_results": [],
-        "rollback_records": [],
-    }
-
-    try:
-        # Ejecutar grafo síncronamente hasta END o interrupción
-        final_state = await graph.ainvoke(initial_state, config=config)
-        elapsed_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
-
-        # Si LangGraph retornó interrupción (HITL pause)
-        if isinstance(final_state, dict) and "__interrupt__" in final_state:
-            interrupt_items = final_state["__interrupt__"]
-            interrupt_value = (
-                interrupt_items[0].value
-                if interrupt_items and hasattr(interrupt_items[0], "value")
-                else (interrupt_items[0] if interrupt_items else {})
-            )
-            pending_id = (
-                interrupt_value.get("action")
-                if isinstance(interrupt_value, dict)
-                else "human_approval_required"
-            )
-            message = (
-                interrupt_value.get("message")
-                if isinstance(interrupt_value, dict)
-                else "Operación de alto riesgo requiere aprobación humana."
-            )
-
-            # Recuperar saltos cognitivos previos acumulados en el checkpoint
-            snapshot_steps: list[dict[str, Any]] = []
-            try:
-                state_snapshot = await graph.aget_state(config)
-                if state_snapshot and state_snapshot.values:
-                    existing_cog_steps = state_snapshot.values.get("cognitive_steps") or []
-                    for step_item in existing_cog_steps:
-                        if hasattr(step_item, "model_dump"):
-                            snapshot_steps.append(step_item.model_dump(mode="json"))
-                        elif isinstance(step_item, dict):
-                            snapshot_steps.append(step_item)
-            except Exception as snap_err:
-                logger.warning(
-                    "No se pudo obtener snapshot de estado en interrupción HITL: %s", snap_err
-                )
-
-            # Salto cognitivo para el paso de human_approval en espera
-            approval_step = {
-                "step_id": f"cog_approval_{int(time.time() * 1000)}",
-                "node": "human_approval",
-                "title": "Control de Aprobación Humana (HITL)",
-                "action": "Pausa de Seguridad Operacional",
-                "description": (
-                    "Operación de alto riesgo detenida. Requiere autorización humana explícita "
-                    "desde el panel de control para continuar."
-                ),
-                "status": "waiting_approval",
-                "details": interrupt_value if isinstance(interrupt_value, dict) else {},
-                "duration_ms": 0.0,
-                "timestamp": datetime.now(UTC).isoformat(),
-            }
-            snapshot_steps.append(approval_step)
-
-            data_payload = (
-                dict(interrupt_value)
-                if isinstance(interrupt_value, dict)
-                else {"details": str(interrupt_value)}
-            )
-            data_payload["cognitive_steps"] = snapshot_steps
-            data_payload["steps"] = snapshot_steps
-
-            agent_output = AgentOutput(
-                execution_id=input_data.execution_id,
-                thread_id=thread_id,
-                status=ExecutionStatus.WAITING_APPROVAL,
-                response=str(message),
-                data=data_payload,
-                execution_time_ms=elapsed_ms,
-                requires_approval=True,
-                pending_approval_id=str(pending_id),
-                metadata=input_data.metadata,
-                completed_at=datetime.now(UTC),
-            )
-            try:
-                await _persist_with_retry(
-                    input_data=input_data,
-                    status_val=ExecutionStatus.WAITING_APPROVAL.value,
-                    response_text=agent_output.response,
-                    data_payload=agent_output.data,
-                    execution_time_ms=agent_output.execution_time_ms,
-                    requires_approval=True,
-                    pending_approval_id=agent_output.pending_approval_id,
-                )
-                agent_output.metadata["persistence"] = PersistenceMetadata(
-                    status=PersistenceStatus.PERSISTED,
-                    persisted=True,
-                ).model_dump()
-            except (PersistenceError, Exception) as db_err:
-                _spool_emergency_execution(
-                    input_data.execution_id, agent_output.model_dump(mode="json")
-                )
-                logger.error(
-                    "Fallo irrecuperable al actualizar DB tras HITL pause en '%s': %s",
-                    input_data.execution_id,
-                    db_err,
-                    exc_info=True,
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Fallo crítico de persistencia en pausa HITL para '{input_data.execution_id}'.",
-                ) from db_err
-
-            return agent_output
-
-        raw_output = final_state.get("output")
-        if isinstance(raw_output, AgentOutput):
-            agent_output = raw_output
-        elif isinstance(raw_output, dict):
-            agent_output = AgentOutput(**raw_output)
-        else:
-            is_resolved = final_state.get("is_resolved", True)
-            agent_output = AgentOutput(
-                execution_id=input_data.execution_id,
-                thread_id=thread_id,
-                status=ExecutionStatus.COMPLETED if is_resolved else ExecutionStatus.FAILED,
-                response="Ejecución finalizada con éxito."
-                if is_resolved
-                else "Ejecución finalizada con fallos.",
-                execution_time_ms=elapsed_ms,
-                requires_approval=bool(final_state.get("human_intervention_required")),
-                metadata=input_data.metadata,
-                completed_at=datetime.now(UTC),
-            )
-
-        # Actualizar persistencia en DB
-        try:
-            await _persist_with_retry(
-                input_data=input_data,
-                status_val=agent_output.status.value,
-                response_text=agent_output.response,
-                data_payload=agent_output.data,
-                execution_time_ms=agent_output.execution_time_ms,
-                requires_approval=agent_output.requires_approval,
-                pending_approval_id=agent_output.pending_approval_id,
-                error_msg=agent_output.error,
-                completed_at=agent_output.completed_at,
-            )
-            agent_output.metadata["persistence"] = PersistenceMetadata(
-                status=PersistenceStatus.PERSISTED,
-                persisted=True,
-            ).model_dump()
-        except (PersistenceError, Exception) as db_err:
-            _spool_emergency_execution(
-                input_data.execution_id, agent_output.model_dump(mode="json")
-            )
-            logger.error(
-                "Fallo irrecuperable al actualizar DB tras finalización en '%s': %s",
-                input_data.execution_id,
-                db_err,
-                exc_info=True,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Fallo crítico de persistencia tras finalización para '{input_data.execution_id}'.",
-            ) from db_err
-
-        if cid:
-            agent_output.correlation_id = cid
-            if "correlation_id" not in agent_output.metadata:
-                agent_output.metadata["correlation_id"] = cid
-
-        return agent_output
-
-    except GraphInterrupt as interrupt_ex:
-        # El grafo fue pausado deliberadamente por el nodo human_approval (HITL)
-        elapsed_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
-        interrupt_value = interrupt_ex.args[0] if interrupt_ex.args else {}
-        if isinstance(interrupt_value, list) and interrupt_value:
-            interrupt_value = (
-                interrupt_value[0].value
-                if hasattr(interrupt_value[0], "value")
-                else interrupt_value[0]
-            )
-
-        logger.info(
-            "Grafo pausado por interrupción HITL en thread '%s': %s",
-            thread_id,
-            interrupt_value,
-        )
-
-        pending_id = (
-            interrupt_value.get("action")
-            if isinstance(interrupt_value, dict)
-            else "human_approval_required"
-        )
-        message = (
-            interrupt_value.get("message")
-            if isinstance(interrupt_value, dict)
-            else "Operación de alto riesgo requiere aprobación humana."
-        )
-
-        agent_output = AgentOutput(
-            execution_id=input_data.execution_id,
-            thread_id=thread_id,
-            status=ExecutionStatus.WAITING_APPROVAL,
-            response=str(message),
-            data=interrupt_value
-            if isinstance(interrupt_value, dict)
-            else {"details": str(interrupt_value)},
-            execution_time_ms=elapsed_ms,
-            requires_approval=True,
-            pending_approval_id=str(pending_id),
-            metadata=input_data.metadata,
-            completed_at=datetime.now(UTC),
-        )
-
-        try:
-            await _persist_with_retry(
-                input_data=input_data,
-                status_val=ExecutionStatus.WAITING_APPROVAL.value,
-                response_text=agent_output.response,
-                data_payload=agent_output.data,
-                execution_time_ms=agent_output.execution_time_ms,
-                requires_approval=True,
-                pending_approval_id=agent_output.pending_approval_id,
-            )
-            agent_output.metadata["persistence"] = PersistenceMetadata(
-                status=PersistenceStatus.PERSISTED,
-                persisted=True,
-            ).model_dump()
-        except (PersistenceError, Exception) as db_err:
-            _spool_emergency_execution(
-                input_data.execution_id, agent_output.model_dump(mode="json")
-            )
-            logger.error(
-                "Fallo irrecuperable al actualizar DB tras HITL pause en '%s': %s",
-                input_data.execution_id,
-                db_err,
-                exc_info=True,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Fallo crítico de persistencia en interrupción HITL para '{input_data.execution_id}'.",
-            ) from db_err
-
-        if cid:
-            agent_output.correlation_id = cid
-            if "correlation_id" not in agent_output.metadata:
-                agent_output.metadata["correlation_id"] = cid
-
-        return agent_output
-
-    except HTTPException:
-        raise
-    except Exception as exc:
-        elapsed_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
-        logger.exception("Error no controlado durante la ejecución del grafo: %s", exc)
-        agent_output = AgentOutput(
-            execution_id=input_data.execution_id,
-            thread_id=thread_id,
-            status=ExecutionStatus.FAILED,
-            response=GENERIC_EXECUTION_ERROR_MSG.format(execution_id=input_data.execution_id),
-            execution_time_ms=elapsed_ms,
-            error=f"InternalExecutionError: Incidencia registrada con ID {input_data.execution_id}",
-            requires_approval=False,
-            metadata=input_data.metadata,
-            completed_at=datetime.now(UTC),
-        )
-
-        try:
-            await _persist_with_retry(
-                input_data=input_data,
-                status_val=ExecutionStatus.FAILED.value,
-                response_text=agent_output.response,
-                execution_time_ms=agent_output.execution_time_ms,
-                error_msg=str(exc),
-                completed_at=datetime.now(UTC),
-            )
-            agent_output.metadata["persistence"] = PersistenceMetadata(
-                status=PersistenceStatus.PERSISTED,
-                persisted=True,
-            ).model_dump()
-        except (PersistenceError, Exception) as db_err:
-            _spool_emergency_execution(
-                input_data.execution_id, agent_output.model_dump(mode="json")
-            )
-            logger.error(
-                "Fallo irrecuperable de persistencia al registrar fallo no controlado en '%s': %s",
-                input_data.execution_id,
-                db_err,
-                exc_info=True,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Fallo crítico de persistencia al registrar fallo no controlado en '{input_data.execution_id}'.",
-            ) from db_err
-
-        if cid:
-            agent_output.correlation_id = cid
-            if "correlation_id" not in agent_output.metadata:
-                agent_output.metadata["correlation_id"] = cid
-
-        return agent_output
-
-
-def _get_agent_credentials() -> tuple[str, str | None]:
-    """Obtiene el identificador y secreto del agente para autenticación contra el Control Plane."""
-    agent_id = settings.AGENT_ID
-    secret = settings.PERMANENT_AGENT_SECRET
-    if not secret:
-        from app.core.registration import CredentialStore
-
-        creds = CredentialStore.load(settings.CREDENTIALS_FILE)
-        if creds:
-            agent_id = creds.agent_id or agent_id
-            secret = creds.permanent_secret or secret
-    return agent_id, secret
-
-
-async def notify_execution_completion(
-    output: AgentOutput,
-    callback_url: str | None = None,
-) -> bool:
-    """Envía notificación webhook hacia el Dashboard o URL de callback tras la finalización asíncrona."""
-    target_url = (
-        callback_url
-        or f"{settings.DASHBOARD_URL.rstrip('/')}/api/v1/internal/executions/{output.execution_id}/complete"
-    )
-    fallback_url = (
-        f"{settings.DASHBOARD_URL.rstrip('/')}/api/internal/executions/{output.execution_id}/complete"
-        if not callback_url
-        else None
-    )
-
-    agent_id, secret = _get_agent_credentials()
-    cid = output.correlation_id or get_correlation_id() or ""
-
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "User-Agent": f"jg_agente/{__version__}",
-        "X-Correlation-ID": cid,
-    }
-    if agent_id:
-        headers["X-Agent-ID"] = agent_id
-    if secret:
-        headers["Authorization"] = f"Bearer {secret}"
-        headers["X-Agent-Secret"] = secret
-
-    status_str = output.status.value if hasattr(output.status, "value") else str(output.status)
-    payload = {
-        "execution_id": output.execution_id,
-        "thread_id": output.thread_id,
-        "correlation_id": cid,
-        "status": status_str,
-        "response": output.response,
-        "output": output.response,
-        "data": output.data,
-        "execution_time_ms": output.execution_time_ms,
-        "requires_approval": output.requires_approval,
-        "pending_approval_id": output.pending_approval_id,
-        "metadata": output.metadata,
-        "completed_at": (
-            output.completed_at.isoformat()
-            if output.completed_at
-            else datetime.now(UTC).isoformat()
-        ),
-    }
-    payload = jsonable_encoder(payload)
-
-    timeout = getattr(settings, "EXECUTION_CALLBACK_TIMEOUT_SECONDS", 5.0)
-    max_retries = getattr(settings, "EXECUTION_CALLBACK_MAX_RETRIES", 3)
-
-    for attempt in range(max_retries):
-        try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(target_url, json=payload, headers=headers)
-                if resp.status_code == 404 and fallback_url and target_url != fallback_url:
-                    resp = await client.post(fallback_url, json=payload, headers=headers)
-
-                if resp.is_success:
-                    logger.info(
-                        "Notificación webhook entregada con éxito a '%s' (Status: %d, execution_id: %s).",
-                        target_url,
-                        resp.status_code,
-                        output.execution_id,
-                    )
-                    return True
-
-                if 400 <= resp.status_code < 500:
-                    logger.warning(
-                        "Notificación webhook rechazada con código de cliente %d en '%s': %s",
-                        resp.status_code,
-                        target_url,
-                        resp.text,
-                    )
-                    return False
-
-                logger.warning(
-                    "Intento %d/%d de notificación webhook a '%s' devolvió código %d: %s",
-                    attempt + 1,
-                    max_retries,
-                    target_url,
-                    resp.status_code,
-                    resp.text,
-                )
-        except httpx.RequestError as req_err:
-            logger.warning(
-                "Error de red en intento %d/%d al notificar webhook en '%s': %s",
-                attempt + 1,
-                max_retries,
-                target_url,
-                req_err,
-            )
-        except Exception as err:
-            logger.warning(
-                "Error inesperado al emitir notificación webhook a '%s': %s",
-                target_url,
-                err,
-            )
-            return False
-
-        if attempt < max_retries - 1:
-            await asyncio.sleep(0.5 * (2**attempt))
-
-    logger.error(
-        "Se agotaron los %d reintentos para entregar webhook de '%s' a '%s'.",
-        max_retries,
-        output.execution_id,
-        target_url,
-    )
-    return False
-
-
-async def run_in_background(
-    graph: Any,
-    input_data: AgentInput,
-) -> None:
-    """Función de soporte para ejecución asíncrona delegada en BackgroundTasks con webhook."""
-    callback_url = (
-        getattr(input_data, "callback_url", None)
-        or (
-            input_data.parameters.get("callback_url")
-            if isinstance(input_data.parameters, dict)
-            else None
-        )
-        or (
-            input_data.parameters.get("webhook_url")
-            if isinstance(input_data.parameters, dict)
-            else None
-        )
-        or (
-            input_data.metadata.get("callback_url")
-            if isinstance(input_data.metadata, dict)
-            else None
-        )
-        or (
-            input_data.metadata.get("webhook_url")
-            if isinstance(input_data.metadata, dict)
-            else None
-        )
-    )
-
-    agent_output: AgentOutput | None = None
-    try:
-        agent_output = await execute_graph_pipeline(graph, input_data)
-    except Exception as exc:
-        logger.error(
-            "Fallo en ejecución en segundo plano '%s': %s",
-            input_data.execution_id,
-            exc,
-            exc_info=True,
-        )
-        agent_output = AgentOutput(
-            execution_id=input_data.execution_id,
-            thread_id=input_data.thread_id,
-            correlation_id=input_data.correlation_id,
-            status=ExecutionStatus.FAILED,
-            response=f"Error durante ejecución en segundo plano: {exc}",
-            data={"error": str(exc), "error_type": type(exc).__name__},
-            execution_time_ms=0.0,
-            completed_at=datetime.now(UTC),
-            metadata=input_data.metadata,
-        )
-    finally:
-        if agent_output is not None:
-            try:
-                await notify_execution_completion(agent_output, callback_url=callback_url)
-            except Exception as notify_err:
-                logger.warning(
-                    "Error no controlado al notificar webhook de '%s': %s",
-                    input_data.execution_id,
-                    notify_err,
-                )
-
-
-@router.post(
-    "/trigger",
-    response_model=AgentOutput,
-    status_code=status.HTTP_200_OK,
-    summary="Disparar o continuar la ejecución del grafo cognitivo",
-    description=(
-        "Recibe un payload formal AgentInput, inicia o reanuda la ejecución del grafo LangGraph "
-        "y devuelve AgentOutput con el resultado final o el estado de espera (HITL). "
-        "Permite ejecución síncrona (200 OK) o asíncrona (202 Accepted)."
-    ),
-    responses={
-        200: {
-            "description": "Ejecución completada con éxito o pausada en espera de aprobación humana (HITL)."
-        },
-        202: {"description": "Ejecución encolada en segundo plano de forma asíncrona."},
-        422: {"description": "Payload de entrada AgentInput no válido."},
-    },
-)
-async def trigger_execution(
-    input_data: AgentInput,
-    request: Request,
-    background_tasks: BackgroundTasks,
-    sync: bool = Query(
-        default=True,
-        description="Si es False, inicia la ejecución en segundo plano y responde HTTP 202 Accepted.",
-    ),
-    graph: Any = Depends(get_agent_graph),
-) -> Any:
-    """Punto de entrada principal para la ejecución de agentes en jg_agente."""
-    # 0. Sincronizar e inyectar correlation_id
+def _sync_correlation_id(input_data: AgentInput) -> str | None:
+    """Sincroniza el correlation_id entre el contexto de traza y el payload."""
     cid = (
         get_correlation_id()
         or input_data.correlation_id
@@ -846,8 +80,11 @@ async def trigger_execution(
         input_data.correlation_id = cid
         if "correlation_id" not in input_data.metadata:
             input_data.metadata["correlation_id"] = cid
+    return cid
 
-    # 1. Registrar o asegurar registro inicial en DB
+
+async def _record_initial_state(input_data: AgentInput) -> None:
+    """Registra el estado inicial de la ejecución en base de datos o spool de emergencia."""
     try:
         await _persist_with_retry(
             input_data=input_data,
@@ -860,27 +97,47 @@ async def trigger_execution(
     except (PersistenceError, Exception) as p_err:
         _spool_emergency_execution(input_data.execution_id, input_data.model_dump(mode="json"))
         logger.error(
-            "Fallo irrecuperable de persistencia al registrar inicio de ejecución '%s': %s",
+            "Fallo de persistencia al registrar inicio de ejecución '%s': %s",
             input_data.execution_id,
             p_err,
             exc_info=True,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Fallo crítico de persistencia: no se pudo registrar la ejecución '{input_data.execution_id}' en la base de datos.",
+            detail=f"Fallo crítico de persistencia al registrar ejecución '{input_data.execution_id}'.",
         ) from p_err
 
-    # 2. Flujo Asíncrono (sync=False o indicado en parámetros)
+
+@router.post(
+    "/trigger",
+    response_model=AgentOutput,
+    status_code=status.HTTP_200_OK,
+    summary="Disparar o continuar la ejecución del grafo cognitivo",
+    description="Inicia o continúa la ejecución del grafo LangGraph de forma síncrona o asíncrona.",
+    responses={
+        200: {"description": "Ejecución completada o pausada en espera de HITL."},
+        202: {"description": "Ejecución encolada en segundo plano."},
+        422: {"description": "Payload no válido."},
+    },
+)
+async def trigger_execution(
+    input_data: AgentInput,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    sync: bool = Query(default=True, description="Si es False, responde HTTP 202 Accepted."),
+    graph: Any = Depends(get_agent_graph),
+) -> Any:
+    """Punto de entrada principal para la ejecución de agentes en jg_agente."""
+    cid = _sync_correlation_id(input_data)
+    await _record_initial_state(input_data)
+
     async_requested = (
         not sync
         or bool(input_data.parameters.get("async"))
         or bool(input_data.parameters.get("background"))
     )
-
     if async_requested:
         background_tasks.add_task(run_in_background, graph, input_data)
-        from fastapi.responses import JSONResponse
-
         accepted_output = AgentOutput(
             execution_id=input_data.execution_id,
             thread_id=input_data.thread_id,
@@ -894,9 +151,7 @@ async def trigger_execution(
             content=accepted_output.model_dump(mode="json"),
         )
 
-    # 4. Flujo Síncrono (por defecto)
-    output = await execute_graph_pipeline(graph, input_data)
-    return output
+    return await execute_graph_pipeline(graph, input_data)
 
 
 @router.get(
@@ -904,12 +159,9 @@ async def trigger_execution(
     response_model=ExecutionThreadDetail,
     status_code=status.HTTP_200_OK,
     summary="Consultar estado de una ejecución por thread_id",
-    description=(
-        "Recupera el estado operacional actual, historial de pasos ejecutados, evaluación de riesgos, "
-        "interrupciones HITL y errores acumulados del hilo de ejecución a partir del checkpointer y base de datos."
-    ),
+    description="Recupera el estado actual, historial y checkpoints del hilo de ejecución.",
     responses={
-        200: {"description": "Detalle del hilo de ejecución recuperado con éxito."},
+        200: {"description": "Detalle del hilo recuperado con éxito."},
         404: {"description": "Hilo de ejecución no encontrado."},
     },
 )
@@ -918,417 +170,8 @@ async def get_execution_by_thread_id(
     graph: Any = Depends(get_agent_graph),
     db: AsyncSession = Depends(get_async_session),
 ) -> ExecutionThreadDetail:
-    """Consulta el estado, historial y checkpoints de una sesión o hilo de ejecución."""
-    # 1. Consultar estado en el checkpointer del grafo LangGraph
-    state_snapshot: Any = None
-    try:
-        config = {"configurable": {"thread_id": thread_id}}
-        state_snapshot = await graph.aget_state(config)
-    except Exception as exc:
-        logger.warning(
-            "No se pudo consultar el estado en el checkpointer para thread '%s': %s",
-            thread_id,
-            exc,
-        )
-
-    # 2. Consultar persistencia relacional en core_executions
-    db_record: CoreExecution | None = None
-    try:
-        query = (
-            select(CoreExecution)
-            .where(CoreExecution.thread_id == thread_id)
-            .order_by(CoreExecution.created_at.desc())
-        )
-        res = await db.execute(query)
-        db_record = res.scalars().first()
-    except Exception as db_err:
-        logger.warning(
-            "No se pudo consultar el registro en core_executions para thread '%s': %s",
-            thread_id,
-            db_err,
-        )
-
-    # 3. Si no existe en checkpointer ni en base de datos, responder 404
-    has_checkpoint = state_snapshot is not None and bool(getattr(state_snapshot, "values", None))
-    if not has_checkpoint and db_record is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Hilo de ejecución '{thread_id}' no encontrado.",
-        )
-
-    vals: dict[str, Any] = state_snapshot.values if has_checkpoint else {}
-
-    # 4. Extraer y armonizar campos desde el snapshot y la BD
-    request_obj = vals.get("request")
-    output_obj = vals.get("output")
-
-    # Identificadores
-    execution_id: str | None = None
-    if request_obj and hasattr(request_obj, "execution_id"):
-        execution_id = str(request_obj.execution_id)
-    elif isinstance(request_obj, dict) and request_obj.get("execution_id"):
-        execution_id = str(request_obj["execution_id"])
-    elif db_record:
-        execution_id = db_record.execution_id
-
-    # Prompt
-    prompt: str | None = None
-    if request_obj and hasattr(request_obj, "prompt"):
-        prompt = str(request_obj.prompt)
-    elif isinstance(request_obj, dict) and request_obj.get("prompt"):
-        prompt = str(request_obj["prompt"])
-    elif db_record:
-        prompt = db_record.prompt
-
-    # Respuesta
-    response_text: str | None = None
-    if output_obj and hasattr(output_obj, "response"):
-        response_text = str(output_obj.response)
-    elif isinstance(output_obj, dict) and output_obj.get("response"):
-        response_text = str(output_obj["response"])
-    elif db_record:
-        response_text = db_record.response
-
-    # Nodos siguientes en LangGraph
-    next_nodes: list[str] = (
-        list(state_snapshot.next)
-        if state_snapshot and getattr(state_snapshot, "next", None)
-        else []
-    )
-
-    # Estado
-    raw_status = vals.get("status")
-    if next_nodes and ("human_approval" in next_nodes or "risk_assess" in next_nodes):
-        status_val: str = ExecutionStatus.WAITING_APPROVAL.value
-    elif raw_status:
-        status_val = raw_status.value if hasattr(raw_status, "value") else str(raw_status)
-        # Mapear estados operacionales a ExecutionStatus si es necesario
-        if status_val == AgentExecutionStatus.RESOLVED.value:
-            status_val = ExecutionStatus.COMPLETED.value
-        elif status_val == AgentExecutionStatus.AWAITING_APPROVAL.value:
-            status_val = ExecutionStatus.WAITING_APPROVAL.value
-    elif db_record:
-        status_val = db_record.status
-    else:
-        status_val = ExecutionStatus.IN_PROGRESS.value
-
-    # Plan
-    plan_obj = vals.get("plan")
-    plan_dict: dict[str, Any] | None = None
-    if plan_obj is not None:
-        if hasattr(plan_obj, "model_dump"):
-            plan_dict = plan_obj.model_dump(mode="json")
-        elif isinstance(plan_obj, dict):
-            plan_dict = plan_obj
-
-    # Pasos y saltos cognitivos
-    raw_cog_steps = (
-        vals.get("cognitive_steps")
-        or (
-            db_record.data.get("cognitive_steps")
-            if (db_record and isinstance(db_record.data, dict))
-            else None
-        )
-        or []
-    )
-    cog_steps_list: list[dict[str, Any]] = []
-    for rec in raw_cog_steps:
-        if hasattr(rec, "model_dump"):
-            item_dict = rec.model_dump(mode="json")
-        elif isinstance(rec, dict):
-            item_dict = dict(rec)
-        else:
-            item_dict = {"raw": str(rec)}
-        if (
-            status_val != ExecutionStatus.WAITING_APPROVAL.value
-            and item_dict.get("status") == "waiting_approval"
-        ):
-            item_dict["status"] = (
-                "failed" if status_val == ExecutionStatus.CANCELLED.value else "completed"
-            )
-        cog_steps_list.append(item_dict)
-
-    raw_exec_records = (
-        vals.get("execution_records")
-        or (
-            db_record.data.get("execution_records")
-            if (db_record and isinstance(db_record.data, dict))
-            else None
-        )
-        or []
-    )
-    exec_steps_list: list[dict[str, Any]] = []
-    for rec in raw_exec_records:
-        if hasattr(rec, "model_dump"):
-            exec_steps_list.append(rec.model_dump(mode="json"))
-        elif isinstance(rec, dict):
-            exec_steps_list.append(rec)
-        else:
-            exec_steps_list.append({"raw": str(rec)})
-
-    # steps_list unificado: prioriza la traza cognitiva completa
-    steps_list = cog_steps_list if cog_steps_list else exec_steps_list
-
-    # Gobernanza HITL
-    appr_obj = vals.get("approval")
-    approval_status_val: str | None = None
-    if appr_obj is not None:
-        if hasattr(appr_obj, "status"):
-            approval_status_val = (
-                appr_obj.status.value if hasattr(appr_obj.status, "value") else str(appr_obj.status)
-            )
-        elif isinstance(appr_obj, dict) and appr_obj.get("status"):
-            approval_status_val = str(appr_obj["status"])
-    elif status_val == ExecutionStatus.WAITING_APPROVAL.value:
-        approval_status_val = ApprovalStatus.PENDING.value
-
-    requires_approval: bool = bool(
-        vals.get("requires_approval")
-        or vals.get("human_intervention_required")
-        or (next_nodes and "human_approval" in next_nodes)
-        or (db_record and db_record.requires_approval)
-    )
-
-    pending_approval_id: str | None = (
-        str(vals.get("pending_approval_id"))
-        if vals.get("pending_approval_id")
-        else (db_record.pending_approval_id if db_record else None)
-    )
-    if requires_approval and not pending_approval_id:
-        pending_approval_id = "human_approval_required"
-
-    # Errores
-    raw_errors = vals.get("errors") or []
-    errors_list: list[dict[str, Any]] = []
-    for err in raw_errors:
-        if hasattr(err, "model_dump"):
-            errors_list.append(err.model_dump(mode="json"))
-        elif isinstance(err, dict):
-            errors_list.append(err)
-        else:
-            errors_list.append({"message": str(err)})
-    if not errors_list and db_record and db_record.error:
-        errors_list.append({"message": db_record.error, "code": "DB_RECORD_ERROR"})
-
-    # Checkpoint ID
-    checkpoint_id: str | None = None
-    if state_snapshot and getattr(state_snapshot, "config", None):
-        cfg = state_snapshot.config.get("configurable", {})
-        checkpoint_id = cfg.get("checkpoint_id")
-
-    # Metadatos
-    metadata: dict[str, Any] = (
-        dict(db_record.metadata_) if (db_record and db_record.metadata_) else {}
-    )
-    if request_obj and hasattr(request_obj, "metadata"):
-        metadata.update(request_obj.metadata)
-    elif isinstance(request_obj, dict) and "metadata" in request_obj:
-        metadata.update(request_obj["metadata"])
-
-    # Fechas
-    created_at = db_record.created_at if db_record else None
-    if created_at is None and request_obj and hasattr(request_obj, "created_at"):
-        created_at = request_obj.created_at
-
-    completed_at = db_record.completed_at if db_record else None
-    if completed_at is None and output_obj and hasattr(output_obj, "completed_at"):
-        completed_at = output_obj.completed_at
-
-    req_cid = getattr(request_obj, "correlation_id", None) if request_obj is not None else None
-    correlation_id: str | None = (
-        vals.get("correlation_id")
-        or req_cid
-        or (metadata.get("correlation_id") if isinstance(metadata, dict) else None)
-        or get_correlation_id()
-    )
-
-    return ExecutionThreadDetail(
-        thread_id=thread_id,
-        execution_id=execution_id,
-        correlation_id=correlation_id,
-        status=status_val,
-        prompt=prompt,
-        response=response_text,
-        current_step=int(vals.get("current_step", len(steps_list))),
-        next_nodes=next_nodes,
-        plan=plan_dict,
-        steps=steps_list,
-        cognitive_steps=cog_steps_list,
-        approval_status=approval_status_val,
-        requires_approval=requires_approval,
-        pending_approval_id=pending_approval_id,
-        errors=errors_list,
-        checkpoint_id=checkpoint_id,
-        metadata=metadata,
-        created_at=created_at,
-        completed_at=completed_at,
-    )
-
-
-async def _resolve_hitl_execution(
-    thread_id: str,
-    approved: bool,
-    payload: HITLResolutionRequest,
-    graph: Any,
-) -> AgentOutput:
-    """Reanuda o cancela una ejecución detenida en el nodo human_approval mediante Command(resume=...)."""
-    # 1. Validar existencia del hilo en el checkpointer
-    config = {"configurable": {"thread_id": thread_id}}
-    state_snapshot: Any = None
-    try:
-        state_snapshot = await graph.aget_state(config)
-    except Exception as exc:
-        logger.warning("Error al consultar checkpointer para thread '%s': %s", thread_id, exc)
-
-    if not state_snapshot or not getattr(state_snapshot, "values", None):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Hilo de ejecución '{thread_id}' no encontrado en el checkpointer.",
-        )
-
-    # 2. Validar que el hilo se encuentre en espera de aprobación
-    next_nodes: list[str] = (
-        list(state_snapshot.next) if getattr(state_snapshot, "next", None) else []
-    )
-    if not next_nodes:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"El hilo de ejecución '{thread_id}' ya ha finalizado y no requiere aprobación.",
-        )
-
-    if "human_approval" not in next_nodes and not getattr(state_snapshot, "tasks", None):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"El hilo de ejecución '{thread_id}' no se encuentra en estado de espera de aprobación "
-                f"(nodos siguientes: {next_nodes})."
-            ),
-        )
-
-    # 3. Construir el Command nativo de LangGraph con el payload de resume
-    from langgraph.types import Command
-
-    resume_payload: dict[str, Any] = {
-        "approved": approved,
-        "status": ApprovalStatus.APPROVED.value if approved else ApprovalStatus.REJECTED.value,
-        "approver": payload.approver,
-        "notes": payload.notes
-        or ("Aprobado por operador" if approved else "Rechazado por operador"),
-        "action": "approve" if approved else "reject",
-    }
-    command: Command[Any] = Command(resume=resume_payload)
-
-    # 4. Reanudar ejecución del grafo
-    start_time = time.perf_counter()
-    try:
-        final_state = await graph.ainvoke(command, config=config)
-    except GraphInterrupt:
-        elapsed_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
-        return AgentOutput(
-            execution_id=str(
-                state_snapshot.values.get("request", {}).execution_id
-                if hasattr(state_snapshot.values.get("request"), "execution_id")
-                else "exec-hitl"
-            ),
-            thread_id=thread_id,
-            status=ExecutionStatus.WAITING_APPROVAL,
-            response="Pausa HITL subsiguiente activada.",
-            execution_time_ms=elapsed_ms,
-            requires_approval=True,
-            pending_approval_id="human_approval_required",
-            completed_at=datetime.now(UTC),
-        )
-
-    elapsed_ms = round((time.perf_counter() - start_time) * 1000.0, 2)
-
-    # 5. Formatear AgentOutput resultante
-    raw_output = final_state.get("output")
-    agent_output: AgentOutput
-    if isinstance(raw_output, AgentOutput):
-        agent_output = raw_output
-    elif isinstance(raw_output, dict):
-        agent_output = AgentOutput(**raw_output)
-    else:
-        req_obj = final_state.get("request")
-        exec_id = getattr(req_obj, "execution_id", "exec-resumed") if req_obj else "exec-resumed"
-        out_status = ExecutionStatus.COMPLETED if approved else ExecutionStatus.CANCELLED
-        agent_output = AgentOutput(
-            execution_id=exec_id,
-            thread_id=thread_id,
-            status=out_status,
-            response=payload.notes
-            or (
-                "Ejecución completada tras aprobación."
-                if approved
-                else "Ejecución cancelada por rechazo de operador (HITL)."
-            ),
-            execution_time_ms=elapsed_ms,
-            requires_approval=False,
-            pending_approval_id=None,
-            completed_at=datetime.now(UTC),
-        )
-
-    agent_output.requires_approval = False
-    agent_output.pending_approval_id = None
-
-    if agent_output.data is None:
-        agent_output.data = {}
-    cog_steps = final_state.get("cognitive_steps") or []
-    formatted_steps: list[dict[str, Any]] = []
-    for s in cog_steps:
-        s_dict = s.model_dump(mode="json") if hasattr(s, "model_dump") else dict(s)
-        if s_dict.get("status") == "waiting_approval":
-            s_dict["status"] = "completed" if approved else "failed"
-        formatted_steps.append(s_dict)
-    agent_output.data["cognitive_steps"] = formatted_steps
-    agent_output.data["steps"] = formatted_steps
-
-    rejection_text = (
-        payload.notes or getattr(payload, "justification", None) or getattr(payload, "reason", None)
-    )
-    if not approved:
-        agent_output.status = ExecutionStatus.CANCELLED
-        if rejection_text:
-            agent_output.response = rejection_text
-        elif not agent_output.response or agent_output.response.startswith("Ejecución finalizada"):
-            agent_output.response = "Ejecución cancelada por rechazo de operador (HITL)."
-
-    # 6. Actualizar persistencia en core_executions
-    req_data = final_state.get("request")
-    dummy_input = AgentInput(
-        execution_id=agent_output.execution_id,
-        thread_id=thread_id,
-        prompt=getattr(req_data, "prompt", "HITL Decision") if req_data else "HITL Decision",
-    )
-    try:
-        await _persist_with_retry(
-            input_data=dummy_input,
-            status_val=agent_output.status.value,
-            response_text=agent_output.response,
-            data_payload=agent_output.data,
-            execution_time_ms=agent_output.execution_time_ms,
-            requires_approval=False,
-            pending_approval_id=None,
-            completed_at=datetime.now(UTC),
-        )
-        agent_output.metadata["persistence"] = PersistenceMetadata(
-            status=PersistenceStatus.PERSISTED,
-            persisted=True,
-        ).model_dump()
-    except (PersistenceError, Exception) as db_err:
-        _spool_emergency_execution(agent_output.execution_id, agent_output.model_dump(mode="json"))
-        logger.error(
-            "Fallo irrecuperable de persistencia al actualizar resolución HITL en '%s': %s",
-            agent_output.execution_id,
-            db_err,
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Fallo crítico de persistencia al actualizar resolución HITL para '{agent_output.execution_id}'.",
-        ) from db_err
-
-    return agent_output
+    """Consulta el estado, historial y checkpoints de un hilo de ejecución."""
+    return await get_execution_thread_detail(thread_id=thread_id, graph=graph, db=db)
 
 
 @router.post(
@@ -1336,13 +179,7 @@ async def _resolve_hitl_execution(
     response_model=AgentOutput,
     status_code=status.HTTP_200_OK,
     summary="Aprobar ejecución pausada en HITL por thread_id",
-    description="Reanuda la ejecución del grafo para el hilo indicado tras autorización humana.",
-    responses={
-        200: {"description": "Ejecución reanudada y finalizada con éxito."},
-        400: {"description": "El hilo no se encuentra en estado de espera de aprobación."},
-        404: {"description": "Hilo de ejecución no encontrado."},
-        409: {"description": "El hilo ya ha finalizado previamente."},
-    },
+    description="Reanuda la ejecución del grafo tras autorización humana.",
 )
 async def approve_execution_by_thread_id(
     thread_id: str,
@@ -1350,11 +187,10 @@ async def approve_execution_by_thread_id(
     graph: Any = Depends(get_agent_graph),
 ) -> AgentOutput:
     """Reanuda el grafo en el paso de ejecución con aprobación del operador."""
-    req_payload = payload or HITLResolutionRequest()
     return await _resolve_hitl_execution(
         thread_id=thread_id,
         approved=True,
-        payload=req_payload,
+        payload=payload or HITLResolutionRequest(),
         graph=graph,
     )
 
@@ -1364,13 +200,7 @@ async def approve_execution_by_thread_id(
     response_model=AgentOutput,
     status_code=status.HTTP_200_OK,
     summary="Rechazar ejecución pausada en HITL por thread_id",
-    description="Cancela la ejecución del grafo para el hilo indicado tras rechazo humano.",
-    responses={
-        200: {"description": "Ejecución cancelada con estado cancelled."},
-        400: {"description": "El hilo no se encuentra en estado de espera de aprobación."},
-        404: {"description": "Hilo de ejecución no encontrado."},
-        409: {"description": "El hilo ya ha finalizado previamente."},
-    },
+    description="Cancela la ejecución del grafo tras rechazo humano.",
 )
 async def reject_execution_by_thread_id(
     thread_id: str,
@@ -1378,11 +208,10 @@ async def reject_execution_by_thread_id(
     graph: Any = Depends(get_agent_graph),
 ) -> AgentOutput:
     """Cancela el plan y concluye el grafo con estado cancelled."""
-    req_payload = payload or HITLResolutionRequest()
     return await _resolve_hitl_execution(
         thread_id=thread_id,
         approved=False,
-        payload=req_payload,
+        payload=payload or HITLResolutionRequest(),
         graph=graph,
     )
 
@@ -1392,14 +221,6 @@ async def reject_execution_by_thread_id(
     response_model=AgentOutput,
     status_code=status.HTTP_200_OK,
     summary="Aprobar ejecución pausada en HITL (payload con thread_id)",
-    description="Reanuda la ejecución del grafo tras autorización humana indicando thread_id en el cuerpo.",
-    responses={
-        200: {"description": "Ejecución reanudada y finalizada con éxito."},
-        400: {"description": "El hilo no se encuentra en estado de espera de aprobación."},
-        404: {"description": "Hilo de ejecución no encontrado."},
-        409: {"description": "El hilo ya ha finalizado previamente."},
-        422: {"description": "thread_id ausente en el payload."},
-    },
 )
 async def approve_execution(
     payload: HITLResolutionRequest,
@@ -1424,14 +245,6 @@ async def approve_execution(
     response_model=AgentOutput,
     status_code=status.HTTP_200_OK,
     summary="Rechazar ejecución pausada en HITL (payload con thread_id)",
-    description="Cancela la ejecución del grafo tras rechazo humano indicando thread_id en el cuerpo.",
-    responses={
-        200: {"description": "Ejecución cancelada con estado cancelled."},
-        400: {"description": "El hilo no se encuentra en estado de espera de aprobación."},
-        404: {"description": "Hilo de ejecución no encontrado."},
-        409: {"description": "El hilo ya ha finalizado previamente."},
-        422: {"description": "thread_id ausente en el payload."},
-    },
 )
 async def reject_execution(
     payload: HITLResolutionRequest,
@@ -1449,3 +262,23 @@ async def reject_execution(
         payload=payload,
         graph=graph,
     )
+
+
+__all__ = [
+    "_get_agent_credentials",
+    "_persist_or_update_execution",
+    "_persist_with_retry",
+    "_resolve_hitl_execution",
+    "_spool_emergency_execution",
+    "approve_execution",
+    "approve_execution_by_thread_id",
+    "execute_graph_pipeline",
+    "get_agent_graph",
+    "get_execution_by_thread_id",
+    "notify_execution_completion",
+    "reject_execution",
+    "reject_execution_by_thread_id",
+    "router",
+    "run_in_background",
+    "trigger_execution",
+]

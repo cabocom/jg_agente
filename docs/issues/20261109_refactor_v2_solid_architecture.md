@@ -28,8 +28,17 @@ Este issue planifica la refactorización estructural v2.0 de `jg_agente` para cu
 
 ## 3. Plan de Refactorización Estructural (Cero Roturas)
 
-- **Fase 1 (`app/api/executions.py` -> Servicios de Orquestación):**
-  - Adelgazar el router FastAPI a `<250 LOC` extrayendo la lógica de negocio a `app/services/execution_orchestrator.py`, `app/services/hitl_resume_service.py` y `app/services/saga_compensation_service.py`.
+- **Fase 1 (`app/api/executions.py` -> Servicios de Orquestación) [COMPLETADA]:**
+  - Router `app/api/executions.py` reducido de **1.451 LOC a 284 LOC** (controlador HTTP delgado).
+  - Lógica de negocio segmentada en `app/services/`:
+    - `execution_orchestrator.py` (269 LOC)
+    - `hitl_resume_service.py` (227 LOC)
+    - `hitl_interrupt_service.py` (153 LOC)
+    - `execution_persistence_service.py` (238 LOC)
+    - `execution_query_service.py` (257 LOC)
+    - `execution_notification_service.py` (177 LOC)
+    - `background_execution_service.py` (76 LOC)
+  - Re-exportación completa de fachadas públicas y retrocompatibilidad 100% con tests existentes.
 - **Fase 2 (`app/security/` -> Submódulos Especializados):**
   - Dividir `ssrf.py` en `dns_pinning.py`, `ip_policy.py` y `safe_http_client.py` (re-exportando la API pública en `app/security/ssrf.py`).
   - Modularizar `guard.py` y `audit.py`.
