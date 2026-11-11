@@ -74,6 +74,22 @@
    - `execution_notification_service.py`: Emisión de webhooks con autenticación de agente y trazabilidad distribuida.
    - `background_execution_service.py`: Gestión de ejecuciones asíncronas de fondo mediante BackgroundTasks.
 
+7. **Arquitectura de Seguridad Modular y Desacoplada (`app/security/`):**
+   El subsistema de seguridad se descompone en submódulos especializados de responsabilidad única (<300 LOC):
+   - `guard.py`: Fachada de intercepción para `execute_tool()` y sanitización de entrada.
+   - `guard_policy.py`: Evaluación desacoplada de políticas de riesgo, RBAC, degradación de checkpoints y HITL.
+   - `sanitizer.py`: Detección universal y recursiva de inyección de comandos shell, directory traversal y escapes de jail del workspace.
+   - `tool_executor.py`: Invocación física segura (sync/async) con control de timeout determinista y encapsulación de `ToolResult`.
+   - `ssrf.py`: Fachada canónica y singleton de prevención SSRF.
+   - `ssrf_validator.py`: Validador central de esquemas, redes privadas y denegación de hostnames.
+   - `dns_pinning.py`: Backends httpcore (`SSRFSafeSyncBackend`, `SSRFSafeAsyncBackend`) con resolución DNS previa y pinning a nivel socket TCP (mitigación TOCTOU).
+   - `safe_http_client.py`: Clientes y transportes HTTP seguros (`SSRFSafeTransport`, `SSRFSafeAsyncTransport`).
+   - `ip_policy.py`: Constantes normativas (RFC1918, RFC6598, loopback, link-local) y excepciones (`SSRFValidationError`).
+   - `ssrf_url_inspector.py`: Análisis léxico preliminar de URLs e inspección recursiva de payloads en herramientas.
+   - `audit.py`: Logger de auditoría inmutable en memoria con búfer circular.
+   - `audit_builders.py`: Factoría constructora de `AuditRecord` tipados para decisiones, estímulos, ejecuciones y transiciones de estado.
+   - `audit_persistence.py`: Persistencia asíncrona no bloqueante en PostgreSQL (`core_audit_records`) con desacoplamiento de integridad referencial.
+
 ---
 
 ## 3. Matriz de Responsabilidades

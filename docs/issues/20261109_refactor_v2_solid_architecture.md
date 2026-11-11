@@ -39,9 +39,11 @@ Este issue planifica la refactorización estructural v2.0 de `jg_agente` para cu
     - `execution_notification_service.py` (177 LOC)
     - `background_execution_service.py` (76 LOC)
   - Re-exportación completa de fachadas públicas y retrocompatibilidad 100% con tests existentes.
-- **Fase 2 (`app/security/` -> Submódulos Especializados):**
-  - Dividir `ssrf.py` en `dns_pinning.py`, `ip_policy.py` y `safe_http_client.py` (re-exportando la API pública en `app/security/ssrf.py`).
-  - Modularizar `guard.py` y `audit.py`.
+- **Fase 2 (`app/security/` -> Submódulos Especializados) [COMPLETADA]:**
+  - Descomposición de `ssrf.py` (de 838 LOC a 61 LOC) en `dns_pinning.py` (188 LOC), `ip_policy.py` (71 LOC), `safe_http_client.py` (103 LOC), `ssrf_url_inspector.py` (142 LOC) y `ssrf_validator.py` (292 LOC).
+  - Descomposición de `guard.py` (de 626 LOC a 199 LOC) en `guard_policy.py` (192 LOC), `sanitizer.py` (196 LOC) y `tool_executor.py` (100 LOC).
+  - Descomposición de `audit.py` (de 458 LOC a 278 LOC) en `audit_builders.py` (227 LOC) y `audit_persistence.py` (94 LOC).
+  - Preservación íntegra de singletons thread-safe (`get_security_guard`, `get_ssrf_validator`, `get_security_audit_logger`) y retrocompatibilidad total (447/447 tests pasando).
 - **Fase 3 (`app/core/` y `app/nodes/`):**
   - Separar constructores del grafo en `app/core/graph_builder.py` y modularizar `reason.py`, `execute.py`, `llm.py` y `registration.py`.
 
