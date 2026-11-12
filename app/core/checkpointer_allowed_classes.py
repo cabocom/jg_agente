@@ -1,0 +1,68 @@
+# ==============================================================================
+# Part of the javiergalvez-ia ecosystem.
+# Author: Javier Gálvez
+# License: GNU AGPLv3 (or Commercial Enterprise License where applicable)
+# Project URL: https://javiergalvez.com | https://gitlab.com/javiergalvez-ia/jg_agente
+# ==============================================================================
+
+"""Clases autorizadas para serialización/deserialización en checkpoints de LangGraph."""
+
+STATE_ALLOWED_CLASSES: list[tuple[str, str]] = [
+    ("app.models", "AgentInput"),
+    ("app.models.io", "AgentInput"),
+    ("app.models", "AgentOutput"),
+    ("app.models.io", "AgentOutput"),
+    ("app.models", "UserContext"),
+    ("app.models.io", "UserContext"),
+    ("app.models", "ExecutionStatus"),
+    ("app.models.io", "ExecutionStatus"),
+    ("app.models", "AgentExecutionStatus"),
+    ("app.models.state", "AgentExecutionStatus"),
+    ("app.models", "ApprovalStatus"),
+    ("app.models.state", "ApprovalStatus"),
+    ("app.models", "StepStatus"),
+    ("app.models.state", "StepStatus"),
+    ("app.models", "VerificationStatus"),
+    ("app.models.state", "VerificationStatus"),
+    ("app.models", "RiskLevel"),
+    ("app.models.tools", "RiskLevel"),
+    ("app.models", "ToolType"),
+    ("app.models.tools", "ToolType"),
+    ("app.models", "ToolResult"),
+    ("app.models.tools", "ToolResult"),
+    ("app.models", "IntentModel"),
+    ("app.models.state", "IntentModel"),
+    ("app.models", "PlanStep"),
+    ("app.models.state", "PlanStep"),
+    ("app.models", "ExecutionPlan"),
+    ("app.models.state", "ExecutionPlan"),
+    ("app.models", "ApprovalRecord"),
+    ("app.models.state", "ApprovalRecord"),
+    ("app.models", "StepExecutionRecord"),
+    ("app.models.state", "StepExecutionRecord"),
+    ("app.models", "AuditRecord"),
+    ("app.models.state", "AuditRecord"),
+    ("app.models", "PolicyDecision"),
+    ("app.models.state", "PolicyDecision"),
+    ("app.models", "SecurityEvaluationResult"),
+    ("app.models.state", "SecurityEvaluationResult"),
+    ("app.models", "ExecutionError"),
+    ("app.models.state", "ExecutionError"),
+    ("app.models", "CognitiveStepRecord"),
+    ("app.models.state", "CognitiveStepRecord"),
+    ("app.models", "GoalStatus"),
+    ("app.models.state", "GoalStatus"),
+    ("app.models", "EvaluationRecord"),
+    ("app.models.state", "EvaluationRecord"),
+    # Clases canónicas de jg_agente_sdk (SSOT)
+    ("jg_sdk.contracts", "RiskLevel"),
+    ("jg_sdk.contracts", "ToolType"),
+    ("jg_sdk.contracts", "ToolResult"),
+    ("jg_sdk.contracts", "AgentTool"),
+    ("jg_sdk.contracts", "ExecutionStatus"),
+    ("jg_sdk.contracts", "StepStatus"),
+    ("jg_sdk.models", "AgentInput"),
+    ("jg_sdk.models", "AgentOutput"),
+    ("jg_sdk.models", "UserContext"),
+    ("jg_sdk.models", "ExecutionStatus"),
+]

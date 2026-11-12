@@ -5,38 +5,37 @@
 # Project URL: https://javiergalvez.com | https://gitlab.com/javiergalvez-ia/jg_agente
 # ==============================================================================
 
-"""Gestor de plugins (PluginManager) y autodescubrimiento para jg_agente.
+"""Gestor de plugins (PluginManager) y ciclo de vida para jg_agente.
 
 Responsable de descubrir, verificar dependencias, inicializar y registrar plugins
 tanto locales como distribuidos vía entry_points en el CapabilityRegistry.
 """
 
-import importlib
-import inspect
 import logging
-import pkgutil
-import sys
-from collections import deque
 from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Any, Self
 
+from app.core.plugin_loader import (
+    PluginDependencyError,
+    PluginLoadError,
+    discover_entrypoints,
+    discover_local_plugins,
+    resolve_dependencies_and_order,
+)
 from app.core.registry import BootConflictError, CapabilityRegistry
 from app.plugins.base import BasePlugin
 
 logger = logging.getLogger("jg_agente.plugin_manager")
 
-
-class PluginLoadError(Exception):
-    """Excepción lanzada cuando ocurre un fallo al descubrir, importar o cargar un plugin."""
-
-    pass
-
-
-class PluginDependencyError(PluginLoadError):
-    """Excepción lanzada cuando un plugin declara dependencias ausentes o circulares."""
-
-    pass
+__all__ = [
+    "PluginLoadError",
+    "PluginDependencyError",
+    "PluginManager",
+    "discover_entrypoints",
+    "discover_local_plugins",
+    "resolve_dependencies_and_order",
+]
 
 
 class PluginManager:
@@ -83,94 +82,17 @@ class PluginManager:
         """Secuencia de plugins ordenada según resolución de dependencias."""
         return list(self._load_order)
 
-    # --- Descubrimiento ---
-
     def discover_entrypoints(self, group: str = "jg_agente.plugins") -> list[type[BasePlugin]]:
         """Descubre clases de plugin registradas en el entorno mediante entry_points de Python."""
-        discovered: list[type[BasePlugin]] = []
-        try:
-            eps = entry_points(group=group)
-        except Exception as exc:
-            logger.warning("Error al consultar entry_points para el grupo '%s': %s", group, exc)
-            return discovered
+        import sys
 
-        for ep in eps:
-            try:
-                plugin_cls = ep.load()
-                if not (inspect.isclass(plugin_cls) and issubclass(plugin_cls, BasePlugin)):
-                    raise PluginLoadError(
-                        f"El entry_point '{ep.name}' no referencia una subclase válida de BasePlugin: {plugin_cls}"
-                    )
-                discovered.append(plugin_cls)
-                logger.info("Plugin descubierto vía entry_point [%s]: %s", ep.name, plugin_cls)
-            except Exception as exc:
-                logger.error("Error al cargar entry_point '%s': %s", ep.name, exc)
-                raise PluginLoadError(f"Fallo al cargar entry_point '{ep.name}': {exc}") from exc
-
-        return discovered
+        ep_fn = getattr(sys.modules[__name__], "entry_points", entry_points)
+        return discover_entrypoints(group=group, entry_points_fn=ep_fn)
 
     def discover_local_plugins(self, directory: Path | str | None = None) -> list[type[BasePlugin]]:
         """Descubre plugins en carpetas locales buscando 'PLUGIN_CLASS' o subclases de BasePlugin."""
         target_dir = Path(directory) if directory is not None else self.plugins_dir
-        discovered: list[type[BasePlugin]] = []
-
-        if target_dir is None or not target_dir.exists():
-            return discovered
-
-        target_dir_str = str(target_dir.resolve())
-        if target_dir_str not in sys.path:
-            sys.path.insert(0, target_dir_str)
-
-        for _finder, module_name, is_pkg in pkgutil.iter_modules([target_dir_str]):
-            candidate_cls: type[BasePlugin] | None = None
-
-            # 1. Intentar cargar subpaquete {module_name}.plugin
-            if is_pkg:
-                try:
-                    submodule = importlib.import_module(f"{module_name}.plugin")
-                    if hasattr(submodule, "PLUGIN_CLASS"):
-                        cls_candidate = submodule.PLUGIN_CLASS
-                        if inspect.isclass(cls_candidate) and issubclass(cls_candidate, BasePlugin):
-                            candidate_cls = cls_candidate
-                except ModuleNotFoundError:
-                    pass
-                except Exception as exc:
-                    logger.error("Error al importar %s.plugin: %s", module_name, exc)
-                    raise PluginLoadError(
-                        f"Fallo al importar '{module_name}.plugin': {exc}"
-                    ) from exc
-
-            # 2. Si no se encontró en .plugin, intentar cargar directamente el módulo raíz
-            if candidate_cls is None:
-                try:
-                    mod = importlib.import_module(module_name)
-                    if hasattr(mod, "PLUGIN_CLASS"):
-                        cls_candidate = mod.PLUGIN_CLASS
-                        if inspect.isclass(cls_candidate) and issubclass(cls_candidate, BasePlugin):
-                            candidate_cls = cls_candidate
-                    else:
-                        # Inspeccionar clases exportadas en el módulo
-                        for _, obj in inspect.getmembers(mod, inspect.isclass):
-                            if issubclass(obj, BasePlugin) and obj is not BasePlugin:
-                                candidate_cls = obj
-                                break
-                except Exception as exc:
-                    logger.error("Error al importar módulo local '%s': %s", module_name, exc)
-                    raise PluginLoadError(
-                        f"Fallo al importar módulo de plugin '{module_name}': {exc}"
-                    ) from exc
-
-            if candidate_cls is not None:
-                if not (inspect.isclass(candidate_cls) and issubclass(candidate_cls, BasePlugin)):
-                    raise PluginLoadError(
-                        f"El componente '{module_name}' no exporta una subclase válida de BasePlugin."
-                    )
-                discovered.append(candidate_cls)
-                logger.info("Plugin local descubierto en '%s': %s", module_name, candidate_cls)
-
-        return discovered
-
-    # --- Carga y Registro ---
+        return discover_local_plugins(target_dir)
 
     def register_plugin_instance(self, plugin: BasePlugin) -> None:
         """Registra e incorpora una instancia activa de plugin validando su compatibilidad."""
@@ -185,7 +107,6 @@ class PluginManager:
             return
 
         self._plugins[name] = plugin
-
         if self.auto_register:
             self.registry.register_plugin(plugin)
 
@@ -201,7 +122,6 @@ class PluginManager:
 
         if load_local:
             discovered_classes.extend(self.discover_local_plugins(directory=plugins_dir))
-
         if load_entrypoints:
             discovered_classes.extend(self.discover_entrypoints())
 
@@ -238,51 +158,12 @@ class PluginManager:
                 logger.error("Fallo al instanciar plugin '%s': %s", plugin_cls, exc)
                 raise PluginLoadError(f"Error instanciando {plugin_cls}: {exc}") from exc
 
-        # Resolver orden topológico de dependencias
         self._load_order = self._resolve_dependencies_and_order()
         return [self._plugins[name] for name in self._load_order]
 
-    # --- Validación de Dependencias y Ordenamiento Topológico ---
-
     def _resolve_dependencies_and_order(self) -> list[str]:
         """Verifica dependencias requeridas y computa el orden topológico de inicialización."""
-        in_degree: dict[str, int] = dict.fromkeys(self._plugins, 0)
-        adjacency: dict[str, list[str]] = {name: [] for name in self._plugins}
-
-        for name, plugin in self._plugins.items():
-            metadata = plugin.get_plugin_metadata()
-            for dep in metadata.dependencies:
-                if dep not in self._plugins:
-                    raise PluginDependencyError(
-                        f"Dependencia insatisfecha: El plugin '{name}' requiere el plugin '{dep}', "
-                        "pero no se encuentra disponible o activo en el entorno."
-                    )
-                # dep debe inicializarse antes de name -> arco: dep -> name
-                adjacency[dep].append(name)
-                in_degree[name] += 1
-
-        # Algoritmo de Kahn para ordenación topológica
-        queue: deque[str] = deque([name for name, deg in in_degree.items() if deg == 0])
-        ordered: list[str] = []
-
-        while queue:
-            node = queue.popleft()
-            ordered.append(node)
-
-            for neighbor in adjacency[node]:
-                in_degree[neighbor] -= 1
-                if in_degree[neighbor] == 0:
-                    queue.append(neighbor)
-
-        if len(ordered) != len(self._plugins):
-            unresolved = [name for name, deg in in_degree.items() if deg > 0]
-            raise PluginDependencyError(
-                f"Dependencia circular detectada entre los plugins: {', '.join(unresolved)}"
-            )
-
-        return ordered
-
-    # --- Ciclo de Vida Asíncrono ---
+        return resolve_dependencies_and_order(self._plugins)
 
     async def startup(self) -> None:
         """Inicializa concurrentemente o en orden estricto de dependencias todos los plugins cargados."""
@@ -304,7 +185,6 @@ class PluginManager:
         if not self._is_started:
             return
 
-        # Apagado en orden inverso
         for name in reversed(self._load_order):
             plugin = self._plugins[name]
             logger.info("Apagando plugin [%s]...", name)

@@ -23,69 +23,31 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
+from app.core.checkpointer_allowed_classes import STATE_ALLOWED_CLASSES
 from app.core.config import settings
+from app.core.postgres_saver import (
+    DualPostgresSaver,
+)
+from app.core.postgres_saver import (
+    async_sanitize_for_storage as _async_sanitize_for_storage,
+)
+from app.core.postgres_saver import (
+    sync_sanitize_for_storage as _sync_sanitize_for_storage,
+)
 
 logger = logging.getLogger("jg_agente.checkpointer")
 
-# Clases autorizadas para serialización/deserialización en checkpoints de LangGraph
-STATE_ALLOWED_CLASSES = [
-    ("app.models", "AgentInput"),
-    ("app.models.io", "AgentInput"),
-    ("app.models", "AgentOutput"),
-    ("app.models.io", "AgentOutput"),
-    ("app.models", "UserContext"),
-    ("app.models.io", "UserContext"),
-    ("app.models", "ExecutionStatus"),
-    ("app.models.io", "ExecutionStatus"),
-    ("app.models", "AgentExecutionStatus"),
-    ("app.models.state", "AgentExecutionStatus"),
-    ("app.models", "ApprovalStatus"),
-    ("app.models.state", "ApprovalStatus"),
-    ("app.models", "StepStatus"),
-    ("app.models.state", "StepStatus"),
-    ("app.models", "VerificationStatus"),
-    ("app.models.state", "VerificationStatus"),
-    ("app.models", "RiskLevel"),
-    ("app.models.tools", "RiskLevel"),
-    ("app.models", "ToolType"),
-    ("app.models.tools", "ToolType"),
-    ("app.models", "ToolResult"),
-    ("app.models.tools", "ToolResult"),
-    ("app.models", "IntentModel"),
-    ("app.models.state", "IntentModel"),
-    ("app.models", "PlanStep"),
-    ("app.models.state", "PlanStep"),
-    ("app.models", "ExecutionPlan"),
-    ("app.models.state", "ExecutionPlan"),
-    ("app.models", "ApprovalRecord"),
-    ("app.models.state", "ApprovalRecord"),
-    ("app.models", "StepExecutionRecord"),
-    ("app.models.state", "StepExecutionRecord"),
-    ("app.models", "AuditRecord"),
-    ("app.models.state", "AuditRecord"),
-    ("app.models", "PolicyDecision"),
-    ("app.models.state", "PolicyDecision"),
-    ("app.models", "SecurityEvaluationResult"),
-    ("app.models.state", "SecurityEvaluationResult"),
-    ("app.models", "ExecutionError"),
-    ("app.models.state", "ExecutionError"),
-    ("app.models", "CognitiveStepRecord"),
-    ("app.models.state", "CognitiveStepRecord"),
-    ("app.models", "GoalStatus"),
-    ("app.models.state", "GoalStatus"),
-    ("app.models", "EvaluationRecord"),
-    ("app.models.state", "EvaluationRecord"),
-    # Clases canónicas de jg_agente_sdk (SSOT)
-    ("jg_sdk.contracts", "RiskLevel"),
-    ("jg_sdk.contracts", "ToolType"),
-    ("jg_sdk.contracts", "ToolResult"),
-    ("jg_sdk.contracts", "AgentTool"),
-    ("jg_sdk.contracts", "ExecutionStatus"),
-    ("jg_sdk.contracts", "StepStatus"),
-    ("jg_sdk.models", "AgentInput"),
-    ("jg_sdk.models", "AgentOutput"),
-    ("jg_sdk.models", "UserContext"),
-    ("jg_sdk.models", "ExecutionStatus"),
+__all__ = [
+    "STATE_ALLOWED_CLASSES",
+    "DualPostgresSaver",
+    "ensure_core_checkpoint_views",
+    "get_default_serializer",
+    "close_checkpointer",
+    "get_postgres_checkpointer",
+    "get_memory_checkpointer",
+    "get_checkpointer",
+    "_async_sanitize_for_storage",
+    "_sync_sanitize_for_storage",
 ]
 
 
@@ -113,106 +75,6 @@ def ensure_core_checkpoint_views(conn: Any) -> None:
 def get_default_serializer() -> JsonPlusSerializer:
     """Crea y retorna un serializador JsonPlusSerializer con las clases del Core autorizadas."""
     return JsonPlusSerializer(allowed_msgpack_modules=STATE_ALLOWED_CLASSES)
-
-
-async def _async_sanitize_for_storage(obj: Any, depth: int = 0) -> Any:
-    """Resuelve recursivamente corutinas o awaitables en estructuras de datos para checkpoints."""
-    if depth > 8 or obj is None:
-        return obj
-    from app.core.async_compat import ensure_awaited, is_awaitable_or_coroutine
-
-    if is_awaitable_or_coroutine(obj):
-        try:
-            resolved = await ensure_awaited(obj)
-            return await _async_sanitize_for_storage(resolved, depth + 1)
-        except Exception as exc:
-            logger.warning("Error resolviendo coroutine para checkpoint: %s", exc)
-            return str(obj)
-    if isinstance(obj, dict):
-        return {k: await _async_sanitize_for_storage(v, depth + 1) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [await _async_sanitize_for_storage(v, depth + 1) for v in obj]
-    if isinstance(obj, tuple):
-        return tuple([await _async_sanitize_for_storage(v, depth + 1) for v in obj])
-    if hasattr(obj, "__dict__"):
-        for k, v in list(vars(obj).items()):
-            if is_awaitable_or_coroutine(v):
-                try:
-                    setattr(obj, k, await ensure_awaited(v))
-                except Exception:
-                    setattr(obj, k, str(v))
-    return obj
-
-
-def _sync_sanitize_for_storage(obj: Any, depth: int = 0) -> Any:
-    """Sanitiza recursivamente objetos no serializables en modo síncrono."""
-    if depth > 8 or obj is None:
-        return obj
-    from app.core.async_compat import is_awaitable_or_coroutine
-
-    if is_awaitable_or_coroutine(obj):
-        return f"[Unresolved awaitable: {type(obj).__name__}]"
-    if isinstance(obj, dict):
-        return {k: _sync_sanitize_for_storage(v, depth + 1) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_sync_sanitize_for_storage(v, depth + 1) for v in obj]
-    if isinstance(obj, tuple):
-        return tuple(_sync_sanitize_for_storage(v, depth + 1) for v in obj)
-    if hasattr(obj, "__dict__"):
-        for k, v in list(vars(obj).items()):
-            if is_awaitable_or_coroutine(v):
-                setattr(obj, k, f"[Unresolved awaitable: {type(v).__name__}]")
-    return obj
-
-
-class DualPostgresSaver(PostgresSaver):
-    """PostgresSaver compatible con ejecución síncrona y asíncrona (ainvoke) de LangGraph."""
-
-    def put(self, config: Any, checkpoint: Any, metadata: Any, new_versions: Any) -> Any:
-        clean_checkpoint = _sync_sanitize_for_storage(checkpoint)
-        return super().put(config, clean_checkpoint, metadata, new_versions)
-
-    def put_writes(self, config: Any, writes: Any, task_id: Any, task_path: Any = "") -> Any:
-        clean_writes = _sync_sanitize_for_storage(writes)
-        return super().put_writes(config, clean_writes, task_id, task_path)
-
-    async def aget_tuple(self, config: Any) -> Any:
-        import asyncio
-
-        return await asyncio.to_thread(self.get_tuple, config)
-
-    async def aput(self, config: Any, checkpoint: Any, metadata: Any, new_versions: Any) -> Any:
-        import asyncio
-
-        clean_checkpoint = await _async_sanitize_for_storage(checkpoint)
-        return await asyncio.to_thread(self.put, config, clean_checkpoint, metadata, new_versions)
-
-    async def aput_writes(self, config: Any, writes: Any, task_id: Any, task_path: Any = "") -> Any:
-        import asyncio
-
-        clean_writes = await _async_sanitize_for_storage(writes)
-        return await asyncio.to_thread(self.put_writes, config, clean_writes, task_id, task_path)
-
-    async def alist(
-        self, config: Any, *, filter: Any = None, before: Any = None, limit: Any = None
-    ) -> Any:
-        import asyncio
-
-        items = await asyncio.to_thread(
-            lambda: list(self.list(config, filter=filter, before=before, limit=limit))
-        )
-        for item in items:
-            yield item
-
-    def close(self) -> None:
-        """Cierra de forma segura e idempotente el pool de conexiones subyacente."""
-        pool = getattr(self, "conn", None)
-        if pool is not None and hasattr(pool, "close") and callable(pool.close):
-            try:
-                pool.close()
-                logger.info("Pool de conexiones de DualPostgresSaver cerrado exitosamente.")
-            except Exception as exc:
-                logger.warning("Error al cerrar pool de conexiones de DualPostgresSaver: %s", exc)
 
 
 def close_checkpointer(saver: Any) -> None:
@@ -281,8 +143,9 @@ def get_checkpointer(saver_type: str | None = None) -> BaseCheckpointSaver[Any]:
     emite una alarma crítica (CRITICAL), marca el estado de degradación en la
     instancia fallback y conmuta a MemorySaver.
     """
-    raw_kind = saver_type or getattr(settings, "CHECKPOINT_SAVER", "postgres")
-    kind = str(raw_kind or "postgres").lower()
+    kind = str(
+        saver_type or getattr(settings, "CHECKPOINT_SAVER", "postgres") or "postgres"
+    ).lower()
 
     if kind in ("postgres", "postgresql"):
         max_retries = int(getattr(settings, "CHECKPOINT_MAX_RETRIES", 3))
