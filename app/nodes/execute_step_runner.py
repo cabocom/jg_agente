@@ -224,11 +224,13 @@ async def run_single_step(
         if tool_result.success
         else f"Error ejecutando {tool.name}: {tool_result.error}"
     )
-    max_tool_msg_chars = 8000
+    max_tool_msg_chars = 2500
     if len(msg_content) > max_tool_msg_chars:
+        half_tool = max_tool_msg_chars // 2
         msg_content = (
-            msg_content[:max_tool_msg_chars]
-            + f"\n... [Salida truncada a {max_tool_msg_chars} caracteres para prevenir saturación de contexto]"
+            msg_content[:half_tool]
+            + f"\n... [omisión central ({len(msg_content)} chars)] ...\n"
+            + msg_content[-half_tool:]
         )
     tool_msg = ToolMessage(content=msg_content, tool_call_id=step.step_id, name=step.tool_name)
 

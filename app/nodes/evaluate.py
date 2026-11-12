@@ -49,7 +49,7 @@ logger = logging.getLogger("jg_agente.nodes.evaluate")
 __all__ = ["evaluate_node", "_extract_json"]
 
 
-def _collect_tool_messages(messages: list[Any], max_obs_chars: int = 8000) -> list[str]:
+def _collect_tool_messages(messages: list[Any], max_obs_chars: int = 2500) -> list[str]:
     """Extrae y formatea mensajes de herramientas recibidos en el estado."""
     tool_messages: list[str] = []
     half_obs = max_obs_chars // 2
