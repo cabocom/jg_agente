@@ -173,4 +173,3 @@ def print_banner() -> None:
     print(f"{C_CYAN}{C_BOLD}   🤖 JG_AGENTE — DEMOSTRACIÓN DE EJECUCIÓN MANUAL COGNITIVA{C_RESET}")
     print(f"{C_CYAN}{C_BOLD}   LangGraph Execution Plane · HITL · Rollback · Verificación{C_RESET}")
     print(f"{C_CYAN}{C_BOLD}{'=' * 70}{C_RESET}\n")
-
