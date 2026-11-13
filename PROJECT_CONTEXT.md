@@ -1,9 +1,9 @@
 # CONTEXTO DE PROYECTO: jg_agente
 
-**Versión del documento:** 2.40.0  
-**Fecha de consolidación:** 12 de noviembre de 2026  
+**Versión del documento:** 2.40.1  
+**Fecha de consolidación:** 13 de noviembre de 2026  
 **Componente:** Execution Plane (Motor Autónomo de Ejecución)  
-**Estado:** Fases 01 a 11 completadas (100%). Refactorización Estructural v2.0 SOLID culminada (jg_agente#82): 100% de ficheros y clases por debajo de 300 LOC y métodos <40 LOC. Integración con `jg_agente_sdk` consolidada y sincronización automática de *mirror* público hacia `https://github.com/cabocom/jg_agente` vía GitLab CI/CD (`workspace#8`).  
+**Estado:** Fases 01 a 11 completadas (100%). Refactorización Estructural v2.0 SOLID culminada (jg_agente#82): 100% de ficheros y clases por debajo de 300 LOC y métodos <40 LOC, tanto en `app/` como en `scripts/` (modularizado `run_manual_execution.py` a 296 LOC vía `demo_fixtures.py`). Integración con `jg_agente_sdk` consolidada y sincronización automática de *mirror* público hacia `https://github.com/cabocom/jg_agente` vía GitLab CI/CD (`workspace#8`).  
 - Refactorización Estructural SOLID v2.0 (jg_agente#82):
   * Router FastAPI (`app/api/executions.py`): Adelgazado de 1.452 LOC a 284 LOC mediante servicios de orquestación (`execution_orchestrator`, `execution_query_service`, `execution_persistence_service`, `hitl_resume_service`, `hitl_interrupt_service`, `execution_notification_service`, `background_execution_service`).
   * Seguridad (`app/security/`): Descomposición de monolitos `ssrf.py` (838 -> 61 LOC) en `dns_pinning.py`, `ip_policy.py`, `safe_http_client.py`, `ssrf_url_inspector.py`, `ssrf_validator.py`. Modularización de `guard.py` (626 -> 232 LOC) en `guard_policy.py`, `sanitizer.py`, `tool_executor.py`. Modularización de `audit.py` (458 -> 278 LOC) en `audit_builders.py`, `audit_persistence.py`.

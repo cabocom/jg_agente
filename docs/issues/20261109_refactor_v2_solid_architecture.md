@@ -50,12 +50,13 @@ Este issue planifica la refactorización estructural v2.0 de `jg_agente` para cu
   - Descomposición de `registration.py` (534 a 32 LOC) y `checkpointer.py` (326 a 183 LOC) en `registration_client.py`, `registration_service.py`, `registration_store.py`, `postgres_saver.py` y `checkpointer_allowed_classes.py`.
   - Modularización de nodos cognitivos (`reason.py`, `execute.py`, `human_approval.py`, `conclude.py`, `risk_assess.py`, `evaluate.py`) con fachadas delgadas.
   - Prompts y Modelos: `manager.py` (539 a 202 LOC), constantes i18n en `i18n_constants.py` y `cognitive_strings.py`.
-  - 100% de los ficheros de `app/` por debajo de 300 LOC (fichero mayor: 292 LOC).
+  - 100% de los ficheros de `app/` y `scripts/` por debajo de 300 LOC (fichero mayor: 296 LOC).
+  - Modularización de `scripts/run_manual_execution.py` (de 399 a 296 LOC) extrayendo `scripts/demo_fixtures.py` (176 LOC).
 
 ## 4. Estimación con Gemini Flash y Criterios de Aceptación
 
 - **Esfuerzo estimado:** 5 – 6 sesiones (~3,0 M – 4,0 M tokens Gemini Flash, ~2 – 2,5 horas).
 - **Criterios de cierre:**
-  - [x] Router `executions.py` y todos los módulos de `app/` bajo el umbral de 300 LOC (100% cumplido).
+  - [x] Router `executions.py`, todos los módulos de `app/` y scripts bajo el umbral de 300 LOC (100% cumplido).
   - [x] 100% de la suite de tests en verde (`pytest`: 447 pasados) y linters limpios (`ruff check .`, `ruff format --check .`, `mypy`).
   - [x] Web E2E Selenium Firefox pasando correctamente en el entorno integrado.
