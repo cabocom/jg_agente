@@ -7,6 +7,8 @@
 
 """Construcción de contexto conversacional y resolución de locale para el nodo reason."""
 
+from typing import Any
+
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 from app.core.config import settings
@@ -88,6 +90,53 @@ def _build_evaluation_guidance(
     return HumanMessage(content=guidance_text)
 
 
+TELEPHONY_VOICE_DIRECTIVE = (
+    "\n\n[MODO TELEFONÍA / VOZ TTS ACTIVADO]\n"
+    "Esta petición proviene de una llamada telefónica por voz (Asterisk PBX) que será locutada mediante TTS:\n"
+    "- Responde de forma MUY CORTA, CONCISA Y DIRECTA (máximo 1 o 2 oraciones breves).\n"
+    "- NUNCA cites fuentes, ni enlaces web, ni URLs (nada de 'https://...', 'AS.com', 'Marca.com', 'fuente:').\n"
+    "- Habla de forma natural y fluida para ser escuchada por voz, sin formato markdown (sin asteriscos, sin viñetas, sin negritas)."
+)
+
+
+def is_voice_telephony_request(state: AgentState | dict[str, Any]) -> bool:
+    """Determina si la solicitud actual proviene de un canal de telefonía/voz (Asterisk PBX / TTS)."""
+    req = state.get("request")
+    if not req:
+        return False
+
+    params = getattr(req, "parameters", None) or {}
+    meta = getattr(req, "metadata", None) or {}
+    user_ctx = getattr(req, "user_context", None)
+
+    if isinstance(params, dict):
+        if params.get("is_telephony") or params.get("simulation_type") in (
+            "asterisk_voice",
+            "telephony_voice",
+        ):
+            return True
+        ch = str(params.get("channel", "")).lower()
+        if ch.startswith("sip/") or "asterisk" in ch or "voice" in ch:
+            return True
+
+    if isinstance(meta, dict):
+        if meta.get("simulation_type") in ("asterisk_voice", "telephony_voice") or meta.get(
+            "is_telephony"
+        ):
+            return True
+        ch = str(meta.get("channel", "")).lower()
+        if ch.startswith("sip/") or "asterisk" in ch or "voice" in ch:
+            return True
+
+    if user_ctx:
+        role = getattr(user_ctx, "role", "") or ""
+        email = getattr(user_ctx, "email", "") or ""
+        if role == "caller" or "@telephony.local" in email:
+            return True
+
+    return False
+
+
 def build_reason_messages(
     state: AgentState,
     prompt: str,
@@ -98,6 +147,7 @@ def build_reason_messages(
     existing_messages = list(state.get("messages") or [])
     prompt_mgr = get_prompt_manager()
     messages_to_send: list[BaseMessage] = []
+    is_telephony = is_voice_telephony_request(state)
 
     has_system = any(isinstance(m, SystemMessage) for m in existing_messages)
     if not has_system:
@@ -106,7 +156,11 @@ def build_reason_messages(
             verbosity=getattr(settings, "AGENT_VERBOSITY", "concise"),
             base_prompt=system_prompt or getattr(settings, "AGENT_SYSTEM_PROMPT", None),
         )
+        if is_telephony:
+            sys_content += TELEPHONY_VOICE_DIRECTIVE
         messages_to_send.append(SystemMessage(content=sys_content))
+    elif is_telephony:
+        messages_to_send.append(SystemMessage(content=TELEPHONY_VOICE_DIRECTIVE))
 
     messages_to_send.extend(existing_messages)
 

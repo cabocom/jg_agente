@@ -25,6 +25,26 @@ def _detect_meta_commentary(text: str) -> bool:
     return any(re.search(p, text, re.IGNORECASE) for p in patterns)
 
 
+def sanitize_for_voice_tts(text: str) -> str:
+    """Adapta el texto para locución telefónica (TTS): elimina URLs, citas de fuentes y markdown."""
+    if not text:
+        return ""
+    # 1. Eliminar URLs completas
+    cleaned = re.sub(r"https?://\S+", "", text)
+    # 2. Transformar enlaces markdown [texto](url) -> texto
+    cleaned = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", cleaned)
+    # 3. Eliminar citaciones de fuentes tipo 'Fuente: ...' o '(Fuente: ...)'
+    cleaned = re.sub(
+        r"(?i)\(?(?:fuente|fuentes|disponible en|según datos de)\s*:\s*[^\n.)]*\)?", "", cleaned
+    )
+    # 4. Eliminar símbolos markdown
+    cleaned = re.sub(r"[*_#`~]+", "", cleaned)
+    cleaned = re.sub(r"^\s*[-•*]\s+", "", cleaned, flags=re.MULTILINE)
+    # 5. Normalizar espacios
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
 def _find_clean_tool_output(records: list[Any]) -> str | None:
     """Busca en orden inverso la última salida textual limpia de una herramienta."""
     for rec in reversed(records):
@@ -69,6 +89,40 @@ def _synthesize_tool_execution_output(records: list[Any], is_failed: bool) -> st
 
 
 def synthesize_final_response(
+    state: AgentState,
+    is_cancelled: bool,
+    is_rejected: bool,
+    is_failed: bool,
+    is_resolved: bool,
+    is_iteration_limit_reached: bool,
+    records: list[Any],
+    errors: list[Any],
+    last_eval: Any,
+    approval_val: Any,
+    max_iterations: int,
+) -> str:
+    """Determina la respuesta textual final aplicando sanitización TTS para canales de voz."""
+    raw_res = _resolve_raw_final_response(
+        state=state,
+        is_cancelled=is_cancelled,
+        is_rejected=is_rejected,
+        is_failed=is_failed,
+        is_resolved=is_resolved,
+        is_iteration_limit_reached=is_iteration_limit_reached,
+        records=records,
+        errors=errors,
+        last_eval=last_eval,
+        approval_val=approval_val,
+        max_iterations=max_iterations,
+    )
+    from app.nodes.reason_context import is_voice_telephony_request
+
+    if is_voice_telephony_request(state):
+        return sanitize_for_voice_tts(raw_res)
+    return raw_res
+
+
+def _resolve_raw_final_response(
     state: AgentState,
     is_cancelled: bool,
     is_rejected: bool,
