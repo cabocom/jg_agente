@@ -66,12 +66,16 @@ services:
     networks:
       - jg_agente_net
       - jg_network
+      - jg_mcp_internal
 
 networks:
   jg_agente_net:
     driver: bridge
   jg_network:
     name: jg_network
+    external: true
+  jg_mcp_internal:
+    name: jg_mcp_internal
     external: true
 
 volumes:
