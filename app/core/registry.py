@@ -11,7 +11,7 @@ Gestiona la indexación de herramientas (AgentTool), motores de dominio (BaseEng
 y plugins (BasePlugin) con detección estricta de conflictos en tiempo de arranque.
 """
 
-from typing import Any
+from typing import Any, cast
 
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
@@ -44,7 +44,7 @@ def _extract_input_schema(tool: AgentTool) -> dict[str, Any]:
     """Extrae el JSON Schema del modelo Pydantic de argumentos o un objeto abierto por defecto."""
     schema = getattr(tool, "args_schema", None)
     if schema is not None and hasattr(schema, "model_json_schema"):
-        return schema.model_json_schema()
+        return cast(dict[str, Any], schema.model_json_schema())
     return {"type": "object", "properties": {}, "additionalProperties": True}
 
 

@@ -10,7 +10,7 @@
 import ipaddress
 import logging
 import socket
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 from jg_sdk.security.ssrf import SSRFValidator as SdkSSRFValidator
@@ -64,14 +64,14 @@ class SSRFValidator(SdkSSRFValidator):
             enforce=enf,
         )
 
-    def resolve_host(self, hostname: str, port: int = 80) -> set[str]:
-        """Resuelve el hostname sincrónicamente devolviendo el conjunto de IPs."""
-        return set(super().resolve_host(hostname, port))
+    def resolve_host(self, hostname: str, port: int = 80) -> list[str]:
+        """Resuelve el hostname sincrónicamente devolviendo la lista de IPs."""
+        return list(dict.fromkeys(super().resolve_host(hostname, port)))
 
-    async def resolve_host_async(self, hostname: str, port: int = 80) -> set[str]:
+    async def resolve_host_async(self, hostname: str, port: int = 80) -> list[str]:
         """Resuelve el hostname asíncronamente sin bloquear el bucle de eventos."""
         resolved = await super().resolve_host_async(hostname, port)
-        return set(resolved)
+        return list(dict.fromkeys(resolved))
 
     def _validate_pre_dns(
         self, url: str
@@ -86,7 +86,7 @@ class SSRFValidator(SdkSSRFValidator):
         return _build_pinned_info_func(parsed, hostname, chosen_ip)
 
     def _check_resolved_ips(
-        self, hostname: str, resolved_ips: set[str]
+        self, hostname: str, resolved_ips: Iterable[str]
     ) -> tuple[bool, str | None, list[str]]:
         """Verifica que ninguna IP resuelta pertenezca a un rango bloqueado."""
         if not resolved_ips:
