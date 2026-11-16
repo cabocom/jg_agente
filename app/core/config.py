@@ -241,6 +241,10 @@ class Settings(BaseSettings):
         ),
         description="Prompt del sistema base para el razonamiento cognitivo",
     )
+    AGENT_SYSTEM_PROMPT: str | None = Field(
+        default=None,
+        description="Prompt del sistema personalizado para el agente que sobreescribe la plantilla por defecto",
+    )
     AGENT_VERBOSITY: str = Field(
         default="concise",
         description="Nivel de verbosidad de las respuestas: 'concise', 'balanced', 'detailed'.",

@@ -104,7 +104,7 @@ def build_reason_messages(
         sys_content = prompt_mgr.get_system_prompt(
             locale=locale,
             verbosity=getattr(settings, "AGENT_VERBOSITY", "concise"),
-            base_prompt=system_prompt,
+            base_prompt=system_prompt or getattr(settings, "AGENT_SYSTEM_PROMPT", None),
         )
         messages_to_send.append(SystemMessage(content=sys_content))
 
