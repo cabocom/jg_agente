@@ -7,4 +7,4 @@
 
 """Paquete principal de jg_agente (Execution Plane)."""
 
-__version__ = "2.0.0"
+__version__ = "1.4.0"

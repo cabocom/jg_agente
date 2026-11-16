@@ -1,6 +1,6 @@
 [project]
 name = "jg-agente"
-version = "2.0.0"
+version = "1.4.0"
 description = "Motor Autónomo de Ejecución Cognitiva y Accionamiento (Execution Plane)"
 readme = "README.md"
 requires-python = ">=3.11"
