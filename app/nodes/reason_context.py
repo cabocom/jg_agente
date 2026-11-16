@@ -90,26 +90,26 @@ def _build_evaluation_guidance(
     return HumanMessage(content=guidance_text)
 
 
-TELEPHONY_VOICE_DIRECTIVE = (
-    "\n\n[MODO TELEFONÍA / VOZ TTS ACTIVADO]\n"
-    "Esta petición proviene de una llamada telefónica por voz (Asterisk PBX) que será locutada mediante TTS:\n"
+SHORT_ANSWER_DIRECTIVE = (
+    "\n\n[MODO RESPUESTA CORTA / SHORT ANSWER ACTIVADO]\n"
     "- Responde de forma MUY CORTA, CONCISA Y DIRECTA (máximo 1 o 2 oraciones breves).\n"
     "- NUNCA cites fuentes, ni enlaces web, ni URLs (nada de 'https://...', 'AS.com', 'Marca.com', 'fuente:').\n"
-    "- Habla de forma natural y fluida para ser escuchada por voz, sin formato markdown (sin asteriscos, sin viñetas, sin negritas)."
+    "- Formato limpio y fluido, sin sintaxis markdown (sin asteriscos, sin viñetas, sin negritas)."
 )
 
 
-def is_voice_telephony_request(state: AgentState | dict[str, Any]) -> bool:
-    """Determina si la solicitud actual proviene de un canal de telefonía/voz (Asterisk PBX / TTS)."""
+def is_short_answer_request(state: AgentState | dict[str, Any]) -> bool:
+    """Determina si la solicitud requiere una respuesta corta y concisa (short_answer)."""
     req = state.get("request")
     if not req:
         return False
 
     params = getattr(req, "parameters", None) or {}
     meta = getattr(req, "metadata", None) or {}
-    user_ctx = getattr(req, "user_context", None)
 
     if isinstance(params, dict):
+        if params.get("short_answer") or params.get("verbosity") == "short":
+            return True
         if params.get("is_telephony") or params.get("simulation_type") in (
             "asterisk_voice",
             "telephony_voice",
@@ -120,6 +120,8 @@ def is_voice_telephony_request(state: AgentState | dict[str, Any]) -> bool:
             return True
 
     if isinstance(meta, dict):
+        if meta.get("short_answer") or meta.get("verbosity") == "short":
+            return True
         if meta.get("simulation_type") in ("asterisk_voice", "telephony_voice") or meta.get(
             "is_telephony"
         ):
@@ -128,13 +130,12 @@ def is_voice_telephony_request(state: AgentState | dict[str, Any]) -> bool:
         if ch.startswith("sip/") or "asterisk" in ch or "voice" in ch:
             return True
 
-    if user_ctx:
-        role = getattr(user_ctx, "role", "") or ""
-        email = getattr(user_ctx, "email", "") or ""
-        if role == "caller" or "@telephony.local" in email:
-            return True
-
     return False
+
+
+def is_voice_telephony_request(state: AgentState | dict[str, Any]) -> bool:
+    """Alias retrocompatible para is_short_answer_request."""
+    return is_short_answer_request(state)
 
 
 def build_reason_messages(
@@ -147,7 +148,7 @@ def build_reason_messages(
     existing_messages = list(state.get("messages") or [])
     prompt_mgr = get_prompt_manager()
     messages_to_send: list[BaseMessage] = []
-    is_telephony = is_voice_telephony_request(state)
+    is_short = is_short_answer_request(state)
 
     has_system = any(isinstance(m, SystemMessage) for m in existing_messages)
     if not has_system:
@@ -156,11 +157,11 @@ def build_reason_messages(
             verbosity=getattr(settings, "AGENT_VERBOSITY", "concise"),
             base_prompt=system_prompt or getattr(settings, "AGENT_SYSTEM_PROMPT", None),
         )
-        if is_telephony:
-            sys_content += TELEPHONY_VOICE_DIRECTIVE
+        if is_short:
+            sys_content += SHORT_ANSWER_DIRECTIVE
         messages_to_send.append(SystemMessage(content=sys_content))
-    elif is_telephony:
-        messages_to_send.append(SystemMessage(content=TELEPHONY_VOICE_DIRECTIVE))
+    elif is_short:
+        messages_to_send.append(SystemMessage(content=SHORT_ANSWER_DIRECTIVE))
 
     messages_to_send.extend(existing_messages)
 

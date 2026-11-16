@@ -25,8 +25,8 @@ def _detect_meta_commentary(text: str) -> bool:
     return any(re.search(p, text, re.IGNORECASE) for p in patterns)
 
 
-def sanitize_for_voice_tts(text: str) -> str:
-    """Adapta el texto para locución telefónica (TTS): elimina URLs, citas de fuentes y markdown."""
+def sanitize_for_short_answer(text: str) -> str:
+    """Adapta el texto para modalidad de respuesta corta: elimina URLs, citas de fuentes y markdown."""
     if not text:
         return ""
     # 1. Eliminar URLs completas
@@ -43,6 +43,11 @@ def sanitize_for_voice_tts(text: str) -> str:
     # 5. Normalizar espacios
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
+
+
+def sanitize_for_voice_tts(text: str) -> str:
+    """Alias retrocompatible para sanitize_for_short_answer."""
+    return sanitize_for_short_answer(text)
 
 
 def _find_clean_tool_output(records: list[Any]) -> str | None:
@@ -101,7 +106,7 @@ def synthesize_final_response(
     approval_val: Any,
     max_iterations: int,
 ) -> str:
-    """Determina la respuesta textual final aplicando sanitización TTS para canales de voz."""
+    """Determina la respuesta textual final aplicando formateo de respuesta corta si se solicita."""
     raw_res = _resolve_raw_final_response(
         state=state,
         is_cancelled=is_cancelled,
@@ -115,10 +120,10 @@ def synthesize_final_response(
         approval_val=approval_val,
         max_iterations=max_iterations,
     )
-    from app.nodes.reason_context import is_voice_telephony_request
+    from app.nodes.reason_context import is_short_answer_request
 
-    if is_voice_telephony_request(state):
-        return sanitize_for_voice_tts(raw_res)
+    if is_short_answer_request(state):
+        return sanitize_for_short_answer(raw_res)
     return raw_res
 
 
