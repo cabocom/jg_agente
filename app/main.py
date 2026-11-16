@@ -15,7 +15,7 @@ from typing import Any
 from fastapi import FastAPI
 
 from app import __version__
-from app.api import executions_router, telemetry_router
+from app.api import executions_router, telemetry_router, tools_router
 from app.core.boot import init_agent_capabilities
 from app.core.checkpointer import close_checkpointer, get_checkpointer
 from app.core.config import settings
@@ -99,6 +99,7 @@ app.add_middleware(CorrelationIdMiddleware)
 # Montar enrutadores REST de la API
 app.include_router(executions_router)
 app.include_router(telemetry_router)
+app.include_router(tools_router)
 
 
 @app.get("/", tags=["Root"])

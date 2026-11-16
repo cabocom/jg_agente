@@ -9,5 +9,6 @@
 
 from app.api.executions import router as executions_router
 from app.api.telemetry import router as telemetry_router
+from app.api.tools import router as tools_router
 
-__all__ = ["executions_router", "telemetry_router"]
+__all__ = ["executions_router", "telemetry_router", "tools_router"]

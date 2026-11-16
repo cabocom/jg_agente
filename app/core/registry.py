@@ -40,6 +40,14 @@ RISK_WEIGHTS: dict[RiskLevel, int] = {
 }
 
 
+def _extract_input_schema(tool: AgentTool) -> dict[str, Any]:
+    """Extrae el JSON Schema del modelo Pydantic de argumentos o un objeto abierto por defecto."""
+    schema = getattr(tool, "args_schema", None)
+    if schema is not None and hasattr(schema, "model_json_schema"):
+        return schema.model_json_schema()
+    return {"type": "object", "properties": {}, "additionalProperties": True}
+
+
 class CapabilityRegistry:
     """Catálogo centralizado e inmutable de capacidades en tiempo de ejecución.
 
@@ -110,23 +118,14 @@ class CapabilityRegistry:
                     result = _tool.run(*args, **kwargs)
                     return str(result)
 
+                kw: dict[str, Any] = {
+                    "func": _wrapper,
+                    "name": t.name,
+                    "description": t.description,
+                }
                 if getattr(t, "args_schema", None) is not None:
-                    tools.append(
-                        StructuredTool.from_function(
-                            func=_wrapper,
-                            name=t.name,
-                            description=t.description,
-                            args_schema=t.args_schema,
-                        )
-                    )
-                else:
-                    tools.append(
-                        StructuredTool.from_function(
-                            func=_wrapper,
-                            name=t.name,
-                            description=t.description,
-                        )
-                    )
+                    kw["args_schema"] = t.args_schema
+                tools.append(StructuredTool.from_function(**kw))
         return tools
 
     @property
@@ -263,6 +262,7 @@ class CapabilityRegistry:
                     "read_only": t.read_only,
                     "reversible": t.reversible,
                     "makes_http_requests": t.makes_http_requests,
+                    "input_schema": _extract_input_schema(t),
                 }
                 for t in self._tools.values()
             ],

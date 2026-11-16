@@ -7,17 +7,16 @@
 
 """Validador central de destinos de red para prevención de ataques SSRF."""
 
-import asyncio
 import ipaddress
 import logging
 import socket
 from collections.abc import Sequence
 from typing import Any
 
+from jg_sdk.security.ssrf import SSRFValidator as SdkSSRFValidator
+
 from app.core.config import settings
 from app.security.ip_policy import (
-    DEFAULT_BLOCKED_NETWORKS,
-    RFC1918_NETWORKS,
     SSRFValidationError,
 )
 from app.security.ssrf_url_inspector import (
@@ -33,8 +32,12 @@ from app.security.ssrf_url_inspector import (
 logger = logging.getLogger("jg_agente.security.ssrf_validator")
 
 
-class SSRFValidator:
-    """Validador de destinos de red contra ataques SSRF y bypass de seguridad."""
+class SSRFValidator(SdkSSRFValidator):
+    """Validador de destinos de red contra ataques SSRF y bypass de seguridad.
+
+    Hereda del validador central de jg_sdk.security.ssrf e inyecta la configuración
+    del entorno de jg_agente (settings.SSRF_*).
+    """
 
     def __init__(
         self,
@@ -45,90 +48,30 @@ class SSRFValidator:
         enforce: bool | None = None,
     ) -> None:
         raw_hosts = allowed_hosts if allowed_hosts is not None else settings.SSRF_ALLOWED_HOSTS
-        self.allowed_hosts: set[str] = {h.lower().strip() for h in raw_hosts if h.strip()}
-
         raw_nets = (
             allowed_networks if allowed_networks is not None else settings.SSRF_ALLOWED_NETWORKS
         )
-        self.allowed_networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
-        for net in raw_nets:
-            if isinstance(net, (ipaddress.IPv4Network, ipaddress.IPv6Network)):
-                self.allowed_networks.append(net)
-            elif isinstance(net, str) and net.strip():
-                try:
-                    self.allowed_networks.append(ipaddress.ip_network(net.strip(), strict=False))
-                except ValueError as exc:
-                    logger.warning("Rango de red en allowlist no válido '%s': %s", net, exc)
-
-        self.allow_private_networks: bool = (
+        priv = (
             allow_private_networks
             if allow_private_networks is not None
             else settings.SSRF_ALLOW_PRIVATE_NETWORKS
         )
-        self.enforce: bool = enforce if enforce is not None else settings.SSRF_ENFORCE_PROTECTION
-
-    def is_ip_allowed_explicitly(self, ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-        """Comprueba si una dirección IP se encuentra en los rangos CIDR permitidos."""
-        return any(ip in net for net in self.allowed_networks)
-
-    def is_ip_blocked(
-        self, ip: ipaddress.IPv4Address | ipaddress.IPv6Address
-    ) -> tuple[bool, str | None]:
-        """Verifica si una IP está en rangos no autorizados."""
-        mapped = getattr(ip, "ipv4_mapped", None)
-        if mapped is not None:
-            blocked, reason = self.is_ip_blocked(mapped)
-            return (True, f"{reason} (IPv4 mapeada en IPv6: {ip})") if blocked else (False, None)
-
-        if self.is_ip_allowed_explicitly(ip):
-            return False, None
-
-        for blocked_net in DEFAULT_BLOCKED_NETWORKS:
-            if ip in blocked_net:
-                if self.allow_private_networks and blocked_net in RFC1918_NETWORKS:
-                    continue
-                return True, f"IP {ip} bloqueada por pertenecer a rango restringido {blocked_net}"
-
-        return False, None
-
-    def validate_ip(self, ip_str: str) -> tuple[bool, str | None]:
-        """Valida una dirección IP representada como texto."""
-        if not self.enforce:
-            return True, None
-        try:
-            parsed_ip = ipaddress.ip_address(ip_str.strip())
-        except ValueError:
-            return False, f"Dirección IP no válida: '{ip_str}'"
-
-        blocked, reason = self.is_ip_blocked(parsed_ip)
-        return (False, reason) if blocked else (True, None)
-
-    def is_host_allowed_explicitly(self, hostname: str) -> bool:
-        """Verifica si el hostname o un sufijo de dominio está en la allowlist."""
-        host_lower = hostname.lower().strip()
-        if host_lower in self.allowed_hosts:
-            return True
-        for allowed in self.allowed_hosts:
-            if allowed.startswith(".") and host_lower.endswith(allowed):
-                return True
-            if allowed.startswith("*.") and host_lower.endswith(allowed[1:]):
-                return True
-        return False
+        enf = enforce if enforce is not None else settings.SSRF_ENFORCE_PROTECTION
+        super().__init__(
+            allowed_hosts=raw_hosts,
+            allowed_networks=raw_nets,
+            allow_private_networks=priv,
+            enforce=enf,
+        )
 
     def resolve_host(self, hostname: str, port: int = 80) -> set[str]:
         """Resuelve el hostname sincrónicamente devolviendo el conjunto de IPs."""
-        addr_info = socket.getaddrinfo(
-            hostname, port, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM
-        )
-        return {str(info[4][0]) for info in addr_info}
+        return set(super().resolve_host(hostname, port))
 
     async def resolve_host_async(self, hostname: str, port: int = 80) -> set[str]:
         """Resuelve el hostname asíncronamente sin bloquear el bucle de eventos."""
-        loop = asyncio.get_running_loop()
-        addr_info = await loop.getaddrinfo(
-            hostname, port, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM
-        )
-        return {str(info[4][0]) for info in addr_info}
+        resolved = await super().resolve_host_async(hostname, port)
+        return set(resolved)
 
     def _validate_pre_dns(
         self, url: str

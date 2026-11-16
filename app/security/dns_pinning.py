@@ -11,8 +11,7 @@ import ipaddress
 import logging
 from typing import Any
 
-from httpcore._backends.anyio import AnyIOBackend
-from httpcore._backends.sync import SyncBackend
+from httpcore import AnyIOBackend, SyncBackend
 
 from app.security.ip_policy import SSRFValidationError
 from app.security.ssrf_validator import SSRFValidator, get_ssrf_validator

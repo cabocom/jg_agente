@@ -14,7 +14,7 @@ from app import __version__
 
 def test_package_metadata() -> None:
     """Verifica que los metadatos del paquete app estén definidos."""
-    assert __version__ == "0.1.0"
+    assert __version__ == "2.0.0"
 
 
 def test_python_version_supported() -> None:

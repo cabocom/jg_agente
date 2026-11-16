@@ -191,30 +191,25 @@ Aunque `jg_agente` puede operar de forma aislada, en infraestructuras productiva
 **NO, por defecto NO es bloqueante (`REQUIRE_DASHBOARD_REGISTRATION=False`).**  
 `jg_agente` está diseñado con máxima tolerancia a fallos para operar en entornos autónomos o desconectados. Durante la secuencia de arranque en [app/core/registration.py](app/core/registration.py), el agente resuelve su identidad y credenciales siguiendo un orden de prelación determinista:
 
-```mermaid
-graph TD
-    A[Inicio: Arranque de jg_agente] --> B{¿PERMANENT_AGENT_SECRET y AGENT_ID definidos en env?}
-    B -->|SÍ: Modo Estático / Standalone| C[Cargar credenciales desde variables de entorno]
-    C --> D{¿VERIFY_CREDENTIALS_ON_BOOT == True?}
-    D -->|NO| E[Arranque Inmediato 100% Autónomo]
-    D -->|SÍ| F[Sondear DASHBOARD_URL /api/v1/agents/heartbeat]
-    F -->|Éxito| E
-    F -->|Fallo de Conexión / Timeout| G[Log Warning: Dashboard no disponible] --> E
-    F -->|HTTP 401 Rechazado| H[Error Crítico: Abortar Arranque]
-
-    B -->|NO| I{¿Existe .agent_credentials.json?}
-    I -->|SÍ: Modo Persistente| J[Cargar credenciales locales POSIX 0600] --> D
-
-    I -->|NO| K{¿Existe AGENT_BOOTSTRAP_TOKEN?}
-    K -->|SÍ: Modo Zero-Trust Bootstrap| L[POST DASHBOARD_URL/api/v1/agents/register]
-    L -->|Éxito| M[Persistir credenciales atómicamente en disco] --> E
-    L -->|Fallo de Conexión / 5xx| N{¿REQUIRE_DASHBOARD_REGISTRATION?}
-    N -->|True| O[Abortar Arranque: RegistrationError]
-    N -->|False: Default| P[Log Warning: Continuar sin registrar] --> E
-
-    K -->|NO| Q{¿REQUIRE_DASHBOARD_REGISTRATION?}
-    Q -->|True| O
-    Q -->|False: Default| R[Modo Local / Desconectado: jg_agente_local] --> E
+```text
+  [Inicio: Arranque de jg_agente]
+                 │
+                 ▼
+  ¿PERMANENT_AGENT_SECRET y AGENT_ID en env?
+         ├─── SÍ ───► Cargar credenciales de env ──► ¿VERIFY_CREDENTIALS_ON_BOOT?
+         │                                                    ├─── NO ──► Arranque Autónomo
+         │                                                    └─── SÍ ──► Sondear heartbeat
+         └─── NO
+                 │
+                 ▼
+  ¿Existe .agent_credentials.json?
+         ├─── SÍ ───► Cargar credenciales locales POSIX 0600
+         └─── NO
+                 │
+                 ▼
+  ¿Existe AGENT_BOOTSTRAP_TOKEN?
+         ├─── SÍ ───► POST /api/v1/agents/register ──► Persistir credenciales ──► Arranque
+         └─── NO ───► Modo Local / Desconectado (jg_agente_local)
 ```
 
 ### Resumen de Modos de Operación:
