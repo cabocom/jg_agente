@@ -276,15 +276,14 @@ def test_discover_local_plugins_with_plugin_class(tmp_path: Path) -> None:
     (plugin_dir / "__init__.py").write_text("", encoding="utf-8")
 
     plugin_code = """
-from app.plugins.base import BasePlugin, PluginMetadata
-from app.models.tools import AgentTool
-from app.plugins.base import BaseEngine
+from app.plugins.base import BaseEngine, BasePlugin, PluginMetadata
+from jg_sdk.contracts_tools import AgentTool
 
 class LocalPlugin(BasePlugin):
     def get_plugin_metadata(self) -> PluginMetadata:
         return PluginMetadata(name="local_sample", version="1.0.0", description="Local plugin")
 
-    def register_tools(self) -> list[SDKAgentTool]:
+    def register_tools(self) -> list[AgentTool]:
         return []
 
     def register_engines(self) -> dict[str, BaseEngine]:
