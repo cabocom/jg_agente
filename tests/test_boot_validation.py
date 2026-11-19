@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
+from jg_sdk.contracts_tools import AgentTool as SDKAgentTool
 from pydantic import BaseModel
 
 from app.core.boot import (
@@ -60,7 +61,7 @@ class SamplePlugin(BasePlugin):
     def get_plugin_metadata(self) -> PluginMetadata:
         return PluginMetadata(name=self._name, version="1.0.0", description="Plugin esencial")
 
-    def register_tools(self) -> list[AgentTool]:
+    def register_tools(self) -> list[SDKAgentTool]:
         return [make_test_tool(f"{self._name}_tool")]
 
     def register_engines(self) -> dict[str, BaseEngine]:
@@ -182,7 +183,7 @@ def test_init_agent_capabilities_propagates_conflict_error() -> None:
         def get_plugin_metadata(self) -> PluginMetadata:
             return PluginMetadata(name="clash_plugin", version="1.0.0")
 
-        def register_tools(self) -> list[AgentTool]:
+        def register_tools(self) -> list[SDKAgentTool]:
             return []
 
         def register_engines(self) -> dict[str, BaseEngine]:

@@ -8,6 +8,7 @@
 """Tests unitarios para CapabilityRegistry y detección estricta de conflictos de arranque."""
 
 import pytest
+from jg_sdk.contracts_tools import AgentTool as SDKAgentTool
 from pydantic import BaseModel
 
 from app.core.registry import BootConflictError, CapabilityRegistry
@@ -237,7 +238,7 @@ class SamplePlugin(BasePlugin):
     def get_plugin_metadata(self) -> PluginMetadata:
         return PluginMetadata(name=self._name, version="1.0.0", description="Plugin de prueba")
 
-    def register_tools(self) -> list[AgentTool]:
+    def register_tools(self) -> list[SDKAgentTool]:
         return [make_tool(f"{self._name}_tool")]
 
     def register_engines(self) -> dict[str, BaseEngine]:
@@ -273,7 +274,7 @@ def test_register_plugin_propagates_tool_conflict() -> None:
         def get_plugin_metadata(self) -> PluginMetadata:
             return PluginMetadata(name="bad-plugin", version="1.0.0")
 
-        def register_tools(self) -> list[AgentTool]:
+        def register_tools(self) -> list[SDKAgentTool]:
             return [make_tool("conflicting_tool")]
 
         def register_engines(self) -> dict[str, BaseEngine]:

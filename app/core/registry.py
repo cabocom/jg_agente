@@ -13,6 +13,7 @@ y plugins (BasePlugin) delegando en sub-registros especializados (SOLID/ISP).
 
 from typing import Any, cast
 
+from jg_sdk.contracts_tools import AgentTool as SDKAgentTool
 from pydantic import BaseModel
 
 from app.core.registry_subregistries import (
@@ -26,7 +27,7 @@ from app.models.tools import AgentTool
 from app.plugins.base import BasePlugin
 
 
-def _extract_input_schema(tool: AgentTool) -> dict[str, Any]:
+def _extract_input_schema(tool: AgentTool | SDKAgentTool) -> dict[str, Any]:
     """Extrae el JSON Schema del modelo Pydantic de argumentos o un objeto abierto por defecto."""
     schema = getattr(tool, "args_schema", None)
     if schema is not None and hasattr(schema, "model_json_schema"):
@@ -46,7 +47,7 @@ class CapabilityRegistry:
 
     # --- Fachadas para Compatibilidad Hacia Atrás (Regla 8.3 AGENTS.md) ---
     @property
-    def _tools(self) -> dict[str, AgentTool]:
+    def _tools(self) -> dict[str, AgentTool | SDKAgentTool]:
         return self.tools._tools
 
     @property

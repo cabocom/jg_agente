@@ -8,6 +8,7 @@
 """Tests unitarios para la interfaz abstracta BasePlugin, BaseEngine y PluginMetadata."""
 
 import pytest
+from jg_sdk.contracts_tools import AgentTool as SDKAgentTool
 from pydantic import BaseModel, ValidationError
 
 from app.models.tools import AgentTool, RiskLevel, ToolResult
@@ -69,7 +70,7 @@ class ValidPlugin(BasePlugin):
             dependencies=[],
         )
 
-    def register_tools(self) -> list[AgentTool]:
+    def register_tools(self) -> list[SDKAgentTool]:
         return [
             AgentTool(
                 name="dummy_tool",
@@ -224,7 +225,7 @@ def test_default_models_and_engines_default() -> None:
         def get_plugin_metadata(self) -> PluginMetadata:
             return PluginMetadata(name="minimal-plugin", version="0.1.0")
 
-        def register_tools(self) -> list[AgentTool]:
+        def register_tools(self) -> list[SDKAgentTool]:
             return []
 
         def register_engines(self) -> dict[str, BaseEngine]:

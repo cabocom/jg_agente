@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from jg_sdk.contracts_tools import AgentTool as SDKAgentTool
 from pydantic import BaseModel
 
 from app.core.plugin_manager import (
@@ -45,7 +46,7 @@ class MockPluginA(BasePlugin):
     def get_plugin_metadata(self) -> PluginMetadata:
         return PluginMetadata(name="plugin_a", version="1.0.0", description="Plugin A base")
 
-    def register_tools(self) -> list[AgentTool]:
+    def register_tools(self) -> list[SDKAgentTool]:
         return [
             AgentTool(
                 name="tool_a",
@@ -82,7 +83,7 @@ class MockPluginB(BasePlugin):
             dependencies=["plugin_a"],
         )
 
-    def register_tools(self) -> list[AgentTool]:
+    def register_tools(self) -> list[SDKAgentTool]:
         return [
             AgentTool(
                 name="tool_b",
@@ -163,7 +164,7 @@ def test_circular_dependency_raises_plugin_dependency_error() -> None:
         def get_plugin_metadata(self) -> PluginMetadata:
             return PluginMetadata(name="plugin_x", version="1.0.0", dependencies=["plugin_y"])
 
-        def register_tools(self) -> list[AgentTool]:
+        def register_tools(self) -> list[SDKAgentTool]:
             return []
 
         def register_engines(self) -> dict[str, BaseEngine]:
@@ -173,7 +174,7 @@ def test_circular_dependency_raises_plugin_dependency_error() -> None:
         def get_plugin_metadata(self) -> PluginMetadata:
             return PluginMetadata(name="plugin_y", version="1.0.0", dependencies=["plugin_x"])
 
-        def register_tools(self) -> list[AgentTool]:
+        def register_tools(self) -> list[SDKAgentTool]:
             return []
 
         def register_engines(self) -> dict[str, BaseEngine]:
@@ -283,7 +284,7 @@ class LocalPlugin(BasePlugin):
     def get_plugin_metadata(self) -> PluginMetadata:
         return PluginMetadata(name="local_sample", version="1.0.0", description="Local plugin")
 
-    def register_tools(self) -> list[AgentTool]:
+    def register_tools(self) -> list[SDKAgentTool]:
         return []
 
     def register_engines(self) -> dict[str, BaseEngine]:

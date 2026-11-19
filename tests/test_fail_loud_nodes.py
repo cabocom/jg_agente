@@ -11,6 +11,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from langchain_core.messages import ToolCall
 
 from app.core.llm_openai import _extract_tool_calls_from_choice
 from app.core.registry import CapabilityRegistry
@@ -121,7 +122,7 @@ async def test_reason_plan_expander_propagates_llm_exception() -> None:
     mock_llm = MagicMock()
     mock_llm.ainvoke = AsyncMock(side_effect=RuntimeError("Fallo en expansor HITL"))
 
-    initial_calls = [
+    initial_calls: list[ToolCall] = [
         {
             "id": "call-1",
             "name": "docker:restart",

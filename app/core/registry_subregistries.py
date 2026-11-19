@@ -7,8 +7,10 @@
 
 """Sub-registros especializados para herramientas, motores y plugins (SOLID/ISP)."""
 
+import builtins
 from typing import Any
 
+from jg_sdk.contracts_tools import AgentTool as SDKAgentTool
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel
 
@@ -40,9 +42,9 @@ class ToolRegistry:
     """Sub-registro especializado para la gestión y adaptación de herramientas (AgentTool)."""
 
     def __init__(self) -> None:
-        self._tools: dict[str, AgentTool] = {}
+        self._tools: dict[str, AgentTool | SDKAgentTool] = {}
 
-    def register(self, tool: AgentTool) -> None:
+    def register(self, tool: AgentTool | SDKAgentTool) -> None:
         """Registra una herramienta garantizando unicidad de nombre."""
         if tool.name in self._tools:
             raise BootConflictError(
@@ -50,7 +52,7 @@ class ToolRegistry:
             )
         self._tools[tool.name] = tool
 
-    def get(self, name: str) -> AgentTool | None:
+    def get(self, name: str) -> AgentTool | SDKAgentTool | None:
         """Obtiene una herramienta por nombre."""
         return self._tools.get(name)
 
@@ -62,7 +64,7 @@ class ToolRegistry:
         self,
         category: str | None = None,
         max_risk: RiskLevel | None = None,
-    ) -> list[AgentTool]:
+    ) -> builtins.list[AgentTool | SDKAgentTool]:
         """Lista las herramientas registradas aplicando filtros opcionales."""
         max_val = RISK_WEIGHTS.get(max_risk, 4) if max_risk else 4
         return [
@@ -76,9 +78,9 @@ class ToolRegistry:
         self,
         category: str | None = None,
         max_risk: RiskLevel | None = None,
-    ) -> list[BaseTool]:
+    ) -> builtins.list[BaseTool]:
         """Exporta las herramientas filtradas como instancias nativas BaseTool de LangChain."""
-        tools: list[BaseTool] = []
+        tools: builtins.list[BaseTool] = []
         for t in self.list(category=category, max_risk=max_risk):
             if hasattr(t, "as_langchain_tool") and callable(t.as_langchain_tool):
                 tools.append(t.as_langchain_tool())
@@ -98,7 +100,7 @@ class ToolRegistry:
         return tools
 
     @property
-    def names(self) -> list[str]:
+    def names(self) -> builtins.list[str]:
         """Nombres de todas las herramientas registradas."""
         return list(self._tools.keys())
 

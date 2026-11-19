@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
+from jg_sdk.contracts_tools import AgentTool as SDKAgentTool
 from pydantic import BaseModel
 
 from app import __version__
@@ -37,7 +38,7 @@ class SamplePlugin(BasePlugin):
     def get_plugin_metadata(self) -> PluginMetadata:
         return PluginMetadata(name="telemetry_sample_plugin", version="1.0.0")
 
-    def register_tools(self) -> list[AgentTool]:
+    def register_tools(self) -> list[SDKAgentTool]:
         return [
             AgentTool(
                 name="telemetry_test_tool",
