@@ -185,7 +185,11 @@ async def test_lifespan_preinitializes_security_singletons() -> None:
 
     with (
         patch("app.main.init_agent_capabilities", return_value=({}, mock_plugin_manager)),
-        patch("app.main.get_checkpointer", return_value=mock_checkpointer),
+        patch(
+            "app.main.get_checkpointer_async",
+            new_callable=AsyncMock,
+            return_value=mock_checkpointer,
+        ),
         patch("app.main.auto_register_agent", new_callable=AsyncMock, return_value=None),
         patch("app.main.close_checkpointer") as mock_close_checkpointer,
     ):

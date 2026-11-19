@@ -7,11 +7,14 @@
 
 """Sanitización de argumentos, prevención de inyección shell y confinamiento en Workspace Jail."""
 
+import logging
 import os
 import re
 import urllib.parse
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger("jg_agente.security.sanitizer")
 
 # Metacaracteres y secuencias sospechosas de inyección de comandos shell
 SHELL_INJECTION_PATTERN = re.compile(r"[;&$`\n\r><|\\'\"]")
@@ -47,8 +50,8 @@ def build_protected_paths() -> tuple[str, ...]:
         try:
             resolved = os.path.realpath(p)
             paths.add(resolved)
-        except Exception:
-            pass
+        except (OSError, ValueError) as err:
+            logger.debug("No se pudo resolver la ruta base '%s': %s", p, err)
     return tuple(sorted(paths))
 
 
@@ -74,8 +77,8 @@ def check_directory_traversal_or_protected_path(arg_val: str) -> tuple[bool, str
         try:
             candidates.append(os.path.realpath(clean_val))
             candidates.append(os.path.realpath(norm))
-        except Exception:
-            pass
+        except (OSError, ValueError) as err:
+            logger.debug("No se pudo resolver realpath para '%s': %s", clean_val, err)
     elif ".." in clean_val:
         norm_from_root = os.path.normpath(os.path.join("/", clean_val.lstrip("/")))
         candidates.append(norm_from_root)
@@ -84,15 +87,15 @@ def check_directory_traversal_or_protected_path(arg_val: str) -> tuple[bool, str
             candidates.append(abs_p)
             candidates.append(os.path.realpath(abs_p))
             candidates.append(os.path.realpath(norm_from_root))
-        except Exception:
-            pass
+        except (OSError, ValueError) as err:
+            logger.debug("No se pudo resolver realpath para ruta relativa '%s': %s", clean_val, err)
     elif clean_val.startswith("~"):
         try:
             expanded = os.path.expanduser(clean_val)
             candidates.append(expanded)
             candidates.append(os.path.realpath(expanded))
-        except Exception:
-            pass
+        except (OSError, ValueError) as err:
+            logger.debug("No se pudo resolver expanduser para '%s': %s", clean_val, err)
 
     for cand in candidates:
         for sys_path in PROTECTED_SYSTEM_PATHS:

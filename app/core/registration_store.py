@@ -66,6 +66,7 @@ class CredentialStore:
 
         flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
         fd = os.open(tmp_target, flags, 0o600)
+        opened_file = False
         try:
             if os.name == "posix":
                 try:
@@ -77,12 +78,16 @@ class CredentialStore:
                         e,
                     )
             with open(fd, "w", encoding="utf-8", closefd=True) as f:
+                opened_file = True
                 f.write(json_content)
                 f.flush()
                 os.fsync(f.fileno())
 
             os.replace(tmp_target, target)
         except Exception:
+            if not opened_file:
+                with contextlib.suppress(OSError):
+                    os.close(fd)
             if tmp_target.exists():
                 with contextlib.suppress(OSError):
                     tmp_target.unlink(missing_ok=True)

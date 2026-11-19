@@ -17,7 +17,7 @@ from fastapi import FastAPI
 from app import __version__
 from app.api import executions_router, telemetry_router, tools_router
 from app.core.boot import init_agent_capabilities
-from app.core.checkpointer import close_checkpointer, get_checkpointer
+from app.core.checkpointer import close_checkpointer, get_checkpointer_async
 from app.core.config import settings
 from app.core.correlation import CorrelationIdMiddleware, CorrelationLogFilter
 from app.core.heartbeat import HeartbeatService
@@ -59,7 +59,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.plugin_manager = plugin_manager
 
     # 2. Inicialización y precalentamiento del checkpointer para LangGraph
-    app.state.checkpointer = get_checkpointer()
+    app.state.checkpointer = await get_checkpointer_async()
 
     # 3. Inicialización asíncrona de plugins
     await plugin_manager.startup()

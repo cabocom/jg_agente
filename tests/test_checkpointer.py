@@ -266,3 +266,13 @@ class TestPostgresCheckpointerIntegration:
             assert "execution_finished" in event_types
         finally:
             saver.conn.close()
+
+
+@pytest.mark.asyncio
+async def test_get_checkpointer_async_memory() -> None:
+    """Verifica que get_checkpointer_async devuelva MemorySaver sin bloquear."""
+    from app.core.checkpointer import get_checkpointer_async
+
+    saver = await get_checkpointer_async(saver_type="memory")
+    assert isinstance(saver, MemorySaver)
+    assert getattr(saver, "is_degraded", None) is False

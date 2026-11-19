@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from jg_sdk.mcp.normalizer import normalize_to_json_primitives
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.enums import PolicyDecision
 from app.security.auth import verify_control_plane_auth
 from app.security.guard import SecurityGuard, get_security_guard
 
@@ -91,9 +92,10 @@ async def execute_tool_endpoint(
         execution_id=payload.execution_id,
     )
 
-    if (
-        result.metadata.get("requires_approval")
-        or result.metadata.get("security_decision") == "require_approval"
+    if result.metadata.get("requires_approval") or result.metadata.get("security_decision") in (
+        PolicyDecision.REQUIRE_HUMAN_APPROVAL.value,
+        "require_approval",
+        "require_human_approval",
     ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -105,7 +107,7 @@ async def execute_tool_endpoint(
             },
         )
 
-    if result.metadata.get("security_decision") == "deny":
+    if result.metadata.get("security_decision") in (PolicyDecision.DENY.value, "deny"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={

@@ -12,6 +12,7 @@ de checkpoints a través de la vista canónica core_checkpoints, habilitando pau
 reanudación persistente (HITL, multi-worker, fallos de nodo).
 """
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -46,6 +47,7 @@ __all__ = [
     "get_postgres_checkpointer",
     "get_memory_checkpointer",
     "get_checkpointer",
+    "get_checkpointer_async",
     "_async_sanitize_for_storage",
     "_sync_sanitize_for_storage",
 ]
@@ -135,6 +137,14 @@ def get_memory_checkpointer() -> MemorySaver:
     return MemorySaver(serde=get_default_serializer())
 
 
+def _build_fallback_memory_saver(last_exc: Exception | None = None) -> BaseCheckpointSaver[Any]:
+    """Crea una instancia de MemorySaver marcando su estado de degradación."""
+    fallback_saver = get_memory_checkpointer()
+    setattr(fallback_saver, "is_degraded", last_exc is not None)  # noqa: B010
+    setattr(fallback_saver, "degraded_reason", str(last_exc) if last_exc else None)  # noqa: B010
+    return fallback_saver
+
+
 def get_checkpointer(saver_type: str | None = None) -> BaseCheckpointSaver[Any]:
     """Factory central para obtener la instancia activa de checkpointer.
 
@@ -178,12 +188,48 @@ def get_checkpointer(saver_type: str | None = None) -> BaseCheckpointSaver[Any]:
                         exc,
                     )
 
-        fallback_saver = get_memory_checkpointer()
-        setattr(fallback_saver, "is_degraded", True)  # noqa: B010
-        setattr(fallback_saver, "degraded_reason", str(last_exc))  # noqa: B010
-        return fallback_saver
+        return _build_fallback_memory_saver(last_exc)
 
-    mem_saver = get_memory_checkpointer()
-    setattr(mem_saver, "is_degraded", False)  # noqa: B010
-    setattr(mem_saver, "degraded_reason", None)  # noqa: B010
-    return mem_saver
+    return _build_fallback_memory_saver()
+
+
+async def get_checkpointer_async(saver_type: str | None = None) -> BaseCheckpointSaver[Any]:
+    """Obtiene la instancia del checkpointer configurado usando reintentos asíncronos no bloqueantes."""
+    kind = str(
+        saver_type or getattr(settings, "CHECKPOINT_SAVER", "postgres") or "postgres"
+    ).lower()
+
+    if kind in ("postgres", "postgresql"):
+        max_retries = int(getattr(settings, "CHECKPOINT_MAX_RETRIES", 3))
+        base_backoff = float(getattr(settings, "CHECKPOINT_RETRY_BACKOFF_SECONDS", 0.5))
+        last_exc: Exception | None = None
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                saver = get_postgres_checkpointer()
+                setattr(saver, "is_degraded", False)  # noqa: B010
+                setattr(saver, "degraded_reason", None)  # noqa: B010
+                return saver
+            except Exception as exc:
+                last_exc = exc
+                if attempt < max_retries:
+                    wait_seconds = base_backoff * (2 ** (attempt - 1))
+                    logger.warning(
+                        "Intento %d/%d fallido al conectar PostgresSaver: %s. Reintentando asíncronamente en %.2fs...",
+                        attempt,
+                        max_retries,
+                        exc,
+                        wait_seconds,
+                    )
+                    await asyncio.sleep(wait_seconds)
+                else:
+                    logger.critical(
+                        "FATAL: No se pudo conectar ni inicializar PostgresSaver tras %d intentos (%s). "
+                        "El agente operará en modo degradado sin persistencia durable de checkpoints ni HITL.",
+                        max_retries,
+                        exc,
+                    )
+
+        return _build_fallback_memory_saver(last_exc)
+
+    return _build_fallback_memory_saver()

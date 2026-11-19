@@ -22,4 +22,4 @@
   3. En `app/security/sanitizer.py:50, 77, 87, 94`, capturar `(OSError, ValueError)` registrando un `logger.debug/warning` o rechazando la ruta si es irresoluble.
   4. En `app/core/registration_store.py:68-80`, asegurar el cierre de `fd` en caso de error previo a `with open(fd, ...)`.
 - **Criterios de Aceptación (Checklist verificable):**
-  - [ ] `ruff check .` y `pytest` en `jg_agente` pasan al 100%.
+  - [x] `ruff check .` y `pytest` en `jg_agente` pasan al 100%.
