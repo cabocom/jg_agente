@@ -14,6 +14,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, ToolCall
 
 from app.core.config import settings
+from app.core.llm import MockChatModel
 from app.core.registry import CapabilityRegistry
 from app.models.state import AgentState, IntentModel
 from app.nodes.reason_classifier import is_simple_greeting_or_chat_llm
@@ -97,11 +98,10 @@ async def _handle_tool_calls_decision(
         return intent, audit_details, title, action, desc
 
     plan_steps_meta: list[dict[str, Any]] = []
-    model_cls_name = model.__class__.__name__.lower()
-    is_real_llm = (
-        "mock" not in model_cls_name
-        and "fake" not in model_cls_name
-        and settings.LLM_PROVIDER != "mock"
+    is_real_llm = not isinstance(model, MockChatModel) and settings.LLM_PROVIDER not in (
+        "mock",
+        "fake",
+        "test",
     )
 
     if is_real_llm and state.get("approval") is None and len(active_tool_calls) == 1:

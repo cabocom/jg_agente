@@ -28,6 +28,6 @@
   2. Si `chosen_provider in ("mock", "fake", "test")` y `cfg.ENV.lower() in ("production", "prod")`, lanzar `RuntimeError("MockChatModel está terminantemente prohibido en entorno de producción")`.
   3. En `reason_intent_resolver.py:100-105`, reemplazar la inspección por substring de `model.__class__.__name__` por `not isinstance(model, MockChatModel)`.
 - **Criterios de Aceptación (Checklist verificable):**
-  - [ ] `get_chat_model(provider="unknown_provider")` lanza `ValueError`.
-  - [ ] Con `ENV=production` y `LLM_PROVIDER=mock`, el arranque o `get_chat_model()` lanza `RuntimeError`.
-  - [ ] Suite completa `pytest` en `jg_agente` actualizada y pasando al 100%.
+  - [x] `get_chat_model(provider="unknown_provider")` lanza `ValueError`.
+  - [x] Con `ENV=production` y `LLM_PROVIDER=mock`, el arranque o `get_chat_model()` lanza `RuntimeError`.
+  - [x] Suite completa `pytest` en `jg_agente` actualizada y pasando al 100%.

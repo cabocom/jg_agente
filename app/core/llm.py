@@ -56,6 +56,10 @@ def get_chat_model(
     chosen_model = model or cfg.LLM_MODEL
 
     if chosen_provider in ("mock", "fake", "test"):
+        if cfg.ENV.lower() in ("production", "prod"):
+            raise RuntimeError(
+                "MockChatModel está terminantemente prohibido en entorno de producción"
+            )
         return MockChatModel(**kwargs)
 
     if chosen_provider in ("openai", "custom", "ollama", "vllm", "groq", "gemini"):
@@ -69,11 +73,7 @@ def get_chat_model(
             **kwargs,
         )
 
-    logger.warning(
-        "Proveedor LLM desconocido '%s'. Se usará MockChatModel por defecto.",
-        chosen_provider,
-    )
-    return MockChatModel(**kwargs)
+    raise ValueError(f"Proveedor LLM no soportado: '{chosen_provider}'")
 
 
 __all__ = [

@@ -253,6 +253,15 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _resolve_llm_defaults(self) -> "Settings":
         """Resuelve dinámicamente el proveedor de LLM y claves si se proporcionan en el entorno."""
+        if self.ENV.lower() in ("production", "prod") and self.LLM_PROVIDER.lower().strip() in (
+            "mock",
+            "fake",
+            "test",
+        ):
+            raise RuntimeError(
+                "MockChatModel está terminantemente prohibido en entorno de producción"
+            )
+
         if self.GEMINI_API_KEY and not self.LLM_API_KEY and self.LLM_PROVIDER == "gemini":
             self.LLM_API_KEY = self.GEMINI_API_KEY
         elif self.GROQ_API_KEY and not self.LLM_API_KEY:
