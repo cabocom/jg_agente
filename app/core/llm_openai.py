@@ -83,8 +83,10 @@ def _extract_tool_calls_from_choice(choice: dict[str, Any]) -> list[dict[str, An
             try:
                 val = json.loads(raw_args)
                 parsed_args = val if isinstance(val, dict) else {"input": val}
-            except Exception:
-                parsed_args = {"input": raw_args}
+            except (json.JSONDecodeError, ValueError) as err:
+                raise ValueError(
+                    f"JSON corrupto o truncado en tool_call '{fn.get('name')}': {err}"
+                ) from err
         elif isinstance(raw_args, dict):
             parsed_args = raw_args
 

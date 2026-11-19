@@ -31,6 +31,6 @@
   3. En `reason_classifier.py:20-73`, eliminar `_is_isolated_pure_greeting` (o confinarlo a `MockChatModel`) y propagar las excepciones de inferencia del LLM.
   4. En `reason_plan_expander.py:216-219`, `reason.py:57-61` y `llm_openai.py:83-87`, no absorber errores de expansión de plan HITL, fallos de `bind_tools` ni JSON corrupto en argumentos de `tool_calls`.
 - **Criterios de Aceptación (Checklist verificable):**
-  - [ ] En `tests/test_node_evaluate.py`, un fallo del LLM evaluador produce `GoalStatus.FAILED` e `is_resolved=False` (nunca `GoalStatus.SATISFIED`).
-  - [ ] Un JSON truncado en `evaluate_parser.py` o en `tool_calls` de `llm_openai.py` no se marca como `SATISFIED` ni se envuelve silenciosamente en `{"input": raw_args}`.
-  - [ ] `ruff check .` y `pytest` pasan al 100%.
+  - [x] En `tests/test_node_evaluate.py`, un fallo del LLM evaluador produce `GoalStatus.FAILED` e `is_resolved=False` (nunca `GoalStatus.SATISFIED`).
+  - [x] Un JSON truncado en `evaluate_parser.py` o en `tool_calls` de `llm_openai.py` no se marca como `SATISFIED` ni se envuelve silenciosamente en `{"input": raw_args}`.
+  - [x] `ruff check .` y `pytest` pasan al 100%.

@@ -12,6 +12,7 @@ import logging
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
+from app.core.llm import MockChatModel
 from app.prompts import get_prompt_manager
 
 logger = logging.getLogger("jg_agente.nodes.reason_classifier")
@@ -42,7 +43,7 @@ async def is_simple_greeting_or_chat_llm(
     if not prompt or not prompt.strip():
         return True
 
-    if _is_isolated_pure_greeting(prompt, locale):
+    if isinstance(model, MockChatModel) and _is_isolated_pure_greeting(prompt, locale):
         return True
 
     prompt_mgr = get_prompt_manager()
@@ -53,21 +54,11 @@ async def is_simple_greeting_or_chat_llm(
     ]
 
     try:
-        try:
-            res = await model.ainvoke(classification_messages)
-        except NotImplementedError:
-            res = model.invoke(classification_messages)
+        res = await model.ainvoke(classification_messages)
+    except NotImplementedError:
+        res = model.invoke(classification_messages)
 
-        content = str(getattr(res, "content", res)).strip().upper()
-        if "ACTION" in content:
-            return False
-        if "GREETING" in content:
-            return True
-    except Exception as exc:
-        logger.warning(
-            "Error al clasificar intención con el LLM: %s. Asumiendo acción operativa.",
-            exc,
-        )
+    content = str(getattr(res, "content", res)).strip().upper()
+    if "ACTION" in content:
         return False
-
-    return False
+    return "GREETING" in content

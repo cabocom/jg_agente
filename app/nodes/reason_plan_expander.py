@@ -197,23 +197,18 @@ async def expand_full_action_plan_with_llm(
     ]
 
     try:
-        try:
-            res = await model.ainvoke(planning_messages)
-        except NotImplementedError:
-            res = model.invoke(planning_messages)
+        res = await model.ainvoke(planning_messages)
+    except NotImplementedError:
+        res = model.invoke(planning_messages)
 
-        raw_text = str(getattr(res, "content", res)).strip()
-        calls, meta = _parse_planning_response(raw_text, registered_tools)
+    raw_text = str(getattr(res, "content", res)).strip()
+    calls, meta = _parse_planning_response(raw_text, registered_tools)
 
-        if calls and any(m.get("mutative") for m in meta):
-            if past_executions:
-                filtered_calls, filtered_meta = _filter_past_executions(
-                    calls, meta, past_executions
-                )
-                if filtered_calls:
-                    return filtered_calls, filtered_meta
-            return calls, meta
-    except Exception as exc:
-        logger.warning("No se pudo expandir el plan completo con el LLM: %s", exc)
+    if calls and any(m.get("mutative") for m in meta):
+        if past_executions:
+            filtered_calls, filtered_meta = _filter_past_executions(calls, meta, past_executions)
+            if filtered_calls:
+                return filtered_calls, filtered_meta
+        return calls, meta
 
     return initial_tool_calls, []

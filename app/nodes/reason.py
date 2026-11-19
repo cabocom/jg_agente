@@ -55,10 +55,7 @@ async def _invoke_llm(
     tools = registry.get_langchain_tools()
     model_to_invoke: Runnable[Any, Any] = model
     if tools and hasattr(model, "bind_tools"):
-        try:
-            model_to_invoke = model.bind_tools(tools)
-        except Exception as exc:
-            logger.warning("No se pudieron vincular las herramientas al LLM: %s", exc)
+        model_to_invoke = model.bind_tools(tools)
 
     start_llm = time.perf_counter()
     try:

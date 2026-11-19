@@ -291,3 +291,4 @@ async def test_evaluate_node_fallback_on_exception() -> None:
     assert rec.goal_status == GoalStatus.FAILED
     assert "API Gateway Timeout simulado" in rec.explanation
     assert mutations["is_resolved"] is False
+    assert mutations["errors"][0].code == "LLM_EVALUATION_FAILED"

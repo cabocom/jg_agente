@@ -30,7 +30,7 @@ def extract_json(text: str) -> dict[str, Any] | None:
         data = json.loads(cleaned)
         if isinstance(data, dict):
             return data
-    except Exception:
+    except (json.JSONDecodeError, ValueError):
         start = cleaned.find("{")
         end = cleaned.rfind("}")
         if start != -1 and end != -1 and end > start:
@@ -38,7 +38,7 @@ def extract_json(text: str) -> dict[str, Any] | None:
                 candidate = json.loads(cleaned[start : end + 1])
                 if isinstance(candidate, dict):
                     return candidate
-            except Exception:
+            except (json.JSONDecodeError, ValueError):
                 pass
     return None
 
@@ -49,8 +49,8 @@ def parse_evaluation_response(
     tool_names_available: set[str],
 ) -> tuple[GoalStatus, str, list[str], str | None]:
     """Parsea el contenido emitido por el LLM evaluador y aplica consistencia de capability-awareness."""
-    goal_status = GoalStatus.SATISFIED
-    explanation = "Objetivo procesado correctamente."
+    goal_status = GoalStatus.FAILED
+    explanation = "Fallo en parseo de evaluación semántica: JSON ausente o no estructurado."
     missing_capabilities: list[str] = []
     suggested_next_action: str | None = None
 
@@ -70,9 +70,9 @@ def parse_evaluation_response(
         elif raw_status in (GoalStatus.FAILED.value, "failed"):
             goal_status = GoalStatus.FAILED
         else:
-            goal_status = GoalStatus.SATISFIED
+            goal_status = GoalStatus.FAILED
 
-        explanation = str(parsed.get("explanation", explanation))
+        explanation = str(parsed.get("explanation", "Evaluación procesada."))
         raw_missing = parsed.get("missing_capabilities")
         if isinstance(raw_missing, list):
             missing_capabilities = [str(m) for m in raw_missing if m]
@@ -81,9 +81,12 @@ def parse_evaluation_response(
         logger.warning(
             "[evaluate_parser] El LLM no devolvió un JSON estructurado válido: %s", content[:200]
         )
-        explanation = content if content else "Evaluación completada."
-        if errors and any(getattr(e, "fatal", False) for e in errors):
-            goal_status = GoalStatus.FAILED
+        explanation = (
+            content
+            if content
+            else "Fallo en parseo de evaluación semántica: JSON ausente o no estructurado."
+        )
+        goal_status = GoalStatus.FAILED
 
     suggested_base = (
         str(suggested_next_action).strip().split()[0].rstrip(":,(") if suggested_next_action else ""

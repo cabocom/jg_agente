@@ -35,6 +35,7 @@ from app.models.state import (
     AuditRecord,
     CognitiveStepRecord,
     EvaluationRecord,
+    ExecutionError,
     GoalStatus,
 )
 from app.nodes.evaluate_parser import extract_json as _extract_json
@@ -109,6 +110,7 @@ async def evaluate_node(
         HumanMessage(content=user_message_content),
     ]
 
+    evaluation_errors: list[ExecutionError] = []
     try:
         try:
             raw_res = await model.ainvoke(messages_to_send)
@@ -128,9 +130,17 @@ async def evaluate_node(
     except Exception as exc:
         logger.error("[evaluate_node] Fallo invocando al evaluador LLM: %s", exc)
         explanation = f"Evaluación defensiva ante indisponibilidad del modelo evaluador: {exc}"
-        goal_status = GoalStatus.FAILED if errors else GoalStatus.SATISFIED
+        goal_status = GoalStatus.FAILED
         missing_capabilities = []
         suggested_next_action = None
+        evaluation_errors.append(
+            ExecutionError(
+                code="LLM_EVALUATION_FAILED",
+                message=str(exc),
+                component="evaluate_node",
+                fatal=True,
+            )
+        )
 
     duration_ms = max(0.0, round((time.perf_counter() - start_time) * 1000.0, 2))
 
@@ -168,7 +178,7 @@ async def evaluate_node(
         missing_capabilities,
     )
 
-    return {
+    result: dict[str, Any] = {
         "evaluation_records": [eval_record],
         "cognitive_steps": [cognitive_step],
         "is_resolved": (goal_status == GoalStatus.SATISFIED),
@@ -186,3 +196,6 @@ async def evaluate_node(
             )
         ],
     }
+    if evaluation_errors:
+        result["errors"] = evaluation_errors
+    return result
