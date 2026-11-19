@@ -1,9 +1,10 @@
 # CONTEXTO DE PROYECTO: jg_agente
 
-**Versión del documento:** 1.6.1  
+**Versión del documento:** 1.6.2  
 **Fecha de consolidación:** 19 de noviembre de 2026  
 **Componente:** Execution Plane (Motor Autónomo de Ejecución)  
-**Estado:** Producción / Consolidado en v1.6.1. Endurecimiento Anti-Fallback IA (Fase 2):
+**Estado:** Producción / Consolidado en v1.6.2. Endurecimiento Anti-Fallback IA y Seguridad (Fase 2):
+- Seguridad de Webhooks y Erradicación de Fuga de Secretos en Plano (ISSUE-07): En `app/services/execution_notification_service.py`, validación obligatoria contra SSRF (`SSRFValidator.assert_safe_url`) de URLs de destino (`callback_url`), rechazando destinos a metadatos cloud (`169.254.169.254`) o localhost/IPs privadas no autorizadas. Erradicación total del envío de `PERMANENT_AGENT_SECRET` en texto plano en las cabeceras `Authorization` y `X-Agent-Secret` tanto en `execution_notification_service.py` como en `app/core/registration_client.py:86-125`, sustituyéndolo exclusivamente por autenticación simétrica firmada con HMAC-SHA256 (`X-Agent-ID`, `X-Timestamp`, `X-Nonce`, `X-Signature`).
 - Fail-Loud y Erradicación de Falsos Satisfied (ISSUE-06): En `app/nodes/evaluate.py` y `evaluate_parser.py`, todo fallo de inferencia del LLM evaluador, indisponibilidad, salida vacía o JSON truncado/inválido fuerza estrictamente `GoalStatus.FAILED`, `is_resolved=False` y genera un `ExecutionError(code="LLM_EVALUATION_FAILED", fatal=True)` en el estado. En `app/nodes/reason_classifier.py` y `reason_plan_expander.py`, se propagan directamente las excepciones de inferencia sin absorción ciega y la heurística de cortesía queda confinada a `MockChatModel`. En `reason.py` y `llm_openai.py`, se erradicó la absorción de fallos en `bind_tools` y el envoltorio silencioso `{"input": raw_args}` ante JSON de tool_calls corrupto o truncado (lanzando `ValueError`).
 - Prohibición de Mock en Producción (ISSUE-05): Prohibición estricta de `MockChatModel` en entornos de producción (`ENV=production`/`prod`) tanto en arranque (`Settings._resolve_llm_defaults`) como en factoría (`get_chat_model`), con lanzamiento de `RuntimeError`. Erradicación de fallbacks silenciosos a `MockChatModel` ante proveedores no soportados en favor de `ValueError` fail-loud explícito. Refactorización de `reason_intent_resolver.py` mediante `isinstance(model, MockChatModel)` estricto en lugar de inspección heurística por substrings. Suite completa de tests pasando al 100% y Ruff limpio.
 - Fase MCP y Runtime Determinista (Issues #83, #84, #85):

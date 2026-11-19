@@ -10,6 +10,7 @@
 import asyncio
 import json
 import logging
+import secrets
 import time
 from typing import Any, cast
 
@@ -87,14 +88,16 @@ def _build_signed_heartbeat(aid: str, token: str) -> tuple[bytes, dict[str, str]
     """Genera el payload y cabeceras HMAC firmadas para verificación de credenciales."""
     payload = {"agent_id": aid, "status": "ACTIVE", "metrics": {"source": "boot_verification"}}
     timestamp = int(time.time())
+    nonce = secrets.token_hex(16)
     raw_body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-    canonical_v1 = compute_canonical_string("POST", "/api/v1/agents/heartbeat", timestamp, raw_body)
+    canonical_v1 = compute_canonical_string(
+        "POST", "/api/v1/agents/heartbeat", timestamp, raw_body, nonce=nonce
+    )
     sig_v1 = compute_hmac_signature(token, canonical_v1)
     headers = {
-        "Authorization": f"Bearer {token}",
         "X-Agent-ID": aid,
-        "X-Agent-Secret": token,
         "X-Timestamp": str(timestamp),
+        "X-Nonce": nonce,
         "X-Signature": sig_v1,
         "Content-Type": "application/json",
         "Accept": "application/json",
@@ -116,7 +119,10 @@ async def _send_heartbeat_request(
     fallback_url = f"{dashboard_url}/api/agents/heartbeat"
     response = await client.post(v1_url, content=raw_body, headers=headers)
     if response.status_code == 404:
-        can_fb = compute_canonical_string("POST", "/api/agents/heartbeat", timestamp, raw_body)
+        nonce = headers.get("X-Nonce")
+        can_fb = compute_canonical_string(
+            "POST", "/api/agents/heartbeat", timestamp, raw_body, nonce=nonce
+        )
         headers_fb = dict(headers)
         headers_fb["X-Signature"] = compute_hmac_signature(token, can_fb)
         response = await client.post(fallback_url, content=raw_body, headers=headers_fb)

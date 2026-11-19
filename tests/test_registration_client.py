@@ -499,7 +499,10 @@ async def test_verify_credentials_success() -> None:
     result = await client.verify_credentials("test-agent-123", "secret-pass-456")
     assert result["agent_status"] == "ACTIVE"
     assert "/api/v1/agents/heartbeat" in captured_request["url"]
-    assert "Bearer secret-pass-456" in captured_request["headers"]["authorization"]
+    assert "authorization" not in captured_request["headers"]
+    assert "x-agent-secret" not in captured_request["headers"]
+    assert "x-signature" in captured_request["headers"]
+    assert "x-nonce" in captured_request["headers"]
     assert captured_request["headers"]["x-agent-id"] == "test-agent-123"
 
 

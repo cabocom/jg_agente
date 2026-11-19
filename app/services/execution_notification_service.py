@@ -8,9 +8,13 @@
 """Servicio de emisión y reintento de webhooks asíncronos para notificar finalizaciones."""
 
 import asyncio
+import json
 import logging
+import secrets
+import time
 from datetime import UTC, datetime
 from typing import Any, cast
+from urllib.parse import urlparse
 
 import httpx
 from fastapi.encoders import jsonable_encoder
@@ -19,6 +23,9 @@ from app import __version__
 from app.core.config import settings
 from app.core.correlation import get_correlation_id
 from app.models.io import AgentOutput
+from app.security.auth import compute_canonical_string, compute_hmac_signature
+from app.security.ip_policy import SSRFValidationError
+from app.security.ssrf_validator import get_ssrf_validator
 
 logger = logging.getLogger("jg_agente.services.notification")
 
@@ -37,8 +44,15 @@ def get_agent_credentials() -> tuple[str, str | None]:
     return agent_id, secret
 
 
-def _build_notification_headers(agent_id: str, secret: str | None, cid: str) -> dict[str, str]:
-    """Construye las cabeceras HTTP de autenticación y trazabilidad para el webhook."""
+def _build_notification_headers(
+    agent_id: str,
+    secret: str | None,
+    cid: str,
+    method: str = "POST",
+    path: str = "",
+    body_bytes: bytes = b"",
+) -> dict[str, str]:
+    """Construye las cabeceras HTTP de autenticación HMAC y trazabilidad para el webhook."""
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json",
@@ -48,8 +62,12 @@ def _build_notification_headers(agent_id: str, secret: str | None, cid: str) -> 
     if agent_id:
         headers["X-Agent-ID"] = agent_id
     if secret:
-        headers["Authorization"] = f"Bearer {secret}"
-        headers["X-Agent-Secret"] = secret
+        timestamp = int(time.time())
+        nonce = secrets.token_hex(16)
+        canonical = compute_canonical_string(method, path, timestamp, body_bytes, nonce=nonce)
+        headers["X-Timestamp"] = str(timestamp)
+        headers["X-Nonce"] = nonce
+        headers["X-Signature"] = compute_hmac_signature(secret, canonical)
     return headers
 
 
@@ -83,12 +101,22 @@ async def _dispatch_webhook_http(
     payload: dict[str, Any],
     headers: dict[str, str],
     timeout: float,
+    agent_id: str = "",
+    secret: str | None = None,
+    cid: str = "",
+    body_bytes: bytes = b"",
 ) -> tuple[bool, bool, int, str]:
     """Ejecuta la llamada HTTP del webhook retornando (éxito, terminal_error, status_code, texto)."""
     async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(target_url, json=payload, headers=headers)
         if resp.status_code == 404 and fallback_url and target_url != fallback_url:
-            resp = await client.post(fallback_url, json=payload, headers=headers)
+            fb_headers = dict(headers)
+            if secret:
+                fb_path = urlparse(fallback_url).path
+                fb_headers = _build_notification_headers(
+                    agent_id, secret, cid, "POST", fb_path, body_bytes
+                )
+            resp = await client.post(fallback_url, json=payload, headers=fb_headers)
 
         if resp.is_success:
             return True, False, resp.status_code, resp.text
@@ -101,7 +129,19 @@ async def notify_execution_completion(
     output: AgentOutput,
     callback_url: str | None = None,
 ) -> bool:
-    """Envía notificación webhook hacia el Dashboard o URL de callback."""
+    """Envía notificación webhook hacia el Dashboard o URL de callback validando contra SSRF."""
+    if callback_url:
+        validator = get_ssrf_validator()
+        try:
+            validator.assert_safe_url(callback_url)
+        except SSRFValidationError as exc:
+            logger.error(
+                "Webhook callback_url '%s' rechazado por política SSRF: %s",
+                callback_url,
+                exc,
+            )
+            return False
+
     target_url = (
         callback_url
         or f"{settings.DASHBOARD_URL.rstrip('/')}/api/v1/internal/executions/{output.execution_id}/complete"
@@ -114,8 +154,17 @@ async def notify_execution_completion(
 
     agent_id, secret = get_agent_credentials()
     cid = output.correlation_id or get_correlation_id() or ""
-    headers = _build_notification_headers(agent_id, secret, cid)
     payload = _build_notification_payload(output, cid)
+    body_bytes = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    target_path = urlparse(target_url).path
+    headers = _build_notification_headers(
+        agent_id=agent_id,
+        secret=secret,
+        cid=cid,
+        method="POST",
+        path=target_path,
+        body_bytes=body_bytes,
+    )
 
     timeout = getattr(settings, "EXECUTION_CALLBACK_TIMEOUT_SECONDS", 5.0)
     max_retries = getattr(settings, "EXECUTION_CALLBACK_MAX_RETRIES", 3)
@@ -123,7 +172,15 @@ async def notify_execution_completion(
     for attempt in range(max_retries):
         try:
             success, terminal, status_code, text = await _dispatch_webhook_http(
-                target_url, fallback_url, payload, headers, timeout
+                target_url=target_url,
+                fallback_url=fallback_url,
+                payload=payload,
+                headers=headers,
+                timeout=timeout,
+                agent_id=agent_id,
+                secret=secret,
+                cid=cid,
+                body_bytes=body_bytes,
             )
             if success:
                 logger.info(

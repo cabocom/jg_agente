@@ -28,6 +28,6 @@
   1. En `execution_notification_service.py`, validar `target_url` con `SSRFValidator` (o usar `create_async_ssrf_safe_client`) antes de enviar cualquier petición webhook.
   2. Eliminar el envío en texto plano de `PERMANENT_AGENT_SECRET` en las cabeceras `Authorization` y `X-Agent-Secret` tanto en `execution_notification_service.py:51-53` como en `registration_client.py:93-96`; utilizar exclusivamente cabeceras firmadas con HMAC-SHA256 (`X-Agent-ID`, `X-Timestamp`, `X-Nonce`, `X-Signature`).
 - **Criterios de Aceptación (Checklist verificable):**
-  - [ ] `notify_execution_completion` rechaza `callback_url` que apunten a IPs bloqueadas/metadata cloud (`169.254.169.254`, `127.0.0.1` no autorizados).
-  - [ ] Ninguna petición saliente de `execution_notification_service.py` ni `registration_client.py` contiene `PERMANENT_AGENT_SECRET` en claro en las cabeceras HTTP.
-  - [ ] Nuevos tests de seguridad en `tests/test_execution_async_notifications.py` y `tests/test_registration_client.py`.
+  - [x] `notify_execution_completion` rechaza `callback_url` que apunten a IPs bloqueadas/metadata cloud (`169.254.169.254`, `127.0.0.1` no autorizados).
+  - [x] Ninguna petición saliente de `execution_notification_service.py` ni `registration_client.py` contiene `PERMANENT_AGENT_SECRET` en claro en las cabeceras HTTP.
+  - [x] Nuevos tests de seguridad en `tests/test_execution_async_notifications.py` y `tests/test_registration_client.py`.

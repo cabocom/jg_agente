@@ -85,7 +85,7 @@ async def test_notify_execution_completion_custom_callback_url(
     sample_agent_output: AgentOutput,
 ) -> None:
     """Valida que si se provee callback_url explícita, se despache prioritariamente a esa URL."""
-    custom_url = "https://custom-webhook.internal/api/callbacks/done"
+    custom_url = "https://example.com/api/callbacks/done"
     mock_resp = MagicMock(spec=httpx.Response)
     mock_resp.status_code = 200
     mock_resp.is_success = True
@@ -223,3 +223,62 @@ async def test_run_in_background_failure_invokes_webhook_with_failed_status(
     assert called_output.status == ExecutionStatus.FAILED
     assert "Fallo crítico" in called_output.response
     assert called_output.execution_id == sample_agent_input.execution_id
+
+
+@pytest.mark.asyncio
+async def test_notify_execution_completion_rejects_ssrf_metadata_ip(
+    sample_agent_output: AgentOutput,
+) -> None:
+    """Verifica que notify_execution_completion rechace callback_url apuntando a metadata cloud (169.254.169.254)."""
+    blocked_url = "http://169.254.169.254/latest/meta-data/"
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        success = await notify_execution_completion(sample_agent_output, callback_url=blocked_url)
+
+    assert success is False
+    mock_post.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_notify_execution_completion_rejects_ssrf_localhost_ip(
+    sample_agent_output: AgentOutput,
+) -> None:
+    """Verifica que notify_execution_completion rechace callback_url apuntando a 127.0.0.1 o localhost."""
+    for blocked_url in ["http://127.0.0.1:8080/admin", "http://localhost:8000/internal"]:
+        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+            success = await notify_execution_completion(
+                sample_agent_output, callback_url=blocked_url
+            )
+
+        assert success is False
+        mock_post.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_notify_execution_completion_no_plaintext_secret_in_headers(
+    sample_agent_output: AgentOutput,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verifica que las cabeceras HTTP emitidas no filtren PERMANENT_AGENT_SECRET en texto plano."""
+    secret_val = "super_secret_agent_key_999"
+    monkeypatch.setattr(
+        "app.services.execution_notification_service.get_agent_credentials",
+        lambda: ("agent-sec-1", secret_val),
+    )
+
+    mock_resp = MagicMock(spec=httpx.Response)
+    mock_resp.status_code = 200
+    mock_resp.is_success = True
+
+    with patch(
+        "httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp
+    ) as mock_post:
+        success = await notify_execution_completion(sample_agent_output)
+
+    assert success is True
+    headers = mock_post.call_args[1]["headers"]
+    assert "Authorization" not in headers
+    assert "X-Agent-Secret" not in headers
+    assert secret_val not in str(headers.values())
+    assert "X-Signature" in headers
+    assert "X-Nonce" in headers
+    assert headers["X-Agent-ID"] == "agent-sec-1"

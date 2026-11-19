@@ -137,3 +137,16 @@ async def test_reason_plan_expander_propagates_llm_exception() -> None:
             initial_tool_calls=initial_calls,
             registry=registry,
         )
+
+
+def test_build_signed_heartbeat_no_plaintext_secret() -> None:
+    """Verifica que el heartbeat de registro no envíe el secreto en texto plano."""
+    from app.core.registration_client import _build_signed_heartbeat
+
+    _, headers, _ = _build_signed_heartbeat("agent-007", "secret_token_xyz_999")
+    assert "Authorization" not in headers
+    assert "X-Agent-Secret" not in headers
+    assert "secret_token_xyz_999" not in str(headers.values())
+    assert "X-Signature" in headers
+    assert "X-Nonce" in headers
+    assert headers["X-Agent-ID"] == "agent-007"
