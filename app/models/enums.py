@@ -5,32 +5,29 @@
 # Project URL: https://javiergalvez.com | https://gitlab.com/javiergalvez-ia/jg_agente
 # ==============================================================================
 
-"""Enumeraciones canónicas y estados operacionales para jg_agente."""
+"""Enumeraciones canónicas y estados operacionales para jg_agente.
+
+Re-exporta enums canónicos desde jg_sdk garantizando DRY y define estados
+específicos del runtime LangGraph de jg_agente.
+"""
 
 from enum import StrEnum
 
-
-class ExecutionStatus(StrEnum):
-    """Estados posibles de una ejecución del agente."""
-
-    COMPLETED = "completed"
-    WAITING_APPROVAL = "waiting_approval"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-    IN_PROGRESS = "in_progress"
-    TIMEOUT = "timeout"
-
-
-class PersistenceStatus(StrEnum):
-    """Estados de persistencia para el seguimiento de almacenamiento durable."""
-
-    PERSISTED = "persisted"
-    DEGRADED = "degraded"
-    FAILED = "failed"
+from jg_sdk import (
+    ApprovalStatus,
+    ExecutionStatus,
+    GoalStatus,
+    PersistenceStatus,
+    PolicyDecision,
+    RiskLevel,
+    StepStatus,
+    ToolType,
+    VerificationStatus,
+)
 
 
 class AgentExecutionStatus(StrEnum):
-    """Estados del ciclo de vida operacional del agente."""
+    """Estados del ciclo de vida operacional del agente en LangGraph."""
 
     IDLE = "idle"
     OBSERVING = "observing"
@@ -46,49 +43,15 @@ class AgentExecutionStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
-class ApprovalStatus(StrEnum):
-    """Estados de aprobación humana (HITL)."""
-
-    PENDING = "pending"
-    APPROVED = "approved"
-    REJECTED = "rejected"
-    AUTO_APPROVED = "auto_approved"
-    TIMEOUT = "timeout"
-
-
-class StepStatus(StrEnum):
-    """Estados de ejecución de un paso individual del plan."""
-
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    SKIPPED = "skipped"
-    TIMED_OUT = "timed_out"
-
-
-class VerificationStatus(StrEnum):
-    """Estados de comprobación activa post-operación."""
-
-    NOT_STARTED = "not_started"
-    PASS = "pass"
-    FAIL = "fail"
-    DEGRADED = "degraded"
-    SKIPPED = "skipped"
-
-
-class PolicyDecision(StrEnum):
-    """Decisiones del motor de políticas de seguridad."""
-
-    ALLOW = "allow"
-    DENY = "deny"
-    REQUIRE_HUMAN_APPROVAL = "require_human_approval"
-
-
-class GoalStatus(StrEnum):
-    """Estados semánticos de resolución del objetivo tras un ciclo de ejecución."""
-
-    SATISFIED = "satisfied"
-    NEEDS_MORE_INFO = "needs_more_info"
-    BLOCKED_MISSING_CAPABILITY = "blocked_missing_capability"
-    FAILED = "failed"
+__all__ = [
+    "AgentExecutionStatus",
+    "ApprovalStatus",
+    "ExecutionStatus",
+    "GoalStatus",
+    "PersistenceStatus",
+    "PolicyDecision",
+    "RiskLevel",
+    "StepStatus",
+    "ToolType",
+    "VerificationStatus",
+]

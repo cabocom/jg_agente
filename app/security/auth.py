@@ -12,21 +12,26 @@ canonical_string = f"{METHOD}\\n{PATH}\\n{TIMESTAMP}\\n{SHA256(RAW_BODY)}"
 signature = HMAC-SHA256(canonical_string, secret).hexdigest()
 """
 
-import hashlib
-import hmac
 import logging
 import re
 import threading
 import time
 
 from fastapi import HTTPException, Request, status
+from jg_sdk.auth import (
+    DEFAULT_MAX_TIMESTAMP_SKEW_SECONDS,
+    compute_body_sha256,
+    compute_canonical_string,
+    compute_hmac_signature,
+    verify_hmac_signature,
+)
 
 from app.core.config import settings
 
 logger = logging.getLogger("jg_agente.security.auth")
 
 # Ventana máxima de tolerancia temporal contra ataques de repetición (5 minutos)
-MAX_TIMESTAMP_SKEW_SECONDS = 300
+MAX_TIMESTAMP_SKEW_SECONDS = DEFAULT_MAX_TIMESTAMP_SKEW_SECONDS
 
 # Un timestamp futuro (+skew) sigue siendo válido hasta +2*skew: el nonce debe cubrir toda esa ventana
 NONCE_TTL_SECONDS = MAX_TIMESTAMP_SKEW_SECONDS * 2
@@ -69,55 +74,6 @@ _nonce_cache = NonceReplayCache()
 def get_nonce_cache() -> NonceReplayCache:
     """Devuelve la caché de nonces del proceso (inyectable/limpiable en tests)."""
     return _nonce_cache
-
-
-def compute_body_sha256(body_bytes: bytes | None) -> str:
-    """Calcula el hash SHA-256 en hexadecimal del cuerpo crudo en minúsculas.
-
-    Para cuerpos vacíos o None, devuelve el hash estándar de b"".
-    """
-    data = body_bytes or b""
-    return hashlib.sha256(data).hexdigest()
-
-
-def compute_canonical_string(
-    method: str,
-    path: str,
-    timestamp: str | int,
-    body_bytes: bytes | None,
-    nonce: str | None = None,
-) -> str:
-    """Construye la cadena canónica normalizada para la firma.
-
-    Formato:
-        METHOD\\nPATH\\nTIMESTAMP\\nBODY_SHA256[\\nNONCE]
-
-    El nonce (opcional) forma parte del material firmado: no puede eliminarse ni sustituirse.
-    """
-    norm_method = method.strip().upper()
-    norm_path = path.strip()
-    norm_timestamp = str(timestamp).strip()
-    body_hash = compute_body_sha256(body_bytes)
-
-    canonical = f"{norm_method}\n{norm_path}\n{norm_timestamp}\n{body_hash}"
-    if nonce:
-        canonical += f"\n{nonce.strip()}"
-    return canonical
-
-
-def compute_hmac_signature(secret: str, canonical_string: str) -> str:
-    """Calcula la firma HMAC-SHA256 en formato hexadecimal."""
-    return hmac.new(
-        key=secret.encode("utf-8"),
-        msg=canonical_string.encode("utf-8"),
-        digestmod=hashlib.sha256,
-    ).hexdigest()
-
-
-def verify_hmac_signature(secret: str, canonical_string: str, received_signature: str) -> bool:
-    """Verifica en tiempo constante que la firma recibida coincida con la calculada."""
-    expected_signature = compute_hmac_signature(secret, canonical_string)
-    return hmac.compare_digest(expected_signature.lower(), received_signature.strip().lower())
 
 
 async def verify_control_plane_auth(request: Request) -> None:
@@ -262,3 +218,17 @@ async def verify_control_plane_auth(request: Request) -> None:
         request.method,
         request.url.path,
     )
+
+
+__all__ = [
+    "DEFAULT_MAX_TIMESTAMP_SKEW_SECONDS",
+    "MAX_TIMESTAMP_SKEW_SECONDS",
+    "NONCE_TTL_SECONDS",
+    "NonceReplayCache",
+    "compute_body_sha256",
+    "compute_canonical_string",
+    "compute_hmac_signature",
+    "get_nonce_cache",
+    "verify_control_plane_auth",
+    "verify_hmac_signature",
+]

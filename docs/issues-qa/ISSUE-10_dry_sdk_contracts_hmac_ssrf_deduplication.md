@@ -20,4 +20,4 @@
 - **Solución Técnica Propuesta:**
   1. Reemplazar las reimplementaciones locales en `jg_agente/app/plugins/base.py`, `app/models/tools.py`, `app/security/ip_policy.py` y `app/security/auth.py` por importaciones y re-exportaciones (`__all__`) directas desde `jg_sdk` (manteniendo compatibilidad hacia atrás según Regla 8.3 de `AGENTS.md`).
 - **Criterios de Aceptación (Checklist verificable):**
-  - [ ] `tests/test_contracts_drift.py` y los 422 tests de `jg_agente` pasan al 100% sin código duplicado.
+  - [x] `tests/test_contracts_drift.py` y los 422 tests de `jg_agente` pasan al 100% sin código duplicado.

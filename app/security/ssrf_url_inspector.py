@@ -11,7 +11,9 @@ import ipaddress
 import logging
 import re
 from typing import Any
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse
+
+from jg_sdk.security.ssrf import _build_pinned_info as build_pinned_info
 
 from app.security.ip_policy import (
     DEFAULT_ALLOWED_SCHEMES,
@@ -79,32 +81,6 @@ def validate_pre_dns(
         return True, None, parsed, hostname, None
 
 
-def build_pinned_info(parsed: Any, hostname: str, chosen_ip: str) -> dict[str, Any]:
-    """Construye el diccionario de metadatos de conexión fijada (DNS Pinning)."""
-    scheme = (parsed.scheme or "http").lower()
-    port = parsed.port or (443 if scheme == "https" else 80)
-    standard_port = (scheme == "https" and port == 443) or (scheme == "http" and port == 80)
-    host_header = hostname if standard_port else f"{hostname}:{port}"
-
-    ip_obj = ipaddress.ip_address(chosen_ip)
-    ip_host_str = f"[{chosen_ip}]" if ip_obj.version == 6 else chosen_ip
-    netloc = f"{ip_host_str}:{parsed.port}" if parsed.port else ip_host_str
-    pinned_url = urlunparse(
-        (parsed.scheme, netloc, parsed.path, parsed.params, parsed.query, parsed.fragment)
-    )
-
-    return {
-        "hostname": hostname,
-        "pinned_ip": chosen_ip,
-        "port": port,
-        "scheme": scheme,
-        "pinned_url": pinned_url,
-        "host_header": host_header,
-        "headers": {"Host": host_header},
-        "dns_pin_map": {hostname.lower(): chosen_ip},
-    }
-
-
 def validate_tool_arguments_for_ssrf(
     validator: Any,
     tool_name: str,
@@ -140,3 +116,10 @@ def validate_tool_arguments_for_ssrf(
         except ValueError:
             pass
     return True, None
+
+
+__all__ = [
+    "build_pinned_info",
+    "validate_pre_dns",
+    "validate_tool_arguments_for_ssrf",
+]
