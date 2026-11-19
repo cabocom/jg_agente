@@ -218,14 +218,12 @@ class SSRFValidator(SdkSSRFValidator):
         if not is_safe:
             raise SSRFValidationError(reason or "Destino no permitido por SSRF", target=url)
 
-    def validate_tool_arguments_for_ssrf(
-        self,
-        tool_name: str,
-        args: dict[str, Any],
-        makes_http_requests: bool = False,
-    ) -> tuple[bool, str | None]:
-        """Inspecciona los argumentos de una herramienta para detectar intentos SSRF."""
-        return _validate_tool_args_func(self, tool_name, args, makes_http_requests)
+    def __getattr__(self, name: str) -> Any:
+        if name == "validate_tool_arguments_for_ssrf":
+            return lambda tool_name, args, makes_http_requests=False: _validate_tool_args_func(
+                self, tool_name, args, makes_http_requests
+            )
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
 
 
 def get_ssrf_validator() -> SSRFValidator:

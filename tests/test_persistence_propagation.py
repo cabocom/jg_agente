@@ -116,7 +116,10 @@ async def test_persist_with_retry_transient_failure_recovery() -> None:
         record.execution_id = "exec-retry-transient"
         return record
 
-    with patch("app.api.executions._persist_or_update_execution", side_effect=mock_persist_call):
+    with patch(
+        "app.services.execution_persistence_service.persist_or_update_execution",
+        side_effect=mock_persist_call,
+    ):
         record = await _persist_with_retry(
             input_data=input_data,
             status_val="completed",
@@ -146,7 +149,7 @@ async def test_persist_with_retry_fatal_failure_raises_persistence_error() -> No
 
     with (
         patch(
-            "app.api.executions._persist_or_update_execution",
+            "app.services.execution_persistence_service.persist_or_update_execution",
             side_effect=mock_persist_always_fails,
         ),
         pytest.raises(PersistenceError) as exc_info,
@@ -193,7 +196,10 @@ async def test_execute_graph_pipeline_persisted_success() -> None:
         prompt="Prueba de éxito",
     )
 
-    with patch("app.api.executions._persist_with_retry", new_callable=AsyncMock) as mock_persist:
+    with patch(
+        "app.services.execution_persistence_service.persist_with_retry",
+        new_callable=AsyncMock,
+    ) as mock_persist:
         mock_persist.return_value = MagicMock()
         output = await execute_graph_pipeline(graph, input_data)
 
@@ -229,7 +235,7 @@ async def test_execute_graph_pipeline_fatal_persistence_failure_spools_and_raise
 
     with (
         patch(
-            "app.api.executions._persist_with_retry",
+            "app.services.execution_persistence_service.persist_with_retry",
             side_effect=PersistenceError("Simulated DB storage outage"),
         ),
         pytest.raises(HTTPException) as exc_info,
@@ -325,7 +331,7 @@ async def test_resolve_hitl_execution_fatal_persistence_failure_raises_500(
 
     with (
         patch(
-            "app.api.executions._persist_with_retry",
+            "app.services.execution_persistence_service.persist_with_retry",
             side_effect=PersistenceError("Fallo en commit final HITL"),
         ),
         pytest.raises(HTTPException) as exc_info,

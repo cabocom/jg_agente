@@ -16,16 +16,14 @@ from fastapi import HTTPException, status
 from langgraph.errors import GraphInterrupt
 from langgraph.types import Command
 
-from app.db.exceptions import PersistenceError
 from app.models.io import (
     AgentInput,
     AgentOutput,
     ExecutionStatus,
     HITLResolutionRequest,
-    PersistenceMetadata,
-    PersistenceStatus,
 )
 from app.models.state import ApprovalStatus
+from app.services.execution_persistence_service import persist_execution_outcome
 
 logger = logging.getLogger("jg_agente.services.hitl")
 
@@ -139,48 +137,18 @@ async def _persist_hitl_resolution(
     final_state: dict[str, Any],
 ) -> None:
     """Persiste el estado de resolución en la base de datos con respaldo de emergencia."""
-    from app.api import executions as executions_api
-    from app.services.execution_persistence_service import (
-        persist_with_retry,
-        spool_emergency_execution,
-    )
-
     req_data = final_state.get("request")
     dummy_input = AgentInput(
         execution_id=agent_output.execution_id,
         thread_id=thread_id,
         prompt=getattr(req_data, "prompt", "HITL Decision") if req_data else "HITL Decision",
     )
-    persist_fn = getattr(executions_api, "_persist_with_retry", persist_with_retry)
-    spool_fn = getattr(executions_api, "_spool_emergency_execution", spool_emergency_execution)
-
-    try:
-        await persist_fn(
-            input_data=dummy_input,
-            status_val=agent_output.status.value,
-            response_text=agent_output.response,
-            data_payload=agent_output.data,
-            execution_time_ms=agent_output.execution_time_ms,
-            requires_approval=False,
-            pending_approval_id=None,
-            completed_at=datetime.now(UTC),
-        )
-        agent_output.metadata["persistence"] = PersistenceMetadata(
-            status=PersistenceStatus.PERSISTED,
-            persisted=True,
-        ).model_dump()
-    except (PersistenceError, Exception) as db_err:
-        spool_fn(agent_output.execution_id, agent_output.model_dump(mode="json"))
-        logger.error(
-            "Fallo irrecuperable de persistencia al actualizar resolución HITL en '%s': %s",
-            agent_output.execution_id,
-            db_err,
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Fallo crítico de persistencia al actualizar resolución HITL para '{agent_output.execution_id}'.",
-        ) from db_err
+    await persist_execution_outcome(
+        input_data=dummy_input,
+        agent_output=agent_output,
+        status_val=agent_output.status.value,
+        failure_detail=f"Fallo crítico de persistencia al actualizar resolución HITL para '{agent_output.execution_id}'.",
+    )
 
 
 async def resolve_hitl_execution(

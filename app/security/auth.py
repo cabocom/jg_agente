@@ -76,40 +76,30 @@ def get_nonce_cache() -> NonceReplayCache:
     return _nonce_cache
 
 
-async def verify_control_plane_auth(request: Request) -> None:
-    """Dependencia FastAPI que autentica que la petición provenga del Control Plane (jg_dashboard).
-
-    Valida cabeceras X-Signature, X-Timestamp y X-Agent-ID, comprueba la ventana anti-replay
-    y verifica la firma HMAC-SHA256 contra el secreto permanente del agente.
-
-    Raises:
-        HTTPException(401): Si falta alguna cabecera, el timestamp expiró, el Agent ID no coincide
-                            o la firma criptográfica es inválida.
-    """
+def _extract_and_validate_headers(request: Request) -> tuple[str, str, str, str]:
+    """Valida la presencia y formato de las cabeceras de autenticación requeridas."""
     sig_header = request.headers.get("X-Signature")
     ts_header = request.headers.get("X-Timestamp")
     agent_id_header = request.headers.get("X-Agent-ID")
     nonce_header = (request.headers.get("X-Nonce") or "").strip()
 
-    # 1. Validar presencia de cabeceras obligatorias
     if not sig_header or not ts_header or not agent_id_header:
-        missing = []
-        if not sig_header:
-            missing.append("X-Signature")
-        if not ts_header:
-            missing.append("X-Timestamp")
-        if not agent_id_header:
-            missing.append("X-Agent-ID")
+        missing = [
+            h
+            for h, v in [
+                ("X-Signature", sig_header),
+                ("X-Timestamp", ts_header),
+                ("X-Agent-ID", agent_id_header),
+            ]
+            if not v
+        ]
         logger.warning(
-            "Rechazada petición a %s: Faltan cabeceras de autenticación: %s",
-            request.url.path,
-            ", ".join(missing),
+            "Faltan cabeceras de autenticación en %s: %s", request.url.path, ", ".join(missing)
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Cabeceras de autenticación requeridas ausentes: {', '.join(missing)}",
         )
-
     if not nonce_header and settings.HMAC_REQUIRE_NONCE:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -120,8 +110,11 @@ async def verify_control_plane_auth(request: Request) -> None:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Formato de X-Nonce inválido.",
         )
+    return sig_header, ts_header, agent_id_header.strip(), nonce_header
 
-    # 2. Validar timestamp numérico y ventana anti-replay
+
+def _validate_timestamp_skew(ts_header: str) -> None:
+    """Valida que el timestamp sea numérico y se encuentre dentro de la ventana de tolerancia."""
     try:
         req_timestamp = int(ts_header.strip())
     except ValueError as err:
@@ -130,93 +123,72 @@ async def verify_control_plane_auth(request: Request) -> None:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Cabecera X-Timestamp inválida: debe ser un entero epoch UNIX.",
         ) from err
-
     current_time = int(time.time())
-    if abs(current_time - req_timestamp) > MAX_TIMESTAMP_SKEW_SECONDS:
+    diff = abs(current_time - req_timestamp)
+    if diff > MAX_TIMESTAMP_SKEW_SECONDS:
         logger.warning(
-            "Timestamp expirado o fuera de skew: recibido=%d, actual=%d, diff=%d seg (máx %d seg)",
+            "Timestamp expirado: recibido=%d, actual=%d, diff=%ds",
             req_timestamp,
             current_time,
-            abs(current_time - req_timestamp),
-            MAX_TIMESTAMP_SKEW_SECONDS,
+            diff,
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Timestamp fuera de la ventana de tolerancia anti-replay permitida ({MAX_TIMESTAMP_SKEW_SECONDS}s).",
         )
 
-    # 3. Resolver identidad y secreto esperado del agente
+
+def _resolve_agent_credentials(request: Request, agent_id_header: str) -> str:
+    """Resuelve el secreto esperado y valida que la petición esté dirigida a este agente."""
     app_creds = getattr(request.app.state, "credentials", None)
-    expected_agent_id = getattr(app_creds, "agent_id", None) or settings.AGENT_ID
+    expected_id = getattr(app_creds, "agent_id", None) or settings.AGENT_ID
     expected_secret = (
         getattr(app_creds, "permanent_secret", None) or settings.PERMANENT_AGENT_SECRET
     )
 
     if not expected_secret:
-        logger.error(
-            "El agente no tiene configurado un secreto permanente (PERMANENT_AGENT_SECRET ni credentials). Rechazando petición."
-        )
+        logger.error("El agente no tiene configurado un secreto permanente.")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Agente no inicializado con credenciales de autenticación.",
         )
-
-    # 4. Validar que la petición va dirigida a este agente
-    if agent_id_header.strip() != expected_agent_id.strip():
-        logger.warning(
-            "X-Agent-ID '%s' no coincide con el identificador del agente local '%s'",
-            agent_id_header,
-            expected_agent_id,
-        )
+    if agent_id_header != expected_id.strip():
+        logger.warning("X-Agent-ID '%s' no coincide con local '%s'", agent_id_header, expected_id)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"X-Agent-ID '{agent_id_header}' no coincide con el agente destinatario.",
         )
+    return expected_secret
 
-    # 5. Obtener el cuerpo crudo y construir la cadena canónica
-    # En FastAPI / Starlette, request.body() cachea los bytes internamente permitiendo lecturas posteriores
+
+async def verify_control_plane_auth(request: Request) -> None:
+    """Dependencia FastAPI que autentica que la petición provenga del Control Plane (jg_dashboard)."""
+    sig, ts, agent_id, nonce = _extract_and_validate_headers(request)
+    _validate_timestamp_skew(ts)
+    expected_secret = _resolve_agent_credentials(request, agent_id)
+
     body_bytes = await request.body()
-    canonical_string = compute_canonical_string(
+    canonical = compute_canonical_string(
         method=request.method,
         path=request.url.path,
-        timestamp=ts_header,
+        timestamp=ts,
         body_bytes=body_bytes,
-        nonce=nonce_header or None,
+        nonce=nonce or None,
     )
-
-    # 6. Comprobar firma HMAC-SHA256
-    if not verify_hmac_signature(expected_secret, canonical_string, sig_header):
-        logger.warning(
-            "Firma criptográfica inválida para %s %s desde %s",
-            request.method,
-            request.url.path,
-            request.client.host if request.client else "unknown",
-        )
+    if not verify_hmac_signature(expected_secret, canonical, sig):
+        logger.warning("Firma criptográfica inválida para %s %s", request.method, request.url.path)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Firma criptográfica HMAC inválida o cuerpo alterado.",
         )
-
-    # 7. Anti-replay: nonce de un solo uso, registrado SOLO tras validar la firma para que un
-    # atacante sin secreto no pueda "quemar" nonces legítimos.
-    if nonce_header and not get_nonce_cache().register(
-        f"{agent_id_header.strip()}:{nonce_header}", NONCE_TTL_SECONDS
-    ):
-        logger.warning(
-            "Nonce reutilizado (replay) en %s %s desde %s",
-            request.method,
-            request.url.path,
-            request.client.host if request.client else "unknown",
-        )
+    if nonce and not get_nonce_cache().register(f"{agent_id}:{nonce}", NONCE_TTL_SECONDS):
+        logger.warning("Nonce reutilizado en %s %s", request.method, request.url.path)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Nonce replayed",
         )
-
     logger.debug(
-        "Petición autenticada exitosamente con HMAC para %s %s",
-        request.method,
-        request.url.path,
+        "Petición autenticada exitosamente con HMAC para %s %s", request.method, request.url.path
     )
 
 

@@ -20,7 +20,7 @@
   2. Extraer un servicio común de persistencia con fallback a spool para eliminar la cuadruplicación y los imports inversos hacia `app.api.executions`.
   3. Descomponer `plan_node`, `rollback_node`, `verify_node` y `_resolve_raw_final_response` en funciones auxiliares `<= 40` líneas.
 - **Criterios de Aceptación (Checklist verificable):**
-  - [ ] Ninguna clase de `jg_agente` supera los 10 métodos públicos ni las 300 líneas.
-  - [ ] Ningún módulo bajo `app/services/` importa desde `app/api/`.
+  - [x] Ninguna clase de `jg_agente` supera los 10 métodos públicos ni las 300 líneas.
+  - [x] Ningún módulo bajo `app/services/` importa desde `app/api/`.
 
 ---

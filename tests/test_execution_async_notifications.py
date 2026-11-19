@@ -183,12 +183,12 @@ async def test_run_in_background_success_invokes_webhook(sample_agent_input: Age
 
     with (
         patch(
-            "app.api.executions.execute_graph_pipeline",
+            "app.services.background_execution_service.execute_graph_pipeline",
             new_callable=AsyncMock,
             return_value=mock_output,
         ),
         patch(
-            "app.api.executions.notify_execution_completion",
+            "app.services.background_execution_service.notify_execution_completion",
             new_callable=AsyncMock,
             return_value=True,
         ) as mock_notify,
@@ -205,12 +205,12 @@ async def test_run_in_background_failure_invokes_webhook_with_failed_status(
     """Valida que ante una excepción no capturada en el grafo, se notifique un AgentOutput de fallo."""
     with (
         patch(
-            "app.api.executions.execute_graph_pipeline",
+            "app.services.background_execution_service.execute_graph_pipeline",
             new_callable=AsyncMock,
             side_effect=RuntimeError("Fallo crítico en nodo de razonamiento"),
         ),
         patch(
-            "app.api.executions.notify_execution_completion",
+            "app.services.background_execution_service.notify_execution_completion",
             new_callable=AsyncMock,
             return_value=True,
         ) as mock_notify,

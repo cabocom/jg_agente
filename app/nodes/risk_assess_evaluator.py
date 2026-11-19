@@ -91,6 +91,86 @@ def _step_label(s: PlanStep) -> str:
     return f"{s.tool_name} ('{cmd}')" if cmd else s.tool_name
 
 
+def _evaluate_single_step(
+    idx: int,
+    step: PlanStep,
+    registry: CapabilityRegistry | None,
+    guard: SecurityGuard,
+    caller_perms: list[str],
+    execution_id: str | None,
+    checkpoint_degraded: bool,
+) -> tuple[dict[str, Any], RiskLevel, Any, bool, str]:
+    """Evalúa las políticas de riesgo y construye metadatos para un paso unitario."""
+    tool = registry.get_tool(step.tool_name) if registry else None
+    effective_risk = tool.risk_level if tool else step.risk_level
+    eval_res = guard.evaluate(
+        tool=tool or step.tool_name,
+        tool_args=step.tool_args,
+        risk_level=effective_risk,
+        caller_permissions=caller_perms,
+        is_reversible=tool.reversible if tool else step.reversible,
+        execution_id=execution_id,
+        checkpoint_degraded=checkpoint_degraded,
+    )
+    is_mutative = (
+        (not getattr(tool, "read_only", True))
+        if tool is not None
+        else effective_risk in (RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.CRITICAL)
+    ) or effective_risk in (RiskLevel.HIGH, RiskLevel.CRITICAL)
+
+    args_dict = step.tool_args if isinstance(step.tool_args, dict) else {}
+    cmd = (
+        args_dict.get("command")
+        or args_dict.get("target_url")
+        or args_dict.get("url")
+        or args_dict.get("target")
+        or args_dict.get("container")
+        or args_dict.get("query")
+        or ""
+    )
+    desc = step.description or ""
+    if not desc or desc == f"Ejecutar {step.tool_name}":
+        desc = (
+            f"{'Mutación' if is_mutative else 'Consulta'} con {step.tool_name}: {cmd}"
+            if cmd
+            else f"Ejecutar {step.tool_name}"
+        )
+    step_meta = {
+        "index": idx,
+        "step_id": step.step_id,
+        "tool_name": step.tool_name,
+        "tool": step.tool_name,
+        "command": str(cmd) if cmd else None,
+        "action": desc,
+        "description": desc,
+        "risk_level": effective_risk.value.upper(),
+        "mutative": is_mutative,
+        "read_only": not is_mutative,
+        "reversible": bool(tool.reversible if tool else step.reversible),
+    }
+    tool_name_entry = tool.name if tool else step.tool_name
+    return step_meta, effective_risk, eval_res, is_mutative, tool_name_entry
+
+
+def _aggregate_risk_verdict(
+    steps_to_evaluate: list[PlanStep],
+    denied_reasons: list[str],
+    approval_reasons: list[str],
+    requires_approval: bool,
+    max_risk: RiskLevel,
+) -> tuple[PolicyDecision, str]:
+    """Determina la decisión y justificación global consolidada."""
+    if denied_reasons:
+        return PolicyDecision.DENY, " ; ".join(denied_reasons)
+    if requires_approval:
+        return PolicyDecision.REQUIRE_HUMAN_APPROVAL, " ; ".join(approval_reasons)
+    labels = ", ".join(_step_label(s) for s in steps_to_evaluate)
+    return (
+        PolicyDecision.ALLOW,
+        f"Operación [{labels}] con nivel de riesgo operativo aceptable ({max_risk.value.upper()}) para ejecución autónoma.",
+    )
+
+
 def evaluate_steps_risk(
     steps_to_evaluate: list[PlanStep],
     registry: CapabilityRegistry | None,
@@ -135,93 +215,34 @@ def evaluate_steps_risk(
         )
 
     for idx, step in enumerate(steps_to_evaluate, start=1):
-        tool = registry.get_tool(step.tool_name) if registry else None
-        effective_risk = tool.risk_level if tool else step.risk_level
-
-        if _RISK_ORDER.get(effective_risk, 1) > _RISK_ORDER.get(max_risk, 1):
-            max_risk = effective_risk
-
-        eval_res = guard.evaluate(
-            tool=tool or step.tool_name,
-            tool_args=step.tool_args,
-            risk_level=effective_risk,
-            caller_permissions=caller_perms,
-            is_reversible=tool.reversible if tool else step.reversible,
-            execution_id=execution_id,
-            checkpoint_degraded=checkpoint_degraded,
+        meta, eff_risk, eval_res, _, t_name = _evaluate_single_step(
+            idx, step, registry, guard, caller_perms, execution_id, checkpoint_degraded
         )
-
-        is_step_mutative = (
-            (not getattr(tool, "read_only", True))
-            if tool is not None
-            else effective_risk in (RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.CRITICAL)
-        ) or effective_risk in (RiskLevel.HIGH, RiskLevel.CRITICAL)
-
-        args_dict = step.tool_args if isinstance(step.tool_args, dict) else {}
-        cmd_val = (
-            args_dict.get("command")
-            or args_dict.get("target_url")
-            or args_dict.get("url")
-            or args_dict.get("target")
-            or args_dict.get("container")
-            or args_dict.get("query")
-            or ""
-        )
-        step_desc = step.description or ""
-        if not step_desc or step_desc == f"Ejecutar {step.tool_name}":
-            step_desc = (
-                f"{'Mutación' if is_step_mutative else 'Consulta'} con {step.tool_name}: {cmd_val}"
-                if cmd_val
-                else f"Ejecutar {step.tool_name}"
-            )
-
-        evaluated_plan_steps.append(
-            {
-                "index": idx,
-                "step_id": step.step_id,
-                "tool_name": step.tool_name,
-                "tool": step.tool_name,
-                "command": str(cmd_val) if cmd_val else None,
-                "action": step_desc,
-                "description": step_desc,
-                "risk_level": effective_risk.value.upper(),
-                "mutative": is_step_mutative,
-                "read_only": not is_step_mutative,
-                "reversible": bool(tool.reversible if tool else step.reversible),
-            }
-        )
+        if _RISK_ORDER.get(eff_risk, 1) > _RISK_ORDER.get(max_risk, 1):
+            max_risk = eff_risk
+        evaluated_plan_steps.append(meta)
 
         if eval_res.decision == PolicyDecision.DENY:
             denied_reasons.append(
                 f"Acción denegada '{step.tool_name}': {eval_res.reason or 'Violación de seguridad'}"
             )
-
-        if eval_res.decision == PolicyDecision.REQUIRE_HUMAN_APPROVAL or effective_risk in (
+        if eval_res.decision == PolicyDecision.REQUIRE_HUMAN_APPROVAL or eff_risk in (
             RiskLevel.HIGH,
             RiskLevel.CRITICAL,
         ):
             requires_approval = True
             steps_requiring_approval.append(step.step_id)
-            tool_name_entry = tool.name if tool else step.tool_name
-            if tool_name_entry and tool_name_entry not in tools_requiring_approval:
-                tools_requiring_approval.append(tool_name_entry)
+            if t_name and t_name not in tools_requiring_approval:
+                tools_requiring_approval.append(t_name)
             approval_reasons.append(
-                f"Acción '{step.tool_name}' ({effective_risk.value.upper()}): {eval_res.reason}"
+                f"Acción '{step.tool_name}' ({eff_risk.value.upper()}): {eval_res.reason}"
             )
-            if eval_res.can_cause_data_loss or effective_risk == RiskLevel.CRITICAL:
+            if eval_res.can_cause_data_loss or eff_risk == RiskLevel.CRITICAL:
                 has_data_loss = True
 
-    evaluated_labels = ", ".join(_step_label(s) for s in steps_to_evaluate)
-    if denied_reasons:
-        decision = PolicyDecision.DENY
-        reason = " ; ".join(denied_reasons)
-    elif requires_approval:
-        decision = PolicyDecision.REQUIRE_HUMAN_APPROVAL
-        reason = " ; ".join(approval_reasons)
-    else:
-        decision = PolicyDecision.ALLOW
-        reason = f"Operación [{evaluated_labels}] con nivel de riesgo operativo aceptable ({max_risk.value.upper()}) para ejecución autónoma."
-
+    decision, reason = _aggregate_risk_verdict(
+        steps_to_evaluate, denied_reasons, approval_reasons, requires_approval, max_risk
+    )
     return (
         decision,
         reason,

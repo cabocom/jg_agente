@@ -12,6 +12,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.models.io import AgentInput, AgentOutput, ExecutionStatus
+from app.services.execution_notification_service import notify_execution_completion
+from app.services.execution_orchestrator import execute_graph_pipeline
 
 logger = logging.getLogger("jg_agente.services.background")
 
@@ -35,13 +37,9 @@ async def run_in_background(
     input_data: AgentInput,
 ) -> None:
     """Ejecuta el grafo en segundo plano y despacha el webhook de notificación."""
-    from app.api import executions as executions_api
-    from app.services.execution_notification_service import notify_execution_completion
-    from app.services.execution_orchestrator import execute_graph_pipeline
-
     callback_url = extract_callback_url(input_data)
-    notify_fn = getattr(executions_api, "notify_execution_completion", notify_execution_completion)
-    exec_fn = getattr(executions_api, "execute_graph_pipeline", execute_graph_pipeline)
+    notify_fn = notify_execution_completion
+    exec_fn = execute_graph_pipeline
 
     agent_output: AgentOutput | None = None
     try:

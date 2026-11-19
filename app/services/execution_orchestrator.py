@@ -12,7 +12,7 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import HTTPException, Request, status
+from fastapi import HTTPException, Request
 from langchain_core.messages import HumanMessage
 from langgraph.errors import GraphInterrupt
 
@@ -21,13 +21,10 @@ from app.core.correlation import get_correlation_id
 from app.core.graph import GraphBuilder
 from app.core.llm import get_chat_model
 from app.core.registry import CapabilityRegistry
-from app.db.exceptions import PersistenceError
 from app.models.io import (
     AgentInput,
     AgentOutput,
     ExecutionStatus,
-    PersistenceMetadata,
-    PersistenceStatus,
 )
 from app.models.state import (
     AgentExecutionStatus,
@@ -35,6 +32,7 @@ from app.models.state import (
     resolve_caller_permissions,
 )
 from app.security.guard import SecurityGuard
+from app.services.execution_persistence_service import persist_execution_outcome
 from app.services.hitl_interrupt_service import handle_hitl_interrupt
 
 logger = logging.getLogger("jg_agente.services.orchestrator")
@@ -93,54 +91,7 @@ def _init_agent_state(input_data: AgentInput, cid: str | None, graph: Any) -> Ag
     }
 
 
-async def _persist_execution_outcome(
-    input_data: AgentInput,
-    agent_output: AgentOutput,
-    status_val: str,
-    error_msg: str | None = None,
-    failure_detail: str | None = None,
-) -> None:
-    """Persiste el resultado de la ejecución con respaldo ante fallos de BD."""
-    from app.api import executions as executions_api
-    from app.services.execution_persistence_service import (
-        persist_with_retry,
-        spool_emergency_execution,
-    )
-
-    persist_fn = getattr(executions_api, "_persist_with_retry", persist_with_retry)
-    spool_fn = getattr(executions_api, "_spool_emergency_execution", spool_emergency_execution)
-
-    try:
-        await persist_fn(
-            input_data=input_data,
-            status_val=status_val,
-            response_text=agent_output.response,
-            data_payload=agent_output.data,
-            execution_time_ms=agent_output.execution_time_ms,
-            requires_approval=agent_output.requires_approval,
-            pending_approval_id=agent_output.pending_approval_id,
-            error_msg=error_msg or agent_output.error,
-            completed_at=agent_output.completed_at,
-        )
-        agent_output.metadata["persistence"] = PersistenceMetadata(
-            status=PersistenceStatus.PERSISTED,
-            persisted=True,
-        ).model_dump()
-    except (PersistenceError, Exception) as db_err:
-        spool_fn(input_data.execution_id, agent_output.model_dump(mode="json"))
-        logger.error(
-            "Fallo irrecuperable al actualizar DB tras ejecución '%s': %s",
-            input_data.execution_id,
-            db_err,
-            exc_info=True,
-        )
-        detail_msg = (
-            failure_detail or f"Fallo crítico de persistencia para '{input_data.execution_id}'."
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=detail_msg,
-        ) from db_err
+_persist_execution_outcome = persist_execution_outcome
 
 
 def _extract_final_output(

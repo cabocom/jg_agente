@@ -5,12 +5,7 @@
 # Project URL: https://javiergalvez.com | https://gitlab.com/javiergalvez-ia/jg_agente
 # ==============================================================================
 
-"""Nodo opcional de planificación (plan) para jg_agente.
-
-Se activa condicionalmente si existe un PlannerEngine registrado en CapabilityRegistry.
-Transforma el estímulo cognitivo y el IntentModel en un ExecutionPlan estructurado
-con pasos ordenados (PlanStep), dependencias secuenciales y evaluación de riesgo.
-"""
+"""Nodo de planificación DAG (plan_node) para el motor cognitivo de jg_agente."""
 
 import inspect
 import logging
@@ -20,9 +15,7 @@ from typing import Any
 
 from app.core.async_compat import is_awaitable_or_coroutine
 from app.core.registry import CapabilityRegistry
-from app.models.state import (
-    AgentExecutionStatus,
-    AgentState,
+from app.models.records import (
     AuditRecord,
     CognitiveStepRecord,
     ExecutionError,
@@ -30,12 +23,13 @@ from app.models.state import (
     IntentModel,
     PlanStep,
 )
+from app.models.state import AgentExecutionStatus, AgentState
 from app.models.tools import RiskLevel
 from app.plugins.base import BaseEngine, PlannerEngine
 
 logger = logging.getLogger("jg_agente.nodes.plan")
 
-_RISK_ORDER: dict[RiskLevel | str, int] = {
+_RISK_ORDER: dict[RiskLevel, int] = {
     RiskLevel.LOW: 1,
     RiskLevel.MEDIUM: 2,
     RiskLevel.HIGH: 3,
@@ -51,162 +45,143 @@ def _compute_highest_risk(steps: list[PlanStep]) -> RiskLevel:
     return highest.risk_level
 
 
-async def plan_node(
+def _convert_raw_steps(raw_plan: list[Any], state: AgentState) -> ExecutionPlan:
+    """Convierte una lista de pasos crudos en una instancia formal de ExecutionPlan."""
+    raw_steps: list[PlanStep] = []
+    for item in raw_plan:
+        if isinstance(item, PlanStep):
+            raw_steps.append(item)
+        elif isinstance(item, dict):
+            raw_steps.append(PlanStep(**item))
+    intent_val = state.get("intent")
+    goal_val = (
+        intent_val.goal if isinstance(intent_val, IntentModel) else "Plan de ejecución estructurado"
+    )
+    return ExecutionPlan(
+        plan_id=f"plan-{int(datetime.now(UTC).timestamp())}",
+        goal=goal_val,
+        steps=raw_steps,
+        estimated_risk=_compute_highest_risk(raw_steps),
+    )
+
+
+async def _invoke_planner_engine(
+    planner: PlannerEngine | BaseEngine | None,
     state: AgentState,
-    registry: CapabilityRegistry | None = None,
-    engine: PlannerEngine | BaseEngine | None = None,
-) -> dict[str, Any]:
-    """Genera una secuencia estructurada de pasos (ExecutionPlan) a partir de la intención del agente.
-
-    Args:
-        state: Estado global actual del agente (AgentState).
-        registry: Catálogo de capacidades registrado opcional.
-        engine: Instancia directa de PlannerEngine (prioritaria sobre el catálogo).
-
-    Returns:
-        Mutaciones del estado para LangGraph (status, plan, audit_trail y opcionalmente errors).
-    """
-    start_time = time.perf_counter()
-    errors: list[ExecutionError] = []
-
-    # 1. Resolver el motor de planificación
-    planner = engine
-    if planner is None and registry is not None:
-        planner = registry.get_planner()
-
-    plan: ExecutionPlan | None = None
-
-    # 2. Localizar el método invocable del motor (create_plan, plan, build_plan, generate_plan)
+) -> tuple[ExecutionPlan | None, list[ExecutionError]]:
+    """Invoca polimórficamente el motor de planificación si está registrado."""
+    if planner is None:
+        return None, []
     plan_fn = None
-    if planner is not None:
-        for candidate in ("create_plan", "plan", "build_plan", "generate_plan"):
-            attr = getattr(planner, candidate, None)
-            if callable(attr):
-                plan_fn = attr
-                break
+    for candidate in ("create_plan", "plan", "build_plan", "generate_plan"):
+        attr = getattr(planner, candidate, None)
+        if callable(attr):
+            plan_fn = attr
+            break
+    if plan_fn is None:
+        return None, []
+    try:
+        sig = inspect.signature(plan_fn)
+        call_with_state = len(sig.parameters) > 0
+    except (TypeError, ValueError):
+        call_with_state = True
 
-    # 3. Invocar el motor de planificación polimórficamente
-    if planner is not None and plan_fn is not None:
-        try:
-            call_with_state = True
-            try:
-                sig = inspect.signature(plan_fn)
-                call_with_state = len(sig.parameters) > 0
-            except (TypeError, ValueError):
-                call_with_state = True
-
-            res = plan_fn(state) if call_with_state else plan_fn()
-            raw_plan = await res if is_awaitable_or_coroutine(res) else res
-
-            if isinstance(raw_plan, ExecutionPlan):
-                plan = raw_plan
-            elif isinstance(raw_plan, dict):
-                plan = ExecutionPlan(**raw_plan)
-            elif isinstance(raw_plan, list):
-                raw_steps: list[PlanStep] = []
-                for item in raw_plan:
-                    if isinstance(item, PlanStep):
-                        raw_steps.append(item)
-                    elif isinstance(item, dict):
-                        raw_steps.append(PlanStep(**item))
-                intent_val = state.get("intent")
-                goal_val = (
-                    intent_val.goal
-                    if isinstance(intent_val, IntentModel)
-                    else "Plan de ejecución estructurado"
-                )
-                plan = ExecutionPlan(
-                    plan_id=f"plan-{int(datetime.now(UTC).timestamp())}",
-                    goal=goal_val,
-                    steps=raw_steps,
-                    estimated_risk=_compute_highest_risk(raw_steps),
-                )
-        except Exception as err:
-            logger.exception("Excepción en el motor de planificación %s", planner.name)
-            errors.append(
-                ExecutionError(
-                    code="PLANNER_EXECUTION_ERROR",
-                    message=f"Fallo durante la planificación en el motor '{planner.name}': {err}",
-                    component="plan",
-                    fatal=False,
-                )
+    try:
+        res = plan_fn(state) if call_with_state else plan_fn()
+        raw = await res if is_awaitable_or_coroutine(res) else res
+        if isinstance(raw, ExecutionPlan):
+            return raw, []
+        if isinstance(raw, dict):
+            return ExecutionPlan(**raw), []
+        if isinstance(raw, list):
+            return _convert_raw_steps(raw, state), []
+        return None, []
+    except Exception as err:
+        logger.exception("Excepción en el motor de planificación %s", planner.name)
+        return None, [
+            ExecutionError(
+                code="PLANNER_EXECUTION_ERROR",
+                message=f"Fallo durante la planificación en el motor '{planner.name}': {err}",
+                component="plan",
+                fatal=False,
             )
-            plan = None
+        ]
 
-    # 4. Plan de contingencia o fallback seguro si no hay motor o falló
-    if plan is None:
-        intent = state.get("intent")
-        goal = (
-            intent.goal
-            if isinstance(intent, IntentModel)
-            else getattr(state.get("request"), "prompt", "Ejecución de plan estándar")
+
+def _extract_steps_from_tool_calls(
+    intent: Any,
+    registry: CapabilityRegistry | None,
+) -> tuple[list[PlanStep], list[ExecutionError]]:
+    """Extrae PlanSteps a partir de tool_calls emitidas en el paso de razonamiento previo."""
+    tcs: list[dict[str, Any]] = []
+    if isinstance(intent, IntentModel) and intent.parameters:
+        tcs = intent.parameters.get("tool_calls", [])
+    elif isinstance(intent, dict):
+        tcs = intent.get("parameters", {}).get("tool_calls", [])
+
+    if not tcs:
+        logger.warning(
+            "[plan_node] No se generó un plan estructurado válido ni existen tool_calls previas."
         )
-        steps: list[PlanStep] = []
-
-        # Extraer tool_calls si fueron emitidas en reason_node
-        tcs: list[dict[str, Any]] = []
-        if isinstance(intent, IntentModel) and intent.parameters:
-            tcs = intent.parameters.get("tool_calls", [])
-        elif isinstance(intent, dict):
-            tcs = intent.get("parameters", {}).get("tool_calls", [])
-
-        if tcs:
-            for idx, tc in enumerate(tcs, start=1):
-                tc_name = tc.get("name") or tc.get("tool_name", f"tool-{idx}")
-                tc_args = tc.get("args") or tc.get("tool_args", {})
-                tool_def = registry.get_tool(tc_name) if registry else None
-                t_risk = tool_def.risk_level if tool_def else RiskLevel.LOW
-                t_rev = tool_def.reversible if tool_def else False
-                t_allow_failure = (
-                    getattr(tool_def, "allow_failure", False)
-                    if tool_def
-                    else bool(tc.get("allow_failure", False))
-                )
-                steps.append(
-                    PlanStep(
-                        step_id=f"step-{idx}",
-                        tool_name=tc_name,
-                        tool_args=tc_args if isinstance(tc_args, dict) else {},
-                        description=f"Ejecutar {tc_name}",
-                        risk_level=t_risk,
-                        reversible=t_rev,
-                        allow_failure=t_allow_failure,
-                        dependencies=[f"step-{idx - 1}"] if idx > 1 else [],
-                    )
-                )
-        else:
-            # AGENTE-LOGIC-02: Nunca ejecutar una herramienta arbitraria (available_tools[0]) con {} por defecto.
-            logger.warning(
-                "[plan_node] No se generó un plan estructurado válido ni existen tool_calls previas. Abortando fallback ciego."
+        return [], [
+            ExecutionError(
+                code="PLANNING_FAILED",
+                message="No fue posible generar un plan estructurado válido para la solicitud.",
+                component="plan",
+                fatal=True,
             )
-            errors.append(
-                ExecutionError(
-                    code="PLANNING_FAILED",
-                    message="No fue posible generar un plan estructurado válido para la solicitud.",
-                    component="plan",
-                    fatal=True,
-                )
+        ]
+    steps: list[PlanStep] = []
+    for idx, tc in enumerate(tcs, start=1):
+        name = tc.get("name") or tc.get("tool_name", f"tool-{idx}")
+        args = tc.get("args") or tc.get("tool_args", {})
+        t_def = registry.get_tool(name) if registry else None
+        steps.append(
+            PlanStep(
+                step_id=f"step-{idx}",
+                tool_name=name,
+                tool_args=args if isinstance(args, dict) else {},
+                description=f"Ejecutar {name}",
+                risk_level=t_def.risk_level if t_def else RiskLevel.LOW,
+                reversible=t_def.reversible if t_def else False,
+                allow_failure=getattr(t_def, "allow_failure", False)
+                if t_def
+                else bool(tc.get("allow_failure", False)),
+                dependencies=[f"step-{idx - 1}"] if idx > 1 else [],
             )
-
-        plan = ExecutionPlan(
-            plan_id=f"plan-{int(datetime.now(UTC).timestamp())}",
-            goal=goal,
-            steps=steps,
-            estimated_risk=_compute_highest_risk(steps) if steps else RiskLevel.LOW,
         )
-    else:
-        # Asegurar consistencia del riesgo estimado consolidado
-        if plan.steps and plan.estimated_risk == RiskLevel.LOW:
-            calculated_risk = _compute_highest_risk(plan.steps)
-            if calculated_risk != plan.estimated_risk:
-                plan.estimated_risk = calculated_risk
+    return steps, []
 
-    duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
-    has_steps = bool(plan.steps)
-    has_fatal_error = any(getattr(e, "fatal", False) for e in errors)
-    is_failed = (not has_steps) or has_fatal_error
 
-    # 5. Emitir traza inmutable de auditoría
+def _build_fallback_plan(
+    state: AgentState,
+    registry: CapabilityRegistry | None,
+) -> tuple[ExecutionPlan, list[ExecutionError]]:
+    """Construye un plan operativo seguro de contingencia a partir del intent del estado."""
+    intent = state.get("intent")
+    goal = (
+        intent.goal
+        if isinstance(intent, IntentModel)
+        else getattr(state.get("request"), "prompt", "Ejecución de plan estándar")
+    )
+    steps, errors = _extract_steps_from_tool_calls(intent, registry)
+    plan = ExecutionPlan(
+        plan_id=f"plan-{int(datetime.now(UTC).timestamp())}",
+        goal=goal,
+        steps=steps,
+        estimated_risk=_compute_highest_risk(steps) if steps else RiskLevel.LOW,
+    )
+    return plan, errors
+
+
+def _build_plan_audit_records(
+    plan: ExecutionPlan,
+    planner: Any,
+    errors: list[ExecutionError],
+    is_failed: bool,
+    duration_ms: float,
+) -> tuple[AuditRecord, CognitiveStepRecord]:
+    """Formula los registros estructurados de auditoría y salto cognitivo."""
     audit = AuditRecord(
         event_type="planning_completed",
         actor=planner.name if planner else "core",
@@ -219,21 +194,24 @@ async def plan_node(
             "is_failed": is_failed,
         },
     )
-
-    cognitive_step = CognitiveStepRecord(
+    action_str = (
+        "Fallo de Planificación"
+        if is_failed
+        else f"Descomposición de Tarea ({len(plan.steps)} pasos)"
+    )
+    desc_str = (
+        "No fue posible generar un plan estructurado válido para la solicitud."
+        if is_failed
+        else f"Se elaboró un plan con objetivo '{plan.goal}' y riesgo '{plan.estimated_risk.value.upper()}'."
+    )
+    cog = CognitiveStepRecord(
         step_id=f"cog_plan_{int(time.time() * 1000)}",
         node="plan",
         title="Planificación Estratégica (DAG Planner)"
         if planner
         else "Generación de Plan Operativo",
-        action="Fallo de Planificación"
-        if is_failed
-        else f"Descomposición de Tarea ({len(plan.steps)} pasos)",
-        description=(
-            "No fue posible generar un plan estructurado válido para la solicitud. Se aborta la ejecución de herramientas por defecto."
-            if is_failed
-            else f"Se elaboró un plan con objetivo '{plan.goal}' y nivel de riesgo estimado '{plan.estimated_risk.value.upper()}'."
-        ),
+        action=action_str,
+        description=desc_str,
         status="failed" if is_failed else "completed",
         details={
             "plan_id": plan.plan_id,
@@ -248,14 +226,36 @@ async def plan_node(
         duration_ms=duration_ms,
         timestamp=datetime.now(UTC),
     )
+    return audit, cog
+
+
+async def plan_node(
+    state: AgentState,
+    registry: CapabilityRegistry | None = None,
+    engine: PlannerEngine | BaseEngine | None = None,
+) -> dict[str, Any]:
+    """Genera una secuencia estructurada de pasos (ExecutionPlan) a partir de la intención del agente."""
+    start_time = time.perf_counter()
+    planner = engine or (registry.get_planner() if registry else None)
+    plan, errors = await _invoke_planner_engine(planner, state)
+    if plan is None:
+        plan, fb_errors = _build_fallback_plan(state, registry)
+        errors.extend(fb_errors)
+    elif plan.steps and plan.estimated_risk == RiskLevel.LOW:
+        calc_risk = _compute_highest_risk(plan.steps)
+        if calc_risk != plan.estimated_risk:
+            plan.estimated_risk = calc_risk
+
+    duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+    is_failed = (not plan.steps) or any(getattr(e, "fatal", False) for e in errors)
+    audit, cog = _build_plan_audit_records(plan, planner, errors, is_failed, duration_ms)
 
     updates: dict[str, Any] = {
         "status": AgentExecutionStatus.FAILED if is_failed else AgentExecutionStatus.PLANNING,
         "plan": plan,
-        "cognitive_steps": [cognitive_step],
+        "cognitive_steps": [cog],
         "audit_trail": [audit],
     }
     if errors:
         updates["errors"] = errors
-
     return updates

@@ -19,6 +19,7 @@ from app.services.execution_orchestrator import (
     get_agent_graph,
 )
 from app.services.execution_persistence_service import (
+    persist_execution_outcome,
     persist_or_update_execution,
     persist_with_retry,
     spool_emergency_execution,
@@ -40,6 +41,7 @@ __all__ = [
     "get_execution_thread_detail",
     "handle_hitl_interrupt",
     "notify_execution_completion",
+    "persist_execution_outcome",
     "persist_or_update_execution",
     "persist_with_retry",
     "resolve_hitl_execution",

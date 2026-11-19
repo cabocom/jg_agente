@@ -12,16 +12,12 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import HTTPException, status
-
-from app.db.exceptions import PersistenceError
 from app.models.io import (
     AgentInput,
     AgentOutput,
     ExecutionStatus,
-    PersistenceMetadata,
-    PersistenceStatus,
 )
+from app.services.execution_persistence_service import persist_execution_outcome
 
 logger = logging.getLogger("jg_agente.services.hitl_interrupt")
 
@@ -63,42 +59,13 @@ async def _persist_hitl_pause_outcome(
     failure_detail: str | None,
 ) -> None:
     """Persiste el estado de espera en BD con respaldo en disco si la base de datos no responde."""
-    from app.api import executions as executions_api
-    from app.services.execution_persistence_service import (
-        persist_with_retry,
-        spool_emergency_execution,
+    await persist_execution_outcome(
+        input_data=input_data,
+        agent_output=output,
+        status_val=ExecutionStatus.WAITING_APPROVAL.value,
+        failure_detail=failure_detail
+        or f"Fallo crítico de persistencia en pausa HITL para '{input_data.execution_id}'.",
     )
-
-    persist_fn = getattr(executions_api, "_persist_with_retry", persist_with_retry)
-    spool_fn = getattr(executions_api, "_spool_emergency_execution", spool_emergency_execution)
-
-    try:
-        await persist_fn(
-            input_data=input_data,
-            status_val=ExecutionStatus.WAITING_APPROVAL.value,
-            response_text=output.response,
-            data_payload=output.data,
-            execution_time_ms=output.execution_time_ms,
-            requires_approval=True,
-            pending_approval_id=output.pending_approval_id,
-        )
-        output.metadata["persistence"] = PersistenceMetadata(
-            status=PersistenceStatus.PERSISTED,
-            persisted=True,
-        ).model_dump()
-    except (PersistenceError, Exception) as db_err:
-        spool_fn(input_data.execution_id, output.model_dump(mode="json"))
-        logger.error(
-            "Fallo irrecuperable al actualizar DB tras HITL pause en '%s': %s",
-            input_data.execution_id,
-            db_err,
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=failure_detail
-            or f"Fallo crítico de persistencia en pausa HITL para '{input_data.execution_id}'.",
-        ) from db_err
 
 
 async def handle_hitl_interrupt(

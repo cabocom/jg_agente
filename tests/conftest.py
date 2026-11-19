@@ -61,3 +61,7 @@ def mock_persistence_for_unit_tests(
             return record
 
         monkeypatch.setattr("app.api.executions._persist_with_retry", fake_persist_with_retry)
+        monkeypatch.setattr(
+            "app.services.execution_persistence_service.persist_with_retry",
+            fake_persist_with_retry,
+        )
