@@ -9,13 +9,15 @@
 
 import ipaddress
 
+from jg_sdk.security.ssrf import SSRFValidationError
 
-class SSRFValidationError(ValueError):
-    """Excepción lanzada cuando una URL, IP o destino vulnera la política SSRF."""
-
-    def __init__(self, message: str, target: str | None = None) -> None:
-        super().__init__(message)
-        self.target = target
+__all__ = [
+    "DEFAULT_ALLOWED_SCHEMES",
+    "DEFAULT_BLOCKED_HOSTNAMES",
+    "DEFAULT_BLOCKED_NETWORKS",
+    "RFC1918_NETWORKS",
+    "SSRFValidationError",
+]
 
 
 # Redes IPv4 y IPv6 prohibidas por defecto (Loopback, Link-Local, Metadata, RFC 1918, Multicast, etc.)

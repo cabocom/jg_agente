@@ -27,4 +27,4 @@
   1. Eliminar la clase duplicada `SSRFValidationError` de `jg_agente/app/security/ip_policy.py:13` e importar `from jg_sdk.security.ssrf import SSRFValidationError`.
   2. En `validate_url`, `validate_url_async`, `resolve_and_pin_url` y `resolve_and_pin_url_async` (`jg_agente/app/security/ssrf_validator.py`), capturar `except (socket.gaierror, SSRFValidationError) as dns_err:`.
 - **Criterios de Aceptación (Checklist verificable):**
-  - [ ] Test en `jg_agente/tests/test_ssrf_validator.py` que mockea `socket.getaddrinfo` (en vez de `validator.resolve_host`) lanzando `socket.gaierror` y verifica que `validate_url()` retorna `(False, ...)` sin propagar excepción no controlada.
+  - [x] Test en `jg_agente/tests/test_ssrf_validator.py` que mockea `socket.getaddrinfo` (en vez de `validator.resolve_host`) lanzando `socket.gaierror` y verifica que `validate_url()` retorna `(False, ...)` sin propagar excepción no controlada.

@@ -127,7 +127,7 @@ class SSRFValidator(SdkSSRFValidator):
             resolved = self.resolve_host(hostname, port)
             ok, err_msg, _ = self._check_resolved_ips(hostname, resolved)
             return (False, err_msg) if not ok else (True, None)
-        except socket.gaierror as dns_err:
+        except (socket.gaierror, SSRFValidationError) as dns_err:
             return False, f"Fallo en resolución DNS para '{hostname}': {dns_err}"
 
     async def validate_url_async(
@@ -149,7 +149,7 @@ class SSRFValidator(SdkSSRFValidator):
             resolved = await self.resolve_host_async(hostname, port)
             ok, err_msg, _ = self._check_resolved_ips(hostname, resolved)
             return (False, err_msg) if not ok else (True, None)
-        except socket.gaierror as dns_err:
+        except (socket.gaierror, SSRFValidationError) as dns_err:
             return False, f"Fallo en resolución DNS para '{hostname}': {dns_err}"
 
     def resolve_and_pin_url(self, url: str) -> tuple[bool, str | None, dict[str, Any] | None]:
@@ -170,7 +170,7 @@ class SSRFValidator(SdkSSRFValidator):
             if not ok:
                 return False, err_msg, None
             return True, None, self._build_pinned_info(parsed, hostname, valid_ips[0])
-        except socket.gaierror as dns_err:
+        except (socket.gaierror, SSRFValidationError) as dns_err:
             return False, f"Fallo en resolución DNS para '{hostname}': {dns_err}", None
 
     async def resolve_and_pin_url_async(
@@ -193,7 +193,7 @@ class SSRFValidator(SdkSSRFValidator):
             if not ok:
                 return False, err_msg, None
             return True, None, self._build_pinned_info(parsed, hostname, valid_ips[0])
-        except socket.gaierror as dns_err:
+        except (socket.gaierror, SSRFValidationError) as dns_err:
             return False, f"Fallo en resolución DNS para '{hostname}': {dns_err}", None
 
     def is_safe_url(self, url: str, resolve_dns: bool = True) -> bool:

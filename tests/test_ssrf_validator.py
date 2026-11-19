@@ -362,3 +362,18 @@ class TestSSRFIPv4MappedIPv6:
         )
         is_valid, _ = validator.validate_ip("::ffff:127.0.0.1")
         assert is_valid
+
+
+def test_validate_url_socket_getaddrinfo_gaierror(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verifica que validate_url capture socket.gaierror desde getaddrinfo retornando (False, ...) sin crash."""
+    import socket
+
+    def mock_getaddrinfo(*args: object, **kwargs: object) -> list[object]:
+        raise socket.gaierror(-2, "Name or service not known")
+
+    monkeypatch.setattr(socket, "getaddrinfo", mock_getaddrinfo)
+    validator = SSRFValidator()
+    is_valid, reason = validator.validate_url("https://unresolvable-domain-xyz.com/path")
+    assert is_valid is False
+    assert reason is not None
+    assert "Fallo en resolución DNS" in reason
